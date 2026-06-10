@@ -1,0 +1,26 @@
+{
+  "include": [
+    "packages/contracts/src",
+    "packages/foundation/src",
+    "services/ai-runtime/src",
+    "services/platform/src"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "infra/alembic/versions"
+  ],
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.11",
+  "reportMissingImports": false,
+  "reportMissingModuleSource": false,
+  "reportArgumentType": "none",
+  "reportAttributeAccessIssue": "none",
+  "reportOptionalIterable": "none",
+  "reportOptionalMemberAccess": "none",
+  "reportAssignmentType": "none",
+  "reportInvalidTypeForm": "none",
+  "reportOperatorIssue": "none",
+  "reportGeneralTypeIssues": "none",
+  "reportOptionalOperand": "none",
+  "reportUnsupportedDunderAll": "none"
+}

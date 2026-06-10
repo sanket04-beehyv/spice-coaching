@@ -1,0 +1,2445 @@
+{
+  "_comment": "Referral behavioural gaps — compliance only (schema v1). All entries use registry domain \"referral\". Fires when rule-engine recommendation differs from CHW actual referral. See docs/DETECTION_RULE_SCHEMA.md.",
+  "gaps": [
+    {
+      "gap_code": "referral_iccm_danger_signs",
+      "description": "CHW did not follow ICCM general danger signs referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "General Danger Signs"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "General Danger Signs"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "General Danger Signs"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_iccm_respiratory",
+      "description": "CHW did not follow ICCM respiratory referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "Pneumonia",
+                    "Cough"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "Pneumonia",
+                "Cough"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "Pneumonia",
+            "Cough"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_iccm_fever_malaria",
+      "description": "CHW did not follow ICCM fever/malaria referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "Fever",
+                    "Malaria"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "Fever",
+                "Malaria"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "Fever",
+            "Malaria"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_iccm_diarrhoea",
+      "description": "CHW did not follow ICCM diarrhoea referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "Diarrhoea"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "Diarrhoea"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "Diarrhoea"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_iccm_malnutrition",
+      "description": "CHW did not follow ICCM malnutrition referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "MUAC"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "MUAC"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "MUAC"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_iccm_other_symptoms",
+      "description": "CHW did not follow ICCM other-symptoms referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "Symptoms"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "Symptoms"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "Symptoms"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_rmnch_anc_high_risk",
+      "description": "CHW did not follow ANC high-risk referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "High risk pregnant woman"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "High risk pregnant woman"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "High risk pregnant woman"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_rmnch_anc_care_gaps",
+      "description": "CHW did not follow ANC care-gap referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "Gaps in ANC"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "Gaps in ANC"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "Gaps in ANC"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_rmnch_pnc_mother_high_risk",
+      "description": "CHW did not follow PNC mother high-risk referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "High risk mother"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "High risk mother"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "High risk mother"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_rmnch_pnc_care_gaps",
+      "description": "CHW did not follow PNC care-gap referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "Gaps in PNC"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "Gaps in PNC"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "Gaps in PNC"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_rmnch_childhood_visit",
+      "description": "CHW did not follow childhood visit referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "Childhood Visit Signs"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "Childhood Visit Signs"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "Childhood Visit Signs"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_tb_symptoms",
+      "description": "CHW did not follow TB symptoms referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "TB Symptoms"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "TB Symptoms"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "TB Symptoms"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_cbs",
+      "description": "CHW did not follow CBS referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "CBS Referral"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "CBS Referral"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "CBS Referral"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_ncd_cardiometabolic",
+      "description": "CHW did not follow NCD cardiometabolic referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "NCD",
+                    "High BP",
+                    "High BG"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "NCD",
+                "High BP",
+                "High BG"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "NCD",
+            "High BP",
+            "High BG"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_ncd_mental_health",
+      "description": "CHW did not follow NCD mental-health referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "Mental Health",
+                    "Suicidal Ideation"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "Mental Health",
+                "Suicidal Ideation"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "Mental Health",
+            "Suicidal Ideation"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_ncd_substance",
+      "description": "CHW did not follow NCD substance-use referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "Substance Abuse"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "Substance Abuse"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "Substance Abuse"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_ncd_hiv_pregnancy",
+      "description": "CHW did not follow NCD HIV/pregnancy-symptom referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "HIV",
+                    "Pregnancy Symptoms"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "HIV",
+                "Pregnancy Symptoms"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "values": [
+            "HIV",
+            "Pregnancy Symptoms"
+          ],
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_family_planning_consult",
+      "description": "CHW did not follow family planning consult recommendation after pregnancy outcome.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "contains_any",
+                  "path": "recommended.referredReason",
+                  "values": [
+                    "Family Planning Consult"
+                  ]
+                },
+                {
+                  "op": "missed_referral"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_contains_any",
+              "recommended_path": "recommended.referredReason",
+              "actual_path": "actual.referralReasons",
+              "values": [
+                "Family Planning Consult"
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referred_reason",
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_anc_emergency_obstetric",
+      "description": "CHW deviated from ANC emergency (obstetric) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.URGENT",
+              "values": [
+                "Suspected Pre-eclampsia",
+                "Abnormal fundal height",
+                "Urinary Bilirubin present"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.URGENT",
+                      "values": [
+                        "Suspected Pre-eclampsia",
+                        "Abnormal fundal height",
+                        "Urinary Bilirubin present"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk pregnant woman"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "obstetric",
+          "referral_type": "emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_anc_emergency_acute",
+      "description": "CHW deviated from ANC emergency (acute) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.URGENT",
+              "values": [
+                "High Fever",
+                "Abnormal Pulse",
+                "Abnormal weight gain"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.URGENT",
+                      "values": [
+                        "High Fever",
+                        "Abnormal Pulse",
+                        "Abnormal weight gain"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk pregnant woman"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "acute",
+          "referral_type": "emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_anc_emergency_severe_anemia",
+      "description": "CHW deviated from ANC emergency (severe_anemia) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.URGENT",
+              "values": [
+                "Severe Anemia"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.URGENT",
+                      "values": [
+                        "Severe Anemia"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk pregnant woman"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "severe_anemia",
+          "referral_type": "emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_anc_emergency_chronic_untreated",
+      "description": "CHW deviated from ANC emergency (chronic_untreated) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.URGENT",
+              "values": [
+                "PW not on treatment for existing chronic illnesses"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.URGENT",
+                      "values": [
+                        "PW not on treatment for existing chronic illnesses"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk pregnant woman"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "chronic_untreated",
+          "referral_type": "emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_anc_non_emergency_demographic",
+      "description": "CHW deviated from ANC non-emergency (demographic) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.NON_URGENT",
+              "values": [
+                "High risk PW due to age/birth spacing"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.NON_URGENT",
+                      "values": [
+                        "High risk PW due to age/birth spacing"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk pregnant woman"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "NON_URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "demographic",
+          "referral_type": "non_emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_anc_non_emergency_anemia",
+      "description": "CHW deviated from ANC non-emergency (anemia) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.NON_URGENT",
+              "values": [
+                "Moderate Anemia",
+                "Mild Anemia"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.NON_URGENT",
+                      "values": [
+                        "Moderate Anemia",
+                        "Mild Anemia"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk pregnant woman"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "NON_URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "anemia",
+          "referral_type": "non_emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_anc_non_emergency_diabetes",
+      "description": "CHW deviated from ANC non-emergency (diabetes) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.NON_URGENT",
+              "values": [
+                "Suspected/Existing Case of Diabetes"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.NON_URGENT",
+                      "values": [
+                        "Suspected/Existing Case of Diabetes"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk pregnant woman"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "NON_URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "diabetes",
+          "referral_type": "non_emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_anc_non_emergency_chronic_treated",
+      "description": "CHW deviated from ANC non-emergency (chronic_treated) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.NON_URGENT",
+              "values": [
+                "PW with existing chronic illnesses with treatment"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.NON_URGENT",
+                      "values": [
+                        "PW with existing chronic illnesses with treatment"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk pregnant woman"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "NON_URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "chronic_treated",
+          "referral_type": "non_emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_anc_non_emergency_other",
+      "description": "CHW deviated from ANC non-emergency (other) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.NON_URGENT",
+              "values": [
+                "Mild Fever",
+                "H/O Preg related medical complications",
+                "Other Danger Signs"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman.NON_URGENT",
+                      "values": [
+                        "Mild Fever",
+                        "H/O Preg related medical complications",
+                        "Other Danger Signs"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk pregnant woman"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "NON_URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "other",
+          "referral_type": "non_emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_anc_gap_supplementation",
+      "description": "CHW deviated from ANC care-gap (supplementation) recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.anc.summary.gapsInAnc",
+              "values": [
+                "Inadequate /Non consumption IFA",
+                "Inadequate /Non consumption Calcium",
+                "TT vaccination incomplete"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.anc.summary.gapsInAnc",
+                      "values": [
+                        "Inadequate /Non consumption IFA",
+                        "Inadequate /Non consumption Calcium",
+                        "TT vaccination incomplete"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "Gaps in ANC"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "anc_gap",
+          "group": "supplementation",
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_anc_gap_visit_cadence",
+      "description": "CHW deviated from ANC care-gap (visit_cadence) recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.anc.summary.gapsInAnc",
+              "values": [
+                "USG not done >36 weeks",
+                "ANC with Doctor not done >36 weeks",
+                "Less than 3 ANCs completed at end of 36 weeks"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.anc.summary.gapsInAnc",
+                      "values": [
+                        "USG not done >36 weeks",
+                        "ANC with Doctor not done >36 weeks",
+                        "Less than 3 ANCs completed at end of 36 weeks"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "Gaps in ANC"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "anc_gap",
+          "group": "visit_cadence",
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_anc_gap_delivery_plan",
+      "description": "CHW deviated from ANC care-gap (delivery_plan) recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.anc.summary.gapsInAnc",
+              "values": [
+                "Facility not identified for institutional delivery",
+                "Planned for Home Delivery"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.anc.summary.gapsInAnc",
+                      "values": [
+                        "Facility not identified for institutional delivery",
+                        "Planned for Home Delivery"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "Gaps in ANC"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "anc_gap",
+          "group": "delivery_plan",
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_pnc_emergency_bleeding_infection",
+      "description": "CHW deviated from PNC emergency (bleeding_infection) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.pncMother.motherRisks.URGENT",
+              "values": [
+                "Heavy bleeding",
+                "Foul-smelling discharge",
+                "Severe abdominal pain",
+                "Perineum tear / Discharge from wound area"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.pncMother.motherRisks.URGENT",
+                      "values": [
+                        "Heavy bleeding",
+                        "Foul-smelling discharge",
+                        "Severe abdominal pain",
+                        "Perineum tear / Discharge from wound area"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk mother"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "bleeding_infection",
+          "referral_type": "emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_pnc_emergency_neurological",
+      "description": "CHW deviated from PNC emergency (neurological) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.pncMother.motherRisks.URGENT",
+              "values": [
+                "Severe headache/visual issues/convulsions"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.pncMother.motherRisks.URGENT",
+                      "values": [
+                        "Severe headache/visual issues/convulsions"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk mother"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "neurological",
+          "referral_type": "emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_pnc_emergency_hypertensive",
+      "description": "CHW deviated from PNC emergency (hypertensive) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.pncMother.motherRisks.URGENT",
+              "values": [
+                "High BP",
+                "Not on treatment for HTN or Pre-eclampsia /Eclampsia",
+                "Edema",
+                "Urine Albumin"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.pncMother.motherRisks.URGENT",
+                      "values": [
+                        "High BP",
+                        "Not on treatment for HTN or Pre-eclampsia /Eclampsia",
+                        "Edema",
+                        "Urine Albumin"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk mother"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "hypertensive",
+          "referral_type": "emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_pnc_emergency_metabolic",
+      "description": "CHW deviated from PNC emergency (metabolic) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.pncMother.motherRisks.URGENT",
+              "values": [
+                "High Blood sugar",
+                "Known DM/GDM patient not on treatment",
+                "Suspected Jaundice"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.pncMother.motherRisks.URGENT",
+                      "values": [
+                        "High Blood sugar",
+                        "Known DM/GDM patient not on treatment",
+                        "Suspected Jaundice"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk mother"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "metabolic",
+          "referral_type": "emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_pnc_emergency_acute",
+      "description": "CHW deviated from PNC emergency (acute) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.pncMother.motherRisks.URGENT",
+              "values": [
+                "High Fever",
+                "Abnormal Pulse",
+                "Severe Anemia"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.pncMother.motherRisks.URGENT",
+                      "values": [
+                        "High Fever",
+                        "Abnormal Pulse",
+                        "Severe Anemia"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk mother"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "acute",
+          "referral_type": "emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_pnc_non_emergency_anemia",
+      "description": "CHW deviated from PNC non-emergency (anemia) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.pncMother.motherRisks.NON_URGENT",
+              "values": [
+                "Moderate Anemia",
+                "Mild Anemia"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.pncMother.motherRisks.NON_URGENT",
+                      "values": [
+                        "Moderate Anemia",
+                        "Mild Anemia"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk mother"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "NON_URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "anemia",
+          "referral_type": "non_emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_pnc_non_emergency_breast",
+      "description": "CHW deviated from PNC non-emergency (breast) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.pncMother.motherRisks.NON_URGENT",
+              "values": [
+                "Cracked nipples / painful / swollen breasts with or without fever"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.pncMother.motherRisks.NON_URGENT",
+                      "values": [
+                        "Cracked nipples / painful / swollen breasts with or without fever"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk mother"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "NON_URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "breast",
+          "referral_type": "non_emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_pnc_non_emergency_chronic_treated",
+      "description": "CHW deviated from PNC non-emergency (chronic_treated) referral recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.pncMother.motherRisks.NON_URGENT",
+              "values": [
+                "On treatment for HTN or Pre-eclampsia / Eclampsia",
+                "On treatment for DM/GDM",
+                "Fever",
+                "Other Danger Signs"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.pncMother.motherRisks.NON_URGENT",
+                      "values": [
+                        "On treatment for HTN or Pre-eclampsia / Eclampsia",
+                        "On treatment for DM/GDM",
+                        "Fever",
+                        "Other Danger Signs"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "High risk mother"
+                  ]
+                },
+                {
+                  "op": "mismatch_urgency",
+                  "recommended_urgency": "NON_URGENT",
+                  "actual_path": "actual.isUrgent"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "subcondition",
+          "group": "chronic_treated",
+          "referral_type": "non_emergency",
+          "mismatch_kind": "reason_or_urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_pnc_gap_supplementation",
+      "description": "CHW deviated from PNC supplementation care-gap recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "array_contains_substring",
+              "path": "recommended.assessmentDetails.pncMother.pncGaps",
+              "value": "Supplementation"
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "array_contains_substring",
+                      "path": "recommended.assessmentDetails.pncMother.pncGaps",
+                      "value": "Supplementation"
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "Gaps in PNC"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "pnc_gap",
+          "group": "supplementation",
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_pnc_gap_contraception",
+      "description": "CHW deviated from PNC contraception care-gap recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "contains_any",
+              "path": "recommended.assessmentDetails.pncMother.pncGaps",
+              "values": [
+                "Not using postpartum contraception"
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "contains_any",
+                      "path": "recommended.assessmentDetails.pncMother.pncGaps",
+                      "values": [
+                        "Not using postpartum contraception"
+                      ]
+                    },
+                    {
+                      "op": "missed_referral"
+                    }
+                  ]
+                },
+                {
+                  "op": "mismatch_contains_any",
+                  "recommended_path": "recommended.referredReason",
+                  "actual_path": "actual.referralReasons",
+                  "values": [
+                    "Gaps in PNC"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "pnc_gap",
+          "group": "contraception",
+          "mismatch_kind": "missed_or_wrong_reason"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_type_emergency",
+      "description": "CHW did not follow emergency (urgent) referral classification recommended by the rule engine.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "map_key_nonempty",
+                  "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman",
+                  "key": "URGENT"
+                },
+                {
+                  "op": "map_key_nonempty",
+                  "path": "recommended.assessmentDetails.pncMother.motherRisks",
+                  "key": "URGENT"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_urgency",
+              "recommended_urgency": "URGENT",
+              "actual_path": "actual.isUrgent"
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referral_type",
+          "referral_type": "emergency",
+          "mismatch_kind": "urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_type_non_emergency",
+      "description": "CHW did not follow non-emergency referral classification recommended by the rule engine.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "map_key_nonempty",
+                  "path": "recommended.assessmentDetails.anc.summary.highRiskPregnantWoman",
+                  "key": "NON_URGENT"
+                },
+                {
+                  "op": "map_key_nonempty",
+                  "path": "recommended.assessmentDetails.pncMother.motherRisks",
+                  "key": "NON_URGENT"
+                }
+              ]
+            },
+            {
+              "op": "mismatch_urgency",
+              "recommended_urgency": "NON_URGENT",
+              "actual_path": "actual.isUrgent"
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "referral_type",
+          "referral_type": "non_emergency",
+          "mismatch_kind": "urgency"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_location_upazila",
+      "description": "CHW did not follow Upazila Health Complex destination recommended by the rule engine.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "eq",
+                  "path": "recommended.referralFacilityType",
+                  "value": "Upazila Health Complex"
+                },
+                {
+                  "op": "eq",
+                  "path": "recommended.assessmentDetails.referralFacilityType",
+                  "value": "Upazila Health Complex"
+                }
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "missed_referral"
+                },
+                {
+                  "op": "mismatch_eq",
+                  "recommended_path": "recommended.referralFacilityType",
+                  "actual_path": "actual.destinationTier"
+                },
+                {
+                  "op": "mismatch_eq",
+                  "recommended_path": "recommended.assessmentDetails.referralFacilityType",
+                  "actual_path": "actual.destinationTier"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "location",
+          "destination": "upazila",
+          "mismatch_kind": "wrong_destination"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_location_community_clinic",
+      "description": "CHW did not follow Community Clinic destination recommended by the rule engine.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "eq",
+                  "path": "recommended.referralFacilityType",
+                  "value": "Community Clinic"
+                },
+                {
+                  "op": "eq",
+                  "path": "recommended.assessmentDetails.referralFacilityType",
+                  "value": "Community Clinic"
+                }
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "missed_referral"
+                },
+                {
+                  "op": "mismatch_eq",
+                  "recommended_path": "recommended.referralFacilityType",
+                  "actual_path": "actual.destinationTier"
+                },
+                {
+                  "op": "mismatch_eq",
+                  "recommended_path": "recommended.assessmentDetails.referralFacilityType",
+                  "actual_path": "actual.destinationTier"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "location",
+          "destination": "community_clinic",
+          "mismatch_kind": "wrong_destination"
+        }
+      }
+    },
+    {
+      "gap_code": "referral_location_facility_selected",
+      "description": "CHW did not follow rule-engine referral facility/site recommendation.",
+      "domain": "referral",
+      "severity_default": "high",
+      "detection_rule_jsonb": {
+        "schema_version": 1,
+        "evaluator": "spice_referral_compliance",
+        "when": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "exists",
+                  "path": "recommended.assessmentDetails.anc.summary.referralFacility"
+                },
+                {
+                  "op": "exists",
+                  "path": "recommended.assessmentDetails.pncMother.referralFacility"
+                }
+              ]
+            },
+            {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "missed_referral"
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "exists",
+                      "path": "recommended.assessmentDetails.anc.summary.referralFacility"
+                    },
+                    {
+                      "op": "mismatch_eq",
+                      "recommended_path": "recommended.assessmentDetails.anc.summary.referralFacility",
+                      "actual_path": "actual.referredSiteId"
+                    }
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "exists",
+                      "path": "recommended.assessmentDetails.pncMother.referralFacility"
+                    },
+                    {
+                      "op": "mismatch_eq",
+                      "recommended_path": "recommended.assessmentDetails.pncMother.referralFacility",
+                      "actual_path": "actual.referredSiteId"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "tier": "location",
+          "destination": "facility_selected",
+          "mismatch_kind": "wrong_site"
+        }
+      }
+    }
+  ]
+}

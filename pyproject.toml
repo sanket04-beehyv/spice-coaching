@@ -1,0 +1,65 @@
+[project]
+name = "microcoaching"
+version = "0.1.0"
+description = "MicroCoaching AI Platform — monorepo root"
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+members = [
+    "packages/contracts",
+    "packages/foundation",
+    "services/platform",
+    "services/ai-runtime",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+mc-contracts = { workspace = true }
+mc-foundation = { workspace = true }
+microcoaching-platform = { workspace = true }
+ai-runtime = { workspace = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "services/ai-runtime/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "requires_db: integration test requiring DATABASE_URL_TEST and Postgres",
+]
+
+[dependency-groups]
+dev = [
+    "microcoaching-platform",
+    "ai-runtime",
+    "pytest>=8.4.2,<9.0.0",
+    "pytest-asyncio>=1.2.0,<2.0.0",
+    "httpx>=0.28.1,<0.29.0",
+    "aiosqlite>=0.20.0",
+    "python-dotenv>=1.0.0",
+    "ruff>=0.6.0",
+    "bandit>=1.8.0,<2.0.0",
+    "pip-audit>=2.9.0,<3.0.0",
+    "pyright>=1.1.400,<2.0.0",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = [".venv", "infra/alembic/versions"]
+
+[tool.ruff.lint]
+# Baseline rules. Expand to B, SIM, etc. once the fleet is clean.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade (modern syntax)
+]
+ignore = [
+    "E501", # line length handled by formatter
+    "UP042", # StrEnum migration — stylistic, opt in later
+]

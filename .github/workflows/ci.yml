@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: microcoaching_test
+        ports:
+          - 15433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d microcoaching_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 16380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.4
+        ports:
+          - 18124:8123
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      DATABASE_URL_TEST: postgresql+asyncpg://postgres:postgres@localhost:15433/microcoaching_test
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:15433/microcoaching_test
+      REDIS_URL: redis://localhost:16380/0
+      CLICKHOUSE_HOST: localhost
+      CLICKHOUSE_PORT: 18124
+      APP_ENV: development
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --locked --all-packages --group dev
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Bandit security scan
+        run: uv run bandit -r packages services -lll -x tests,infra/alembic -s B101
+
+      - name: Dependency audit
+        run: uv run pip-audit
+
+      - name: Pyright type check
+        run: uv run pyright packages/contracts/src packages/foundation/src services/ai-runtime/src services/platform/src
+
+      - name: Run tests
+        run: uv run pytest tests services/ai-runtime/tests

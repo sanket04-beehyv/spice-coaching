@@ -1,0 +1,101 @@
+{
+  "_comment": "BRAC pilot behavioural-gap registry. Codes are stable identifiers; descriptions are reviewer-facing English summaries. Stage C uses these as the candidate-gap registry when identifying modules from source documents. Add new gaps via the loader script (idempotent upsert by gap_code).",
+  "gaps": [
+    {
+      "gap_code": "missed_referral_for_danger_signs",
+      "description": "CHW failed to refer a pregnant woman or child presenting with documented danger signs to the nearest higher-level facility.",
+      "domain": "anc",
+      "severity_default": "high"
+    },
+    {
+      "gap_code": "incorrect_referral_destination",
+      "description": "CHW referred a patient to a facility that does not provide the required level of care for the presenting condition.",
+      "domain": "referral",
+      "severity_default": "moderate"
+    },
+    {
+      "gap_code": "missed_anc_visit_followup",
+      "description": "CHW did not schedule or complete a required follow-up ANC visit within the WHO-recommended cadence (4 visits minimum).",
+      "domain": "anc",
+      "severity_default": "moderate"
+    },
+    {
+      "gap_code": "anc_danger_signs_education_gap",
+      "description": "CHW did not counsel the pregnant woman and family on recognising obstetric danger signs (severe headache, blurred vision, bleeding, fits, swelling, reduced fetal movement).",
+      "domain": "anc",
+      "severity_default": "high"
+    },
+    {
+      "gap_code": "incorrect_bp_measurement_protocol",
+      "description": "CHW measured blood pressure without following protocol (rest 5 min, correct cuff size, two readings, average).",
+      "domain": "hypertension",
+      "severity_default": "moderate"
+    },
+    {
+      "gap_code": "missed_hypertension_referral_threshold",
+      "description": "CHW did not refer despite BP ≥ 140/90 with symptoms or BP ≥ 160/100 in pregnancy.",
+      "domain": "hypertension",
+      "severity_default": "high"
+    },
+    {
+      "gap_code": "incomplete_immunisation_schedule",
+      "description": "CHW did not advise the family on the next immunisation due date or check vaccination card status during a visit.",
+      "domain": "immunisation",
+      "severity_default": "moderate"
+    },
+    {
+      "gap_code": "missed_pnc_first_24h_visit",
+      "description": "CHW did not conduct the first postnatal visit within 24 hours of delivery.",
+      "domain": "pnc",
+      "severity_default": "high"
+    },
+    {
+      "gap_code": "neonatal_danger_signs_missed",
+      "description": "CHW did not identify or act on neonatal danger signs (poor feeding, lethargy, fever/hypothermia, fast breathing, chest indrawing, jaundice within 24h).",
+      "domain": "neonatal",
+      "severity_default": "high"
+    },
+    {
+      "gap_code": "incorrect_iycf_counselling",
+      "description": "CHW provided incorrect or incomplete infant and young-child feeding counselling (exclusive breastfeeding 0–6m, complementary feeding from 6m, continued breastfeeding to 24m).",
+      "domain": "nutrition",
+      "severity_default": "moderate"
+    },
+    {
+      "gap_code": "family_planning_method_mismatch",
+      "description": "CHW recommended a contraceptive method inappropriate for the client's medical eligibility, breastfeeding status, or stated preferences.",
+      "domain": "family_planning",
+      "severity_default": "moderate"
+    },
+    {
+      "gap_code": "missed_diabetes_screening",
+      "description": "CHW did not perform random or fasting blood glucose screening for an eligible adult during a household visit.",
+      "domain": "diabetes",
+      "severity_default": "moderate"
+    },
+    {
+      "gap_code": "diabetes_referral_threshold_missed",
+      "description": "CHW did not refer a client with random blood glucose ≥ 11.1 mmol/L (200 mg/dL) or symptomatic hyperglycaemia.",
+      "domain": "diabetes",
+      "severity_default": "high"
+    },
+    {
+      "gap_code": "tb_symptom_screening_missed",
+      "description": "CHW did not screen for TB symptoms (cough ≥2 weeks, fever, weight loss, night sweats) in an adult during routine visit.",
+      "domain": "tb",
+      "severity_default": "moderate"
+    },
+    {
+      "gap_code": "incorrect_ors_zinc_protocol",
+      "description": "CHW did not provide correct ORS preparation or zinc dosing (10–20 mg/day for 10–14 days) for a child with diarrhoea.",
+      "domain": "imci",
+      "severity_default": "moderate"
+    },
+    {
+      "gap_code": "danger_signs_documentation_skipped",
+      "description": "CHW completed a visit without documenting which danger signs were assessed in the SPICE app, breaking the audit trail.",
+      "domain": "documentation",
+      "severity_default": "low"
+    }
+  ]
+}
