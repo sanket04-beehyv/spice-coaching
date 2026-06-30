@@ -21,7 +21,9 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest_asyncio.fixture
-async def app() -> AsyncIterator[FastAPI]:
+async def app(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FastAPI]:
+    monkeypatch.setenv("SPICE_AUTH_ENABLED", "false")
+    get_settings.cache_clear()
     app_obj = FastAPI()
     api_router = APIRouter(prefix=get_settings().api_root_path_normalized)
     api_router.include_router(dashboard_router)

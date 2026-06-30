@@ -24,14 +24,14 @@ def _sample_payload() -> dict:
     return {
         "schema_version": 1,
         "retrieval_hints": {
-            "en": ["child cough more than 14 days"],
             "bn": ["১৪ দিনের বেশি কাশি"],
+            "en": ["child cough more than 14 days"],
         },
-        "keywords": {"en": ["ARI", "cough"], "bn": ["কাশি"]},
-        "synonyms": {"en": {"ARI": "acute respiratory infection"}},
+        "keywords": {"bn": ["কাশি"], "en": ["ARI", "cough"]},
+        "synonyms_en": {"ARI": "acute respiratory infection"},
         "questions": {
-            "en": ["When should I refer a child with cough?"],
             "bn": ["কাশি হলে কখন রেফার করব?"],
+            "en": ["When should I refer a child with cough?"],
         },
     }
 
@@ -40,7 +40,7 @@ def _batch_payload(*, indices: list[int]) -> dict:
     return {
         "schema_version": 1,
         "cards": [
-            {"card_index": idx, **_sample_payload(), "keywords": {"en": [f"k{idx}"]}} for idx in indices
+            {"card_index": idx, **_sample_payload(), "keywords": {"bn": [f"k{idx}"]}} for idx in indices
         ],
     }
 
@@ -48,10 +48,10 @@ def _batch_payload(*, indices: list[int]) -> dict:
 class TestNormalizeCardSearchMetadata:
     def test_caps_list_lengths(self) -> None:
         payload = {
-            "retrieval_hints": {"en": [f"h{i}" for i in range(20)]},
-            "keywords": {"en": [f"k{i}" for i in range(20)]},
-            "synonyms": {"en": {f"a{i}": f"expanded {i}" for i in range(20)}},
-            "questions": {"en": [f"q{i}" for i in range(20)]},
+            "retrieval_hints": {"bn": [f"h{i}" for i in range(20)]},
+            "keywords": {"bn": [f"k{i}" for i in range(20)]},
+            "synonyms_en": {f"a{i}": f"expanded {i}" for i in range(20)},
+            "questions": {"bn": [f"q{i}" for i in range(20)]},
         }
         out = normalize_card_search_metadata(
             payload,
@@ -60,15 +60,15 @@ class TestNormalizeCardSearchMetadata:
             max_synonyms=2,
             max_questions=2,
         )
-        assert len(out["retrieval_hints_en"]) == 3
-        assert len(out["keywords_en"]) == 2
+        assert len(out["retrieval_hints"]["bn"]) == 3
+        assert len(out["keywords"]["bn"]) == 2
         assert len(out["synonyms_en"]) == 2
-        assert len(out["questions_en"]) == 2
+        assert len(out["questions"]["bn"]) == 2
 
     def test_drops_empty_and_duplicate_strings(self) -> None:
         payload = {
-            "keywords": {"en": ["ARI", "  ", "ARI", "cough"]},
-            "retrieval_hints": {"en": []},
+            "keywords": {"bn": ["ARI", "  ", "ARI", "cough"]},
+            "retrieval_hints": {"bn": []},
         }
         out = normalize_card_search_metadata(
             payload,
@@ -77,7 +77,7 @@ class TestNormalizeCardSearchMetadata:
             max_synonyms=10,
             max_questions=10,
         )
-        assert out["keywords_en"] == ["ARI", "cough"]
+        assert out["keywords"]["bn"] == ["ARI", "cough"]
 
     def test_metadata_has_searchable_content(self) -> None:
         normalized = normalize_card_search_metadata(
@@ -90,7 +90,7 @@ class TestNormalizeCardSearchMetadata:
         assert card_metadata_has_searchable_content(normalized)
         assert not card_metadata_has_searchable_content(
             normalize_card_search_metadata(
-                {"keywords": {"en": []}, "retrieval_hints": {"en": []}, "synonyms": {"en": {}}},
+                {"keywords": {"bn": []}, "retrieval_hints": {"bn": []}, "synonyms_en": {}},
                 max_retrieval_hints=10,
                 max_keywords=10,
                 max_synonyms=10,
@@ -111,7 +111,7 @@ class TestParseBatchCardSearchMetadata:
         )
         assert failed == []
         assert set(metadata_by_index) == {0, 1}
-        assert metadata_by_index[0]["keywords_en"] == ["k0"]
+        assert metadata_by_index[0]["keywords"]["bn"] == ["k0"]
 
     def test_marks_missing_index_as_failed(self) -> None:
         metadata_by_index, failed = parse_batch_card_search_metadata(
@@ -193,8 +193,8 @@ class TestCardSearchMetadataGenerator:
         generator = CardSearchMetadataGenerator(client=client)
         result = await generator.generate_for_module(module, [0, 1])
         assert result.failed_indices == []
-        assert result.metadata_by_index[0]["keywords_en"] == ["k0"]
-        assert result.metadata_by_index[1]["keywords_en"] == ["k1"]
+        assert result.metadata_by_index[0]["keywords"]["bn"] == ["k0"]
+        assert result.metadata_by_index[1]["keywords"]["bn"] == ["k1"]
         sent = client.generate.call_args[0][0]
         assert sent.generation_type == GenerationType.CARD_SEARCH_METADATA
         assert sent.prompt.template_version == CARD_SEARCH_METADATA_TEMPLATE_VERSION
@@ -208,7 +208,7 @@ class TestCardSearchMetadataGenerator:
         generator = CardSearchMetadataGenerator(client=client)
         result = await generator.generate(module, card, card_index=0)
         assert result.metadata is not None
-        assert result.metadata["keywords_en"] == ["k0"]
+        assert result.metadata["keywords"]["bn"] == ["k0"]
 
     @pytest.mark.asyncio
     async def test_returns_error_on_llm_failure(self) -> None:

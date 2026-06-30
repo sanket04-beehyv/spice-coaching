@@ -19,12 +19,12 @@ from platform_service.services.module_search_metadata_generator import (
 def _sample_payload() -> dict:
     return {
         "schema_version": 1,
-        "keywords": {"en": ["ARI", "cough", "fast breathing"], "bn": ["কাশি"]},
+        "keywords": {"bn": ["কাশি"], "en": ["ARI", "cough", "fast breathing"]},
         "search_phrases": {
-            "en": ["child cough more than 14 days"],
             "bn": ["১৪ দিনের বেশি কাশি"],
+            "en": ["child cough more than 14 days"],
         },
-        "synonyms": {"en": {"ARI": "acute respiratory infection"}},
+        "synonyms_en": {"ARI": "acute respiratory infection"},
         "topic_tags": ["respiratory", "child_health"],
         "clinical_conditions": ["pneumonia"],
         "audience": "chw_field_worker",
@@ -35,9 +35,9 @@ def _sample_payload() -> dict:
 class TestNormalizeSearchMetadata:
     def test_caps_list_lengths(self) -> None:
         payload = {
-            "keywords": {"en": [f"k{i}" for i in range(20)]},
-            "search_phrases": {"en": [f"p{i}" for i in range(20)]},
-            "synonyms": {"en": {f"a{i}": f"expanded {i}" for i in range(20)}},
+            "keywords": {"bn": [f"k{i}" for i in range(20)]},
+            "search_phrases": {"bn": [f"p{i}" for i in range(20)]},
+            "synonyms_en": {f"a{i}": f"expanded {i}" for i in range(20)},
             "topic_tags": [f"t{i}" for i in range(20)],
         }
         out = normalize_search_metadata(
@@ -47,15 +47,15 @@ class TestNormalizeSearchMetadata:
             max_synonyms=2,
             max_tags=2,
         )
-        assert len(out["keywords_en"]) == 3
-        assert len(out["search_phrases_en"]) == 2
+        assert len(out["keywords"]["bn"]) == 3
+        assert len(out["search_phrases"]["bn"]) == 2
         assert len(out["synonyms_en"]) == 2
         assert len(out["topic_tags"]) == 2
 
     def test_drops_empty_and_duplicate_strings(self) -> None:
         payload = {
-            "keywords": {"en": ["ARI", "  ", "ARI", "cough"]},
-            "search_phrases": {"en": []},
+            "keywords": {"bn": ["ARI", "  ", "ARI", "cough"]},
+            "search_phrases": {"bn": []},
         }
         out = normalize_search_metadata(
             payload,
@@ -64,7 +64,7 @@ class TestNormalizeSearchMetadata:
             max_synonyms=10,
             max_tags=10,
         )
-        assert out["keywords_en"] == ["ARI", "cough"]
+        assert out["keywords"]["bn"] == ["ARI", "cough"]
 
     def test_metadata_has_searchable_content(self) -> None:
         assert metadata_has_searchable_content(
@@ -78,7 +78,7 @@ class TestNormalizeSearchMetadata:
         )
         assert not metadata_has_searchable_content(
             normalize_search_metadata(
-                {"keywords": {"en": []}, "search_phrases": {"en": []}, "synonyms": {"en": {}}},
+                {"keywords": {"bn": []}, "search_phrases": {"bn": []}, "synonyms_en": {}},
                 max_keywords=10,
                 max_search_phrases=10,
                 max_synonyms=10,
@@ -119,7 +119,7 @@ class TestModuleSearchMetadataGenerator:
 
         assert result.error is None
         assert result.metadata is not None
-        assert "ARI" in result.metadata["keywords_en"]
+        assert "কাশি" in result.metadata["keywords"]["bn"]
         sent = client.generate.await_args.args[0]
         assert sent.generation_type == GenerationType.MODULE_SEARCH_METADATA
 

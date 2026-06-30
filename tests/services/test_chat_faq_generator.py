@@ -68,7 +68,6 @@ class TestChatFaqGenerator:
         results = await ChatFaqGenerator(client=ai_mock).synthesize(tenant_id, clusters)
         assert len(results) == 2
         assert results[0].question_localized["bn"] == "শিশুর কাশি"
-        assert results[0].question_localized.get("en") == "Child cough"
         assert results[0].occurrence_count == 5
         assert results[0].rank == 1
 
@@ -81,4 +80,3 @@ class TestChatFaqGenerator:
         results = await ChatFaqGenerator(client=ai_mock).synthesize(tenant_id, clusters)
         assert len(results) == 1
         assert results[0].question_localized["bn"] == "child cough"
-        assert results[0].question_localized.get("en") == "child cough"

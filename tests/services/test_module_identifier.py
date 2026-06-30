@@ -231,10 +231,9 @@ class TestPromptGapContextRemoved:
         prompt = render_system_prompt({"clinical"})
         lowered = prompt.lower()
         assert "annexure" in lowered
-        assert "appendix" in lowered
+        assert "appendices" in lowered
         assert "job aid" in lowered
-        # Hindi-Bijoy mojibake cue (lowercase form, since prompt is lowered).
-        assert "layxud" in lowered
+        assert "পরিশিষ্ট" in prompt
 
     def test_human_message_uses_short_tokens_not_uuids(self) -> None:
         """The corpus body must reference content blocks/pages/docs by

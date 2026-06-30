@@ -109,7 +109,7 @@ def test_drug_name_is_hard_violation() -> None:
 
 def test_diagnosis_language_is_hard_violation() -> None:
     res = ModuleCardValidator().validate_card(
-        _card(body={"en": "You have malaria and you are diagnosed with severe anemia."})
+        _card(body={"bn": "You have malaria and you are diagnosed with severe anemia."})
     )
     assert res.is_valid is False
     assert any("diagnosis" in v for v in res.hard_violations)
@@ -121,9 +121,9 @@ def test_diagnosis_language_is_hard_violation() -> None:
 def test_bangla_field_with_mostly_english_is_soft_warning() -> None:
     # Field is 100% English but lives in primary body — bleed-through.
     bleed = "Take rest for five minutes before measuring blood pressure carefully each time"
-    res = ModuleCardValidator().validate_card(_card(body=bleed))
+    res = ModuleCardValidator().validate_card(_card(body={"bn": bleed}))
     assert res.is_valid is True
-    assert any("Latin" in w for w in res.soft_warnings)
+    assert any("bleed-through" in w for w in res.soft_warnings)
 
 
 def test_short_field_is_not_flagged_for_bleed() -> None:

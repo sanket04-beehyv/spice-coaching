@@ -46,7 +46,7 @@ def _build_engine() -> AsyncEngine:
     settings = get_settings()
     url = make_url(settings.database_url)
     if settings.database_password:
-        url = url.set(password=settings.database_password)
+        url = url.set(password=settings.database_password.get_secret_value())
     return create_async_engine(
         url,
         echo=False,

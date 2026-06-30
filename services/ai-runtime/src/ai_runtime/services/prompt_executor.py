@@ -118,9 +118,9 @@ def _build_provider(provider_name: str) -> BaseProvider:
         service_account_info = None
         if settings.google_service_account_base64:
             try:
-                decoded = base64.b64decode(
-                    settings.google_service_account_base64.get_secret_value()
-                ).decode("utf-8")
+                decoded = base64.b64decode(settings.google_service_account_base64.get_secret_value()).decode(
+                    "utf-8"
+                )
                 service_account_info = json.loads(decoded)
             except Exception as exc:
                 logger.error("Failed to decode google_service_account_base64: %s", exc)
