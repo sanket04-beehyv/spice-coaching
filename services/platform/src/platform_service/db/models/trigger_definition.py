@@ -50,23 +50,22 @@ class TriggerDefinition(Base):
 class ModuleTriggerBinding(Base):
     __tablename__ = "module_trigger_binding"
     __table_args__ = (
-        # At most one `primary` binding per (module_family, trigger_kind) — i.e.
-        # a module can have one primary gap-trigger AND one primary workflow-event
-        # AND one primary content-push, but not two primary gap-triggers.
-        # Enforced at application layer (would need a partial index for SQL-level
-        # enforcement; deferred to repository validation).
+        # At most one `primary` binding per (module, trigger_kind) — i.e.
+        # a module version can have one primary gap-trigger AND one primary
+        # workflow-event AND one primary content-push, but not two primary
+        # gap-triggers. Enforced at application layer (would need a partial
+        # index for SQL-level enforcement; deferred to repository validation).
         UniqueConstraint(
-            "module_family_id",
+            "module_id",
             "trigger_definition_id",
             name="uq_module_trigger_binding_pair",
         ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    # Family-level so the binding survives module version updates.
-    module_family_id: Mapped[uuid.UUID] = mapped_column(
+    module_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("module_family.id", ondelete="CASCADE"),
+        ForeignKey("module.id", ondelete="CASCADE"),
         nullable=False,
     )
     trigger_definition_id: Mapped[uuid.UUID] = mapped_column(

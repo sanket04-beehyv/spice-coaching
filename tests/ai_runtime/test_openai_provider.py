@@ -53,6 +53,53 @@ async def test_generate_raises_when_no_choices() -> None:
 
 
 @pytest.mark.asyncio
+async def test_generate_json_array_skips_json_object_response_format() -> None:
+    client = MagicMock()
+    choice = SimpleNamespace(message=SimpleNamespace(content='[{"title": "cand"}]'))
+    usage = SimpleNamespace(prompt_tokens=5, completion_tokens=3)
+    client.chat.completions.create = AsyncMock(return_value=SimpleNamespace(choices=[choice], usage=usage))
+    provider = OpenAIProvider(api_key="test-key")
+    provider._client = client
+
+    raw, _, _ = await provider.generate(
+        system_prompt="sys",
+        human_message="return json array",
+        model="gpt-4o-mini",
+        max_tokens=100,
+        temperature=0.2,
+        output_format="json",
+        json_root="any",
+    )
+
+    assert raw == '[{"title": "cand"}]'
+    kwargs = client.chat.completions.create.await_args.kwargs
+    assert "response_format" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_generate_json_object_uses_response_format() -> None:
+    client = MagicMock()
+    choice = SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))
+    usage = SimpleNamespace(prompt_tokens=5, completion_tokens=3)
+    client.chat.completions.create = AsyncMock(return_value=SimpleNamespace(choices=[choice], usage=usage))
+    provider = OpenAIProvider(api_key="test-key")
+    provider._client = client
+
+    await provider.generate(
+        system_prompt="sys",
+        human_message="user",
+        model="gpt-4o-mini",
+        max_tokens=100,
+        temperature=0.2,
+        output_format="json",
+        json_root="object",
+    )
+
+    kwargs = client.chat.completions.create.await_args.kwargs
+    assert kwargs["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.asyncio
 async def test_aclose_calls_underlying_client() -> None:
     provider = OpenAIProvider(api_key="test-key")
     provider._client.aclose = AsyncMock()

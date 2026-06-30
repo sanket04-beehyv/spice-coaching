@@ -9,9 +9,10 @@ Per `docs/ARCHITECTURE_RESET.md`:
   latest version per family), an LLM merges the old and new card sets
   (new wins on conflict), retires the matched row, and writes a new draft
   version in the same `module_family`.
-- Quiz, embedding, and gap-classification are separate post-publish Celery
-  workers; this stage enqueues all three via `DraftPipeline.enqueue_post_publish`
-  once the module row has been committed.
+- Quiz, search metadata, embedding (chained), and gap-classification are
+  separate post-publish Celery workers; this stage enqueues them via
+  ``DraftPipeline.enqueue_post_publish`` once the module row has been committed.
+  Per-card search metadata is generated before module-level search metadata.
 - `module_card_validator` runs on each drafted card; cards with hard
   violations are dropped, soft warnings are annotated as `field_flags`.
 - If the validator strips the module below `card_min_count`, the candidate
@@ -316,8 +317,7 @@ class StageDOrchestrator:
             "ingestion_run_id": str(c.ingestion_run_id),
             "proposed_title": c.proposed_title,
             "scope_summary": c.scope_summary,
-            "description_en": c.description_en,
-            "description_bn": c.description_bn,
+            "description_localized": c.description_localized,
             "source_provenance": c.source_provenance_jsonb,
             "estimated_card_count": c.estimated_card_count,
             "estimated_quiz_count": c.estimated_quiz_count,

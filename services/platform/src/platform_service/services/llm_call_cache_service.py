@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from platform_service.config import get_settings
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.llm_call_cache import LlmCallCache
+from platform_service.deps import get_ai_client
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 
 logger = logging.getLogger(__name__)
@@ -161,8 +162,6 @@ class CachingAIRuntimeClient:
     def inner(self) -> AIRuntimeClient:
         """Shared httpx client; lazily resolved from the process singleton."""
         if self._inner is None:
-            from platform_service.deps import get_ai_client
-
             self._inner = get_ai_client()
         return self._inner
 

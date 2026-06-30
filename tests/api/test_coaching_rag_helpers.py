@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
-from platform_service.services.coaching_rag_service import parse_rag_json
+from platform_service.services.coaching_rag_service import CoachingRagService, parse_rag_json
 from platform_service.services.llm_text_utils import strip_json_fence
 
 
@@ -29,3 +29,28 @@ def test_parse_rag_json_raises_on_garbage() -> None:
     with pytest.raises(HTTPException) as exc:
         parse_rag_json("not json {{{", None)
     assert exc.value.status_code == 502
+
+
+class TestParseSuggestedQuestions:
+    def test_valid_list(self) -> None:
+        out = CoachingRagService._parse_suggested_questions(["  First?  ", "Second?", "Third?"])
+        assert out == ["First?", "Second?", "Third?"]
+
+    def test_strips_and_drops_empty(self) -> None:
+        out = CoachingRagService._parse_suggested_questions(["  ok  ", "", "   ", 42, None])
+        assert out == ["ok"]
+
+    def test_dedupes_case_insensitive(self) -> None:
+        out = CoachingRagService._parse_suggested_questions(["What?", "what?", "WHAT?"])
+        assert out == ["What?"]
+
+    def test_caps_at_max_count(self) -> None:
+        raw = [f"Q{i}?" for i in range(10)]
+        out = CoachingRagService._parse_suggested_questions(raw, max_count=5)
+        assert len(out) == 5
+        assert out == [f"Q{i}?" for i in range(5)]
+
+    def test_non_list_returns_empty(self) -> None:
+        assert CoachingRagService._parse_suggested_questions(None) == []
+        assert CoachingRagService._parse_suggested_questions("not a list") == []
+        assert CoachingRagService._parse_suggested_questions({}) == []

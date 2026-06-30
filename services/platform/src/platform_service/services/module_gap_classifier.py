@@ -25,6 +25,8 @@ from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.module import Module
 from platform_service.deps import get_ai_client
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
+from platform_service.localized import deployment_locales, migrate_legacy_card
+from platform_service.services.card_body_text import card_body_plain_text
 from platform_service.services.llm_response_resolver import resolve_parsed_dict
 from platform_service.services.prompts.gap_classification_prompt import (
     GAP_CLASSIFICATION_TEMPLATE_ID,
@@ -46,28 +48,55 @@ class GapClassificationResult:
     rationale: str
 
 
+def _truncated_localized_field(
+    localized: dict[str, str] | None,
+    *,
+    field: str,
+    max_len: int,
+) -> dict[str, str]:
+    if not isinstance(localized, dict):
+        return {}
+    out: dict[str, str] = {}
+    for locale, raw in localized.items():
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        text = card_body_plain_text(raw) if field == "body" else raw.strip()
+        piece = _truncate(text, max_len)
+        if piece:
+            out[locale] = piece
+    return out
+
+
 def module_payload_for_classification(module: Module) -> dict[str, Any]:
     """Build a compact module summary for the classification prompt."""
+    settings = get_settings()
+    primary = deployment_locales(settings)
     cards = (module.module_json or {}).get("cards", [])
     card_summaries: list[dict[str, Any]] = []
     for idx, card in enumerate(cards, start=1):
         if not isinstance(card, dict):
             continue
-        card_summaries.append(
-            {
-                "card_index": idx,
-                "title_bn": card.get("title_bn"),
-                "title_en": card.get("title_en"),
-                "body_bn": _truncate(card.get("body_bn"), 400),
-                "body_en": _truncate(card.get("body_en"), 400),
-                "next_action_bn": _truncate(card.get("next_action_bn"), 200),
-            }
-        )
+        migrated = migrate_legacy_card(dict(card), primary=primary)
+        summary: dict[str, Any] = {"card_index": idx}
+        title = migrated.get("title")
+        if isinstance(title, dict):
+            truncated_title = _truncated_localized_field(title, field="title", max_len=400)
+            if truncated_title:
+                summary["title"] = truncated_title
+        body = migrated.get("body")
+        if isinstance(body, dict):
+            truncated_body = _truncated_localized_field(body, field="body", max_len=400)
+            if truncated_body:
+                summary["body"] = truncated_body
+        next_action = migrated.get("next_action")
+        if isinstance(next_action, dict):
+            truncated_action = _truncated_localized_field(next_action, field="next_action", max_len=200)
+            if truncated_action:
+                summary["next_action"] = truncated_action
+        card_summaries.append(summary)
     return {
-        "title_bn": module.title_bn,
-        "title_en": module.title_en,
-        "description_en": module.description_en,
-        "description_bn": module.description_bn,
+        "title": module.title_localized,
+        "description": module.description_localized,
         "domain": module.domain,
         "sub_domain": module.sub_domain,
         "module_type": module.module_type,

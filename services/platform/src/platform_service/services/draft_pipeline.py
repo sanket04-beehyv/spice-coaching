@@ -10,6 +10,14 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from platform_service.celery_tasks import (
+    bind_assessment_triggers_task,
+    classify_module_gaps_task,
+    generate_module_card_search_metadata_batch_task,
+    generate_module_embedding_task,
+    generate_module_quiz_task,
+    generate_module_search_metadata_task,
+)
 from platform_service.config import get_settings
 from platform_service.db.models.content_block import ContentBlock
 from platform_service.db.models.source_page import SourcePage
@@ -24,9 +32,12 @@ from platform_service.services.module_card_validator import (
 )
 from platform_service.services.post_publish import should_generate_quiz_for_sources
 from platform_service.services.run_state_service import (
+    STAGE_CARD_SEARCH_METADATA_GENERATION,
     STAGE_EMBEDDING_GENERATION,
     STAGE_GAP_CLASSIFICATION,
     STAGE_QUIZ_GENERATION,
+    STAGE_SEARCH_METADATA_GENERATION,
+    STAGE_TRIGGER_BINDING,
     RunStateService,
 )
 
@@ -148,6 +159,23 @@ class DraftPipeline:
             stage=STAGE_EMBEDDING_GENERATION,
             input_summary=input_summary,
         )
+        card_metadata_step_id: UUID | None = None
+        metadata_step_id: UUID | None = None
+        settings = get_settings()
+        if settings.post_publish_search_metadata_enabled:
+            if settings.post_publish_card_search_metadata_enabled:
+                card_metadata_step = await run_state.start_step(
+                    run_id=ingestion_run_id,
+                    stage=STAGE_CARD_SEARCH_METADATA_GENERATION,
+                    input_summary=input_summary,
+                )
+                card_metadata_step_id = card_metadata_step.id
+            metadata_step = await run_state.start_step(
+                run_id=ingestion_run_id,
+                stage=STAGE_SEARCH_METADATA_GENERATION,
+                input_summary=input_summary,
+            )
+            metadata_step_id = metadata_step.id
         gap_step_id: UUID | None = None
         if get_settings().post_publish_gap_classification_enabled:
             gap_step = await run_state.start_step(
@@ -156,6 +184,14 @@ class DraftPipeline:
                 input_summary=input_summary,
             )
             gap_step_id = gap_step.id
+        trigger_binding_step_id: UUID | None = None
+        if get_settings().post_publish_trigger_binding_enabled:
+            trigger_binding_step = await run_state.start_step(
+                run_id=ingestion_run_id,
+                stage=STAGE_TRIGGER_BINDING,
+                input_summary=input_summary,
+            )
+            trigger_binding_step_id = trigger_binding_step.id
         quiz_step_id: UUID | None = None
         if await should_generate_quiz_for_sources(self._session, source_document_ids):
             quiz_step = await run_state.start_step(
@@ -180,15 +216,32 @@ class DraftPipeline:
         await self._session.commit()
 
         try:
-            from platform_service.celery_tasks import (
-                classify_module_gaps_task,
-                generate_module_embedding_task,
-                generate_module_quiz_task,
-            )
-
             if quiz_step_id is not None:
                 generate_module_quiz_task.delay(str(module_id), str(quiz_step_id))
-            generate_module_embedding_task.delay(str(module_id), str(embedding_step.id))
+            if metadata_step_id is not None:
+                if card_metadata_step_id is not None:
+                    generate_module_card_search_metadata_batch_task.delay(
+                        str(module_id),
+                        str(card_metadata_step_id),
+                        str(metadata_step_id),
+                        str(embedding_step.id),
+                        str(trigger_binding_step_id) if trigger_binding_step_id else None,
+                    )
+                else:
+                    generate_module_search_metadata_task.delay(
+                        str(module_id),
+                        str(metadata_step_id),
+                        str(embedding_step.id),
+                        str(trigger_binding_step_id) if trigger_binding_step_id else None,
+                    )
+            elif trigger_binding_step_id is not None:
+                bind_assessment_triggers_task.delay(
+                    str(module_id),
+                    str(trigger_binding_step_id),
+                    str(embedding_step.id),
+                )
+            else:
+                generate_module_embedding_task.delay(str(module_id), str(embedding_step.id))
             if gap_step_id is not None:
                 classify_module_gaps_task.delay(str(module_id), str(gap_step_id))
         except Exception:
@@ -202,6 +255,22 @@ class DraftPipeline:
                     quiz_step_id,
                     error={"type": "EnqueueError", "message": "failed to enqueue quiz Celery task"},
                 )
+            if metadata_step_id is not None:
+                await run_state.fail_step(
+                    metadata_step_id,
+                    error={
+                        "type": "EnqueueError",
+                        "message": "failed to enqueue search metadata Celery task",
+                    },
+                )
+            if card_metadata_step_id is not None:
+                await run_state.fail_step(
+                    card_metadata_step_id,
+                    error={
+                        "type": "EnqueueError",
+                        "message": "failed to enqueue card search metadata Celery task",
+                    },
+                )
             await run_state.fail_step(
                 embedding_step.id,
                 error={"type": "EnqueueError", "message": "failed to enqueue embedding Celery task"},
@@ -212,6 +281,14 @@ class DraftPipeline:
                     error={
                         "type": "EnqueueError",
                         "message": "failed to enqueue gap classification Celery task",
+                    },
+                )
+            if trigger_binding_step_id is not None:
+                await run_state.fail_step(
+                    trigger_binding_step_id,
+                    error={
+                        "type": "EnqueueError",
+                        "message": "failed to enqueue trigger binding Celery task",
                     },
                 )
             await self._session.commit()

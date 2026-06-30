@@ -12,6 +12,7 @@ parts alongside the human message text. The system_prompt remains a
 
 from __future__ import annotations
 
+import inspect
 import logging
 
 from google import genai
@@ -93,6 +94,7 @@ class GoogleProvider(BaseProvider):
         temperature: float,
         images: list[ProviderImage] | None = None,
         output_format: str = "json",
+        json_root: str = "object",
     ) -> tuple[str, int, int]:
         """Call Gemini and return (raw_text, input_tokens, output_tokens)."""
         contents: list[str | types.Part] = [human_message]
@@ -164,5 +166,9 @@ class GoogleProvider(BaseProvider):
 
     async def aclose(self) -> None:
         close = getattr(self._client, "close", None)
-        if close is not None:
+        if close is None:
+            return
+        if inspect.iscoroutinefunction(close):
+            await close()
+        else:
             close()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -13,6 +13,7 @@ from platform_service.services.module_thumbnail_service import (
     resolve_default_module_thumbnail,
     validate_module_thumbnail_storage_path,
 )
+from platform_service.services.object_storage import ObjectNotFoundError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _BUCKET = "medtronics-storage"
@@ -38,8 +39,6 @@ async def test_resolve_default_module_thumbnail_first_with_path() -> None:
     session = MagicMock(spec=AsyncSession)
     repo = MagicMock()
     repo.list_source_documents_by_ids = AsyncMock(return_value=[doc_a, doc_b])
-
-    from unittest.mock import patch
 
     with patch(
         "platform_service.services.module_thumbnail_service.SourceRepository",
@@ -82,8 +81,6 @@ async def test_validate_module_thumbnail_accepts_ingest_path() -> None:
 
 @pytest.mark.asyncio
 async def test_validate_module_thumbnail_object_not_found() -> None:
-    from platform_service.services.object_storage import ObjectNotFoundError
-
     path = f"{_BUCKET}/module-thumbnails/custom.png"
     storage = MagicMock()
     storage.stat_object = AsyncMock(side_effect=ObjectNotFoundError("missing"))

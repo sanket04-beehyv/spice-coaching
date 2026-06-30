@@ -36,24 +36,53 @@ from mc_contracts.internal_ai import (
     PromptSpec,
     TraceContext,
 )
+from mc_foundation.locale import localized_primary_text
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from platform_service.config import get_settings
+from platform_service.config import Settings, get_settings
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
 from platform_service.deps import get_ai_client
+from platform_service.localized import (
+    deployment_locales,
+    extract_localized_options_from_raw,
+    extract_localized_string_from_raw,
+    migrate_legacy_card,
+)
+from platform_service.services.card_body_text import card_body_plain_text
 from platform_service.services.llm_response_resolver import resolve_parsed_json
 from platform_service.services.post_publish_step import finish_post_publish_step
+from platform_service.services.prompts.symbol_verbalization import (
+    render_locale_list_map_field_schema,
+    render_locale_map_field_schema,
+)
+from platform_service.services.quiz_explanation_sanitizer import (
+    sanitize_explanation_localized,
+)
 
 logger = logging.getLogger(__name__)
 
+QUIZ_GENERATION_TEMPLATE_ID = "post-publish-quiz-generation"
+# v3: monolingual deployment — primary locale only.
+QUIZ_GENERATION_TEMPLATE_VERSION = 4
 
-_SYSTEM_PROMPT = """\
+
+def render_system_prompt(
+    *,
+    deployment_primary_locale: str | None = None,
+    deployment_region_context: str | None = None,
+) -> str:
+    settings = get_settings()
+    primary_locale = deployment_primary_locale or settings.deployment_primary_locale
+    region_context = deployment_region_context or settings.deployment_region_context
+
+    return f"""\
 You write scenario-based quiz questions for community health workers (CHWs)
-in rural Bangladesh, in Bangla (with English mirror). The questions are
-delivered by a low-spec mobile app — they cannot use rich media, only text.
+in {region_context}, using locale-keyed maps for all translatable fields.
+The questions are delivered by a low-spec mobile app — they cannot use rich
+media, only text.
 
 Rules:
 - One quiz item per question_index. Do NOT cluster sub-questions.
@@ -63,34 +92,34 @@ Rules:
 - 4 options per question. Exactly one is correct.
 - Distractors must be plausibly wrong — content the CHW could reasonably
   pick if they had not internalised the card. No silly distractors.
-- Bangla is canonical; English mirror is for reviewer/admin readability.
-- Explanations cite which card the answer comes from (1-indexed card number).
+- All translatable fields use the deployment primary locale ({primary_locale}).
+- Explanations must stand alone: explain why the correct answer is correct in
+  clinical prose. Do NOT mention card numbers, card titles, or phrases like
+  "see Card N" / "কার্ড N". The `primary_card_index` field records which card
+  the question tests — do not echo it in `explanation`.
 
 Return STRICT JSON. The output must be a single object with this shape:
-{
+{{
   "questions": [
-    {
-      "case_setup_bn": "string or null — patient case in Bangla, ~2 sentences",
-      "case_setup_en": "string or null — English mirror",
-      "question_bn": "string — Bangla question, required",
-      "question_en": "string or null — English mirror",
-      "options_bn": ["...", "...", "...", "..."],
-      "options_en": ["...", "...", "...", "..."],
+    {{
+{render_locale_map_field_schema("case_setup", primary_locale=primary_locale, description="patient case, ~2 sentences")}
+{render_locale_map_field_schema("question", primary_locale=primary_locale, primary_required=True)}
+{render_locale_list_map_field_schema("options", primary_locale=primary_locale, max_items=4, description="exactly 4 options")}
       "correct_index": integer (0-3),
-      "explanation_bn": "string — why the correct answer is correct, in Bangla",
-      "explanation_en": "string or null — English mirror",
+{render_locale_map_field_schema("explanation", primary_locale=primary_locale, description="why the correct answer is correct; no card references")}
       "primary_card_index": integer (1-based card number this question tests),
       "difficulty": "easy" | "moderate" | "hard"
-    },
+    }},
     ...
   ]
-}
+}}
 
 Do not include markdown fences or commentary. Only the JSON object.
 """
 
+
 _HUMAN_TEMPLATE = """\
-Module title: {title_bn}
+Module title: {module_title}
 Module domain: {domain}
 Estimated quiz size: {quiz_size} questions
 
@@ -99,21 +128,72 @@ Estimated quiz size: {quiz_size} questions
 """
 
 
-def _format_card_block(card: dict[str, Any], idx: int) -> str:
+def _localized_field_text(
+    card: dict[str, Any],
+    field: str,
+    locale: str,
+    *,
+    settings: Settings | None = None,
+) -> str | None:
+    """Read plain text from a locale-keyed card field."""
+    s = settings or get_settings()
+    primary = deployment_locales(s)
+    migrated = migrate_legacy_card(dict(card), primary=primary)
+    localized = migrated.get(field)
+    if not isinstance(localized, dict):
+        return None
+    value = localized.get(locale)
+    if value is None:
+        return None
+    if field == "body":
+        text = card_body_plain_text(value)
+    else:
+        text = str(value).strip() if value else ""
+    return text or None
+
+
+def _format_card_block(
+    card: dict[str, Any],
+    idx: int,
+    *,
+    primary_locale: str,
+    settings: Settings,
+) -> str:
     parts = [f"### Card {idx}"]
-    if card.get("title_bn"):
-        parts.append(f"Title (bn): {card['title_bn']}")
-    if card.get("body_bn"):
-        parts.append(f"Body (bn): {card['body_bn']}")
-    if card.get("next_action_bn"):
-        parts.append(f"Next action (bn): {card['next_action_bn']}")
-    if card.get("previous_practice_bn"):
-        parts.append(f"Previous practice (bn): {card['previous_practice_bn']}")
-    if card.get("current_practice_bn"):
-        parts.append(f"Current practice (bn): {card['current_practice_bn']}")
-    if card.get("rationale_for_change_bn"):
-        parts.append(f"Rationale (bn): {card['rationale_for_change_bn']}")
+    title = _localized_field_text(card, "title", primary_locale, settings=settings)
+    if title:
+        parts.append(f"Title ({primary_locale}): {title}")
+    body = _localized_field_text(card, "body", primary_locale, settings=settings)
+    if body:
+        parts.append(f"Body ({primary_locale}): {body}")
+    for field in (
+        "next_action",
+        "previous_practice",
+        "current_practice",
+        "rationale_for_change",
+    ):
+        text = _localized_field_text(card, field, primary_locale, settings=settings)
+        if text:
+            label = field.replace("_", " ")
+            parts.append(f"{label.title()} ({primary_locale}): {text}")
     return "\n".join(parts)
+
+
+def _extract_localized_string(
+    raw: dict[str, Any],
+    field: str,
+    *,
+    settings: Settings,
+) -> dict[str, str]:
+    return extract_localized_string_from_raw(raw, field, settings=settings)
+
+
+def _extract_localized_options(
+    raw: dict[str, Any],
+    *,
+    settings: Settings,
+) -> dict[str, list[Any]]:
+    return extract_localized_options_from_raw(raw, settings=settings)
 
 
 async def generate_quiz_for_module(module_id: UUID, *, step_id: UUID | None = None) -> int:
@@ -145,13 +225,18 @@ async def generate_quiz_for_module(module_id: UUID, *, step_id: UUID | None = No
                 )
                 return 0
 
+            settings = get_settings()
+            primary = deployment_locales(settings)
+            module_title = localized_primary_text(module.title_localized, primary) or ""
+
             quiz_size = _target_quiz_size(len(cards))
             questions = await _call_llm(
                 module_id=module_id,
-                title_bn=module.title_bn or "",
+                module_title=module_title,
                 domain=module.domain,
                 cards=cards,
                 quiz_size=quiz_size,
+                settings=settings,
             )
             if not questions:
                 logger.warning("Quiz worker: LLM returned no usable questions for module %s", module_id)
@@ -171,21 +256,23 @@ async def generate_quiz_for_module(module_id: UUID, *, step_id: UUID | None = No
             await session.flush()
 
             for idx, q in enumerate(questions, start=1):
+                question_localized = _extract_localized_string(q, "question", settings=settings)
+                if not question_localized.get(primary):
+                    continue
                 row = ModuleQuizQuestion(
                     module_id=module_id,
                     question_order=idx,
                     question_family_id=uuid.uuid4(),
                     question_version=1,
-                    case_setup_en=q.get("case_setup_en"),
-                    case_setup_bn=q.get("case_setup_bn"),
-                    question_en=q.get("question_en"),
-                    question_bn=q.get("question_bn") or "",
+                    case_setup_localized=_extract_localized_string(q, "case_setup", settings=settings)
+                    or None,
+                    question_localized=question_localized,
                     question_type="single_select",
-                    options_en=q.get("options_en"),
-                    options_bn=q.get("options_bn") or [],
+                    options_localized=_extract_localized_options(q, settings=settings),
                     correct_indices=[int(q.get("correct_index", 0))],
-                    explanation_en=q.get("explanation_en"),
-                    explanation_bn=q.get("explanation_bn"),
+                    explanation_localized=sanitize_explanation_localized(
+                        _extract_localized_string(q, "explanation", settings=settings)
+                    ),
                     difficulty=q.get("difficulty", "moderate"),
                 )
                 session.add(row)
@@ -222,16 +309,20 @@ async def _load_module(session: AsyncSession, module_id: UUID) -> Module | None:
 async def _call_llm(
     *,
     module_id: UUID,
-    title_bn: str,
+    module_title: str,
     domain: str,
     cards: list[dict[str, Any]],
     quiz_size: int,
+    settings: Settings,
 ) -> list[dict[str, Any]]:
-    settings = get_settings()
+    primary = deployment_locales(settings)
     client = get_ai_client()
-    cards_block = "\n\n".join(_format_card_block(c, i) for i, c in enumerate(cards, start=1))
+    cards_block = "\n\n".join(
+        _format_card_block(c, i, primary_locale=primary, settings=settings)
+        for i, c in enumerate(cards, start=1)
+    )
     human_message = _HUMAN_TEMPLATE.format(
-        title_bn=title_bn,
+        module_title=module_title,
         domain=domain,
         quiz_size=quiz_size,
         cards_block=cards_block,
@@ -241,13 +332,16 @@ async def _call_llm(
         generation_type=GenerationType.QUIZ_DRAFTING,
         model_policy=ModelPolicy(model=settings.text_model),
         prompt=PromptSpec(
-            template_id="post-publish-quiz-generation",
-            template_version=1,
-            resolved_system_prompt=_SYSTEM_PROMPT,
+            template_id=QUIZ_GENERATION_TEMPLATE_ID,
+            template_version=QUIZ_GENERATION_TEMPLATE_VERSION,
+            resolved_system_prompt=render_system_prompt(
+                deployment_primary_locale=primary,
+                deployment_region_context=settings.deployment_region_context,
+            ),
             resolved_human_message=human_message,
         ),
         constraints=GenerationConstraints(
-            language="bn",
+            language=primary,
             output_format="json",
         ),
         trace_context=TraceContext(),

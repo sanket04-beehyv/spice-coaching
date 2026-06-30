@@ -12,10 +12,16 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from mc_foundation.locale import locale_display_name
+
+from platform_service.config import get_settings
+from platform_service.services.prompts.symbol_verbalization import render_locale_map_field_schema
+
 PUBLISHED_MODULE_MERGER_TEMPLATE_ID = "v33-stage-d-published-module-merger"
 # v3: stricter match — majority existing-card overlap + high module content overlap;
 # bias toward no match when uncertain.
-PUBLISHED_MODULE_MERGER_TEMPLATE_VERSION = 3
+# v5: monolingual deployment — primary locale only.
+PUBLISHED_MODULE_MERGER_TEMPLATE_VERSION = 5
 
 
 SYSTEM_PROMPT = """\
@@ -53,7 +59,7 @@ Rules:
 3. When NOT matched: set `matched_module_id` to null and set `merged_cards`
    to the new candidate's cards unchanged (copy them exactly).
 4. Do NOT invent clinical content. Preserve source_block_ids from inputs.
-5. Bangla fields are canonical; English mirrors when present.
+5. All card text must be in the deployment primary locale ({primary_locale_label}).
 6. In `match_rationale`, briefly estimate overlap (e.g. "4/5 existing cards align").
 
 Return STRICT JSON with this shape:
@@ -62,18 +68,12 @@ Return STRICT JSON with this shape:
   "match_rationale": "1-3 sentences explaining match or why no match",
   "merged_cards": [
     {{
-      "title_bn": "string",
-      "title_en": "string or null",
-      "body_bn": "string (refresher / initial_training / digital_proficiency)",
-      "body_en": "string or null",
-      "next_action_bn": "string or null",
-      "next_action_en": "string or null",
-      "previous_practice_bn": "string (content_update only)",
-      "previous_practice_en": "string or null",
-      "current_practice_bn": "string (content_update only)",
-      "current_practice_en": "string or null",
-      "rationale_for_change_bn": "string (content_update only)",
-      "rationale_for_change_en": "string or null",
+{title_field_schema}
+{body_field_schema}
+{next_action_field_schema}
+{previous_practice_field_schema}
+{current_practice_field_schema}
+{rationale_field_schema}
       "source_block_ids": ["uuid", ...],
       "thresholds": {{}} or null,
       "figure_ref_block_id": "uuid or null"
@@ -85,8 +85,50 @@ Do not include markdown fences or commentary. Only the JSON object.
 """
 
 
-def render_system_prompt(*, card_min_count: int, card_max_count: int) -> str:
-    return SYSTEM_PROMPT.format(card_min_count=card_min_count, card_max_count=card_max_count)
+def render_system_prompt(
+    *,
+    card_min_count: int,
+    card_max_count: int,
+    deployment_primary_locale: str | None = None,
+) -> str:
+    settings = get_settings()
+    primary_locale = deployment_primary_locale or settings.deployment_primary_locale
+    primary_label = locale_display_name(primary_locale)
+
+    return SYSTEM_PROMPT.format(
+        card_min_count=card_min_count,
+        card_max_count=card_max_count,
+        primary_locale_label=primary_label,
+        title_field_schema=render_locale_map_field_schema(
+            "title",
+            primary_locale=primary_locale,
+            primary_required=True,
+        ),
+        body_field_schema=render_locale_map_field_schema(
+            "body",
+            primary_locale=primary_locale,
+            description="refresher / initial_training / digital_proficiency",
+        ),
+        next_action_field_schema=render_locale_map_field_schema(
+            "next_action",
+            primary_locale=primary_locale,
+        ),
+        previous_practice_field_schema=render_locale_map_field_schema(
+            "previous_practice",
+            primary_locale=primary_locale,
+            description="content_update only",
+        ),
+        current_practice_field_schema=render_locale_map_field_schema(
+            "current_practice",
+            primary_locale=primary_locale,
+            description="content_update only",
+        ),
+        rationale_field_schema=render_locale_map_field_schema(
+            "rationale_for_change",
+            primary_locale=primary_locale,
+            description="content_update only",
+        ),
+    )
 
 
 def render_human_message(

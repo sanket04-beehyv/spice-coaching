@@ -52,6 +52,7 @@ async def app(db_session: AsyncSession) -> AsyncIterator[FastAPI]:
                     retrieved_modules=[],
                     source_documents=[],
                     model="test-model",
+                    suggested_questions=["পরবর্তী প্রশ্ন?"],
                 )
             ),
         )
@@ -75,3 +76,4 @@ class TestCoachingRagRoute:
         assert resp.status_code == 200
         data = resp.json()
         assert data["answer"] == "উত্তর"
+        assert data["suggested_questions"] == ["পরবর্তী প্রশ্ন?"]

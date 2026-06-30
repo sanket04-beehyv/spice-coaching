@@ -1,7 +1,8 @@
-"""Celery enqueue helpers for admin ingest — isolated to avoid API/worker cycles."""
+"""Celery enqueue helpers for admin ingest."""
 
 from __future__ import annotations
 
+from platform_service.celery_tasks import generate_source_thumbnail_task, run_ingest_batch_task
 from platform_service.services.ingest_upload_service import IngestedSourceResult
 from platform_service.workers.ingest_worker import IngestJob, ingest_job_to_dict
 
@@ -28,8 +29,6 @@ def enqueue_thumbnail_and_batch(
     skip_merge: bool,
     fuse_sources: bool,
 ) -> None:
-    from platform_service.celery_tasks import generate_source_thumbnail_task, run_ingest_batch_task
-
     for result in ingested:
         generate_source_thumbnail_task.delay(
             ingest_job_to_dict(
@@ -59,8 +58,6 @@ def enqueue_thumbnail_and_batch(
 
 
 def enqueue_thumbnail(result: IngestedSourceResult, *, primary_language: str, skip_merge: bool) -> None:
-    from platform_service.celery_tasks import generate_source_thumbnail_task
-
     generate_source_thumbnail_task.delay(
         ingest_job_to_dict(
             ingest_job_from_result(

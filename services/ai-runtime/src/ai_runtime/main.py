@@ -28,6 +28,7 @@ except ImportError:
     pass
 _ = os  # keep import alive for downstream use
 
+import uvicorn  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from mc_foundation.logging import setup_logging  # noqa: E402
 from mc_foundation.request_middleware import RequestIdMiddleware  # noqa: E402
@@ -78,6 +79,4 @@ def create_app() -> FastAPI:
 app = create_app()
 
 if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

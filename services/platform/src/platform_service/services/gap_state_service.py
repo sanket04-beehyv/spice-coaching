@@ -1,7 +1,6 @@
 """W-8 — Per-CHW gap state service (v3.3 path).
 
-Sits alongside the legacy `GapProfileService` but operates on the v3.3
-table `chw_behavioural_gap_state`. Each telemetry observation of a
+Operates on `chw_behavioural_gap_state`. Each telemetry observation of a
 behavioural-gap pattern increments occurrence_count (or resets it to 1 if
 the previous observation is outside the trigger's window).
 

@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Architecture</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+    background: #f8f9fa;
+    color: #212529;
+  }
+  h1 { color: #1a1a2e; border-bottom: 3px solid #4361ee; padding-bottom: 0.5rem; }
+  h2 { color: #16213e; margin-top: 3rem; }
+  .diagram-card {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    margin: 1.5rem 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    border-left: 4px solid #4361ee;
+  }
+  .diagram-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6c757d;
+    margin-bottom: 1rem;
+  }
+  .mermaid {
+    display: flex;
+    justify-content: center;
+  }
+  .toc {
+    background: white;
+    border-radius: 8px;
+    padding: 1rem 1.5rem;
+    margin: 1.5rem 0;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }
+  .toc a { color: #4361ee; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<h1>🏛 Architecture Diagrams — Architecture</h1>
+<div class="toc">
+  <strong>Diagrams in this document:</strong>
+  <ol>
+    <li><a href="#diagram-1">2. System Context</a></li>
+    <li><a href="#diagram-2">4. Container / Service Architecture</a></li>
+    <li><a href="#diagram-3">5.1 — platform-api Internals</a></li>
+    <li><a href="#diagram-4">5.2 — ai-runtime Internals</a></li>
+    <li><a href="#diagram-5">6.2 Core Data Model</a></li>
+    <li><a href="#diagram-6">6.3 Data Flow</a></li>
+    <li><a href="#diagram-7">7.1 — Admin Document Ingest (v3.3 Pipeline)</a></li>
+    <li><a href="#diagram-8">7.2 — Coaching RAG Query</a></li>
+    <li><a href="#diagram-9">7.3 — Telemetry Ingest + Background Processing</a></li>
+    <li><a href="#diagram-10">8. Infrastructure & Deployment</a></li>
+    <li><a href="#diagram-11">Appendix A — Dependency Graph</a></li>
+  </ol>
+</div>
+
+
+<div class="diagram-card" id="diagram-1">
+  <div class="diagram-title">Diagram 1: 2. System Context</div>
+  <div class="mermaid">
+graph LR
+    subgraph "Clients"
+        AndroidSDK([Android SDK / CHW app])
+        AdminWeb([Admin / Reviewer Web])
+        AnalyticsUI([Analytics Dashboard])
+    end
+
+    subgraph "MicroCoaching"
+        Platform[["Platform API + Workers\n(stateful orchestration)"]]
+        AIRuntime[["AI Runtime\n(stateless inference)"]]
+    end
+
+    subgraph "External Services"
+        SPICE[SPICE Auth Service]
+        Vertex[Google Vertex AI / Gemini]
+        OpenAI[OpenAI API]
+        MinIO[(MinIO / S3)]
+    end
+
+    subgraph "Data Tier"
+        PG[(PostgreSQL + pgvector)]
+        Redis[(Redis)]
+        CH[(ClickHouse)]
+    end
+
+    AndroidSDK -->|HTTPS REST| Platform
+    AdminWeb -->|HTTPS REST| Platform
+    AnalyticsUI -->|HTTPS REST| Platform
+    Platform -->|POST /authenticate| SPICE
+    Platform -->|REST internal| AIRuntime
+    Platform --> PG
+    Platform --> Redis
+    Platform --> CH
+    Platform --> MinIO
+    AIRuntime --> Vertex
+    AIRuntime -.->|optional| OpenAI
+  </div>
+</div>
+
+
+<div class="diagram-card" id="diagram-2">
+  <div class="diagram-title">Diagram 2: 4. Container / Service Architecture</div>
+  <div class="mermaid">
+graph TD
+    subgraph "Clients"
+        SDK[Android SDK]
+        Admin[Admin Web]
+    end
+
+    subgraph "Application Tier"
+        API["platform-api\nFastAPI :8000"]
+        Worker["platform-celery-worker\nCelery"]
+        Beat["platform-celery-beat\nCelery Beat"]
+        AI["ai-runtime\nFastAPI :8001"]
+    end
+
+    subgraph "Data Tier"
+        PG[("PostgreSQL 15\n+ pgvector")]
+        Redis[("Redis 7\nbroker")]
+        CH[("ClickHouse 24.4\nanalytics")]
+        MinIO[("MinIO\nobject storage")]
+    end
+
+    SDK --> API
+    Admin --> API
+    API --> PG
+    API --> Redis
+    API --> CH
+    API --> MinIO
+    API -->|REST + token| AI
+    Worker --> Redis
+    Worker --> PG
+    Worker --> MinIO
+    Worker -->|REST + token| AI
+    Beat --> Redis
+    Beat --> Worker
+    Worker --> CH
+  </div>
+</div>
+
+
+<div class="diagram-card" id="diagram-3">
+  <div class="diagram-title">Diagram 3: 5.1 — platform-api Internals</div>
+  <div class="mermaid">
+graph LR
+    subgraph "platform-api"
+        MW["Middleware\n(SPICE auth, rate limit, CORS, request ID)"]
+        API["API Routers\nadmin, sync, telemetry, coaching, dashboard"]
+        SVC["Domain Services\ningest, modules, RAG, telemetry, storage"]
+        REPO["Repositories\nSQLAlchemy queries"]
+        INT["Integrations\nAIRuntimeClient, ClickHouse, MinIO"]
+        WORK["Celery Producers\ntask enqueue"]
+    end
+
+    HTTP["Incoming HTTP"] --> MW --> API
+    API --> SVC
+    SVC --> REPO --> PG[("PostgreSQL")]
+    SVC --> INT
+    INT --> AI["ai-runtime"]
+    INT --> CH[("ClickHouse")]
+    INT --> MinIO[("MinIO")]
+    API --> WORK --> Redis[("Redis broker")]
+  </div>
+</div>
+
+
+<div class="diagram-card" id="diagram-4">
+  <div class="diagram-title">Diagram 4: 5.2 — ai-runtime Internals</div>
+  <div class="mermaid">
+graph LR
+    subgraph "ai-runtime"
+        Router["Internal Routers\n/generate, /embed, /transcribe"]
+        Exec["PromptExecutor\nprovider dispatch"]
+        Google["GoogleProvider\nVertex / API key"]
+        OpenAI["OpenAIProvider"]
+    end
+
+    HTTP["Platform HTTP"] --> Router --> Exec
+    Exec --> Google
+    Exec -.-> OpenAI
+  </div>
+</div>
+
+
+<div class="diagram-card" id="diagram-5">
+  <div class="diagram-title">Diagram 5: 6.2 Core Data Model</div>
+  <div class="mermaid">
+erDiagram
+    SOURCE_DOCUMENT {
+        uuid id PK
+        text status
+        jsonb outline_jsonb
+        text content_sha256 UK
+    }
+
+    SOURCE_PAGE {
+        uuid id PK
+        uuid source_document_id FK
+        int page_number
+    }
+
+    CONTENT_BLOCK {
+        uuid id PK
+        uuid source_page_id FK
+        text block_type
+        text content
+    }
+
+    INGESTION_RUN {
+        uuid id PK
+        uuid source_document_id FK
+        text status
+    }
+
+    MODULE_FAMILY {
+        uuid id PK
+    }
+
+    MODULE {
+        uuid id PK
+        uuid module_family_id FK
+        int version
+        text lifecycle_status
+        jsonb module_json
+        vector embedding
+        tstzrange visibility_window
+        bool clinically_reviewed
+    }
+
+    BEHAVIOURAL_GAP {
+        uuid id PK
+        text name
+    }
+
+    MODULE_BEHAVIOURAL_GAP {
+        uuid module_id FK
+        uuid gap_id FK
+    }
+
+    TRIGGER_DEFINITION {
+        uuid id PK
+        text trigger_type
+    }
+
+    MODULE_TRIGGER_BINDING {
+        uuid id PK
+        uuid module_id FK
+        uuid trigger_definition_id FK
+    }
+
+    CHW_BEHAVIOURAL_GAP_STATE {
+        uuid id PK
+        int chw_id
+        uuid gap_id FK
+    }
+
+    SOURCE_DOCUMENT ||--o{ SOURCE_PAGE : contains
+    SOURCE_PAGE ||--o{ CONTENT_BLOCK : has
+    SOURCE_DOCUMENT ||--o{ INGESTION_RUN : drives
+    MODULE_FAMILY ||--o{ MODULE : versions
+    MODULE ||--o{ MODULE_BEHAVIOURAL_GAP : maps
+    BEHAVIOURAL_GAP ||--o{ MODULE_BEHAVIOURAL_GAP : tagged
+    MODULE ||--o{ MODULE_TRIGGER_BINDING : bound
+    TRIGGER_DEFINITION ||--o{ MODULE_TRIGGER_BINDING : triggers
+    BEHAVIOURAL_GAP ||--o{ CHW_BEHAVIOURAL_GAP_STATE : tracked_for
+  </div>
+</div>
+
+
+<div class="diagram-card" id="diagram-6">
+  <div class="diagram-title">Diagram 6: 6.3 Data Flow</div>
+  <div class="mermaid">
+flowchart TD
+    A([Admin uploads PDFs]) --> B[POST /admin/ingest]
+    B --> C[Store files in MinIO]
+    C --> D[Create source_document + ingestion_run rows]
+    D --> E[Enqueue Celery: run_ingest_batch]
+    E --> F[Stage A: Extract pages + content_blocks]
+    F --> G[Stage C: Identify module candidates]
+    G --> H[Stage D: Draft cards → module rows]
+    H --> I{Publish}
+    I --> J[module.lifecycle_status = published]
+    J --> K[Enqueue embedding + quiz + gap jobs]
+    K --> L[ai-runtime: embed + generate]
+    L --> M[Update module.embedding + quiz questions]
+    M --> N([Device syncs via GET /sync/modules])
+  </div>
+</div>
+
+
+<div class="diagram-card" id="diagram-7">
+  <div class="diagram-title">Diagram 7: 7.1 — Admin Document Ingest (v3.3 Pipeline)</div>
+  <div class="mermaid">
+sequenceDiagram
+    autonumber
+    actor Admin as Admin User
+    participant API as platform-api
+    participant MinIO as MinIO
+    participant PG as PostgreSQL
+    participant Redis as Redis
+    participant Worker as celery-worker
+    participant AI as ai-runtime
+
+    Admin->>API: POST /admin/ingest (multipart files)
+    API->>MinIO: PUT source objects
+    API->>PG: INSERT source_document, ingestion_run
+    API->>Redis: enqueue platform.run_ingest_batch
+    API-->>Admin: 202 batch_queued + poll URLs
+
+    Redis->>Worker: run_ingest_batch_task
+    Worker->>MinIO: GET source file
+    Worker->>AI: POST /internal/generate (stage A/C/D)
+    AI-->>Worker: structured JSON
+    Worker->>PG: INSERT content_blocks, module_candidate_draft, module
+    Worker->>PG: SET module.lifecycle_status=published
+    Worker->>Redis: enqueue embedding + quiz tasks
+    Worker->>AI: POST /internal/embed
+    AI-->>Worker: vectors
+    Worker->>PG: UPDATE module.embedding
+  </div>
+</div>
+
+
+<div class="diagram-card" id="diagram-8">
+  <div class="diagram-title">Diagram 8: 7.2 — Coaching RAG Query</div>
+  <div class="mermaid">
+sequenceDiagram
+    autonumber
+    actor CHW as CHW / SDK
+    participant API as platform-api
+    participant PG as PostgreSQL
+    participant AI as ai-runtime
+    participant MinIO as MinIO
+
+    CHW->>API: POST /coaching/rag-query
+    API->>AI: POST /internal/embed (question)
+    AI-->>API: query vector
+    API->>PG: pgvector similarity search on module.embedding
+    PG-->>API: top-k modules + cards
+    API->>API: Build grounded prompt + source refs
+    API->>AI: POST /internal/generate/coaching_rag
+    AI-->>API: JSON answer
+    API->>MinIO: presign source PDF URLs
+    API-->>CHW: answer + source_document attribution
+  </div>
+</div>
+
+
+<div class="diagram-card" id="diagram-9">
+  <div class="diagram-title">Diagram 9: 7.3 — Telemetry Ingest + Background Processing</div>
+  <div class="mermaid">
+sequenceDiagram
+    autonumber
+    actor SDK as Android SDK
+    participant API as platform-api
+    participant CH as ClickHouse
+    participant Redis as Redis
+    participant Worker as celery-worker
+    participant PG as PostgreSQL
+
+    SDK->>API: POST /telemetry/events
+    API->>API: Validate against mc_contracts schema
+    API->>CH: INSERT coaching_events rows
+    API->>Redis: enqueue platform.process_module_event
+    API-->>SDK: 202 accepted
+
+    Redis->>Worker: process_module_event_task
+    Worker->>PG: UPDATE chw_module_completion, gap states
+  </div>
+</div>
+
+
+<div class="diagram-card" id="diagram-10">
+  <div class="diagram-title">Diagram 10: 8. Infrastructure & Deployment</div>
+  <div class="mermaid">
+graph TD
+    subgraph "Developer / CI Host"
+        subgraph "Docker Compose Stack"
+            Migrate[migrate one-shot]
+            DB[(db :15432)]
+            Redis[(redis :16379)]
+            CH[(clickhouse :18123)]
+            CHInit[clickhouse-init]
+            MinIO[(minio :19902)]
+            API[platform-api :18000]
+            Worker[platform-celery-worker]
+            Beat[platform-celery-beat]
+            AI[ai-runtime :18001]
+        end
+    end
+
+    subgraph "Optional Profile: dashboard"
+        Dash[analytics-dashboard :18080]
+    end
+
+    Migrate --> DB
+    API --> DB
+    API --> Redis
+    API --> CH
+    API --> MinIO
+    API --> AI
+    Worker --> Redis
+    Worker --> DB
+    Worker --> AI
+    Beat --> Redis
+    CHInit --> CH
+    Dash --> API
+  </div>
+</div>
+
+
+<div class="diagram-card" id="diagram-11">
+  <div class="diagram-title">Diagram 11: Appendix A — Dependency Graph</div>
+  <div class="mermaid">
+graph LR
+    subgraph "services/platform"
+        Platform[platform_service]
+    end
+
+    subgraph "services/ai-runtime"
+        AIRuntime[ai_runtime]
+    end
+
+    subgraph "packages"
+        Contracts[mc_contracts]
+        Foundation[mc_foundation]
+    end
+
+    Platform --> Contracts
+    Platform --> Foundation
+    AIRuntime --> Contracts
+    AIRuntime --> Foundation
+
+    Platform -.->|HTTP only| AIRuntime
+
+    Contracts --> Pydantic[Pydantic]
+    Foundation --> InfraLibs[httpx, starlette, pydantic-settings]
+  </div>
+</div>
+
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'default',
+    flowchart: { curve: 'basis', useMaxWidth: true },
+    sequence: { useMaxWidth: true },
+    er: { useMaxWidth: true },
+    fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
+  });
+</script>
+</body>
+</html>

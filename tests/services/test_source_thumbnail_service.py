@@ -10,6 +10,7 @@ import pytest
 from platform_service.services.source_thumbnail_service import (
     SourceThumbnailService,
     render_thumbnail_png_bytes,
+    source_type_supports_thumbnail,
     thumbnail_object_name,
 )
 from platform_service.workers.extractors.page_renderer import UnsupportedRenderError
@@ -32,6 +33,20 @@ def test_render_thumbnail_png_bytes_pptx_skipped(tmp_path: Path) -> None:
 def test_thumbnail_object_name() -> None:
     doc_id = uuid4()
     assert thumbnail_object_name(doc_id) == f"ingest/thumbnails/{doc_id}.png"
+
+
+@pytest.mark.parametrize(
+    ("source_type", "expected"),
+    [
+        ("pdf", True),
+        ("audio", True),
+        ("video", True),
+        ("docx", False),
+        ("pptx", False),
+    ],
+)
+def test_source_type_supports_thumbnail(source_type: str, expected: bool) -> None:
+    assert source_type_supports_thumbnail(source_type) is expected
 
 
 @pytest.mark.asyncio

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import anyio
-from fastapi import HTTPException, UploadFile
+from fastapi import UploadFile
 from mc_contracts.enums import AssessmentMode, ContentDomain
 from mc_contracts.internal_ai import GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES, OPENAI_TRANSCRIPTION_MAX_BYTES
 from sqlalchemy import update
@@ -27,8 +27,10 @@ from platform_service.db.models.module import Module
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.db.repositories.file_upload_repository import FileUploadRepository
 from platform_service.db.repositories.source_repository import SourceRepository
+from platform_service.db.tenant_scope import tenant_scope_filter
 from platform_service.services.attribution_audit import record_attribution_event
 from platform_service.services.file_digest import sha256_hex_file
+from platform_service.services.ingest_errors import IngestValidationError
 from platform_service.services.object_storage import (
     ObjectStorageClient,
     ObjectStorageError,
@@ -82,6 +84,7 @@ class IngestUploadParams:
     primary_language: str
     uploaded_by: str
     retired_ids: list[uuid.UUID]
+    ingestion_instructions: str | None = None
 
 
 @dataclass(frozen=True)
@@ -136,75 +139,62 @@ class IngestUploadService:
     @staticmethod
     def validate_file_count(files: list[UploadFile]) -> None:
         if not files:
-            raise HTTPException(status_code=400, detail="at least one file is required")
+            raise IngestValidationError("at least one file is required")
         if len(files) > MAX_INGEST_FILES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"at most {MAX_INGEST_FILES} files per request; got {len(files)}",
+            raise IngestValidationError(
+                f"at most {MAX_INGEST_FILES} files per request; got {len(files)}",
             )
 
     @staticmethod
     def validate_mode(mode: str) -> None:
         if mode not in ("append", "new"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"invalid mode {mode!r}; must be 'append' or 'new'",
-            )
+            raise IngestValidationError(f"invalid mode {mode!r}; must be 'append' or 'new'")
 
     @staticmethod
     def validate_ingest_metadata(*, content_domain: str, assessment_mode: str) -> None:
         if content_domain not in _ALLOWED_CONTENT_DOMAINS:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"invalid content_domain {content_domain!r}; "
-                    f"must be one of: {sorted(_ALLOWED_CONTENT_DOMAINS)}"
-                ),
+            raise IngestValidationError(
+                f"invalid content_domain {content_domain!r}; "
+                f"must be one of: {sorted(_ALLOWED_CONTENT_DOMAINS)}",
             )
         if assessment_mode not in _ALLOWED_ASSESSMENT_MODES:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"invalid assessment_mode {assessment_mode!r}; "
-                    f"must be one of: {sorted(_ALLOWED_ASSESSMENT_MODES)}"
-                ),
+            raise IngestValidationError(
+                f"invalid assessment_mode {assessment_mode!r}; "
+                f"must be one of: {sorted(_ALLOWED_ASSESSMENT_MODES)}",
             )
 
     @staticmethod
     def resolve_titles_for_files(titles_json: str | None, files: list[UploadFile]) -> list[str]:
         """Map each upload to a title: explicit JSON array or filename stem."""
         if not files:
-            raise HTTPException(status_code=400, detail="at least one file is required")
+            raise IngestValidationError("at least one file is required")
         if titles_json is None:
             resolved: list[str] = []
             for upload in files:
                 if not upload.filename:
-                    raise HTTPException(status_code=400, detail="filename is required")
+                    raise IngestValidationError("filename is required")
                 stem = Path(safe_basename(upload.filename)).stem
                 if not stem:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"cannot derive title from filename {upload.filename!r}",
+                    raise IngestValidationError(
+                        f"cannot derive title from filename {upload.filename!r}",
                     )
                 resolved.append(stem)
             return resolved
         try:
             parsed = json.loads(titles_json)
         except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=400, detail="titles must be valid JSON") from exc
+            raise IngestValidationError("titles must be valid JSON") from exc
         if not isinstance(parsed, list):
-            raise HTTPException(status_code=400, detail="titles must be a JSON array")
+            raise IngestValidationError("titles must be a JSON array")
         if len(parsed) != len(files):
-            raise HTTPException(
-                status_code=400,
-                detail=f"titles must have {len(files)} entries (one per file); got {len(parsed)}",
+            raise IngestValidationError(
+                f"titles must have {len(files)} entries (one per file); got {len(parsed)}",
             )
         resolved = []
         for index, entry in enumerate(parsed):
             if not isinstance(entry, str) or not entry.strip():
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"titles[{index}] must be a non-empty string",
+                raise IngestValidationError(
+                    f"titles[{index}] must be a non-empty string",
                 )
             resolved.append(entry.strip())
         return resolved
@@ -216,31 +206,53 @@ class IngestUploadService:
     ) -> list[bool]:
         """Map each upload to an override flag (default false when omitted)."""
         if not files:
-            raise HTTPException(status_code=400, detail="at least one file is required")
+            raise IngestValidationError("at least one file is required")
         if override_json is None:
             return [False] * len(files)
         try:
             parsed = json.loads(override_json)
         except json.JSONDecodeError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail="override_duplicates must be valid JSON",
-            ) from exc
+            raise IngestValidationError("override_duplicates must be valid JSON") from exc
         if not isinstance(parsed, list):
-            raise HTTPException(status_code=400, detail="override_duplicates must be a JSON array")
+            raise IngestValidationError("override_duplicates must be a JSON array")
         if len(parsed) != len(files):
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"override_duplicates must have {len(files)} entries (one per file); got {len(parsed)}"
-                ),
+            raise IngestValidationError(
+                f"override_duplicates must have {len(files)} entries (one per file); got {len(parsed)}",
             )
         resolved: list[bool] = []
         for index, entry in enumerate(parsed):
             if not isinstance(entry, bool):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"override_duplicates[{index}] must be a boolean",
+                raise IngestValidationError(
+                    f"override_duplicates[{index}] must be a boolean",
+                )
+            resolved.append(entry)
+        return resolved
+
+    @staticmethod
+    def resolve_sync_published_visible_for_files(
+        visible_json: str | None,
+        files: list[UploadFile],
+    ) -> list[bool]:
+        """Map each upload to a published-sync visibility flag (default false when omitted)."""
+        if not files:
+            raise IngestValidationError("at least one file is required")
+        if visible_json is None:
+            return [False] * len(files)
+        try:
+            parsed = json.loads(visible_json)
+        except json.JSONDecodeError as exc:
+            raise IngestValidationError("sync_published_visible must be valid JSON") from exc
+        if not isinstance(parsed, list):
+            raise IngestValidationError("sync_published_visible must be a JSON array")
+        if len(parsed) != len(files):
+            raise IngestValidationError(
+                f"sync_published_visible must have {len(files)} entries (one per file); got {len(parsed)}",
+            )
+        resolved: list[bool] = []
+        for index, entry in enumerate(parsed):
+            if not isinstance(entry, bool):
+                raise IngestValidationError(
+                    f"sync_published_visible[{index}] must be a boolean",
                 )
             resolved.append(entry)
         return resolved
@@ -266,29 +278,37 @@ class IngestUploadService:
     @staticmethod
     def source_type_for_upload(file: UploadFile) -> str:
         if not file.filename:
-            raise HTTPException(status_code=400, detail="filename is required")
+            raise IngestValidationError("filename is required")
         suffix = Path(file.filename).suffix.lower()
         if suffix not in _ACCEPTED_SUFFIXES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"unsupported file type {suffix!r}; accepted: {sorted(_ACCEPTED_SUFFIXES)}",
+            raise IngestValidationError(
+                f"unsupported file type {suffix!r}; accepted: {sorted(_ACCEPTED_SUFFIXES)}",
             )
         return IngestUploadService.source_type_from_suffix(suffix)
 
-    async def retire_published_modules_if_new(self, mode: str) -> tuple[int, list[uuid.UUID]]:
-        """Retire every published module when ``mode=='new'``."""
+    async def retire_published_modules_if_new(
+        self,
+        mode: str,
+        *,
+        tenant_id: uuid.UUID | None = None,
+    ) -> tuple[int, list[uuid.UUID]]:
+        """Retire published modules for the active tenant when ``mode=='new'``."""
         if mode != "new":
             return 0, []
-        result = await self._db.execute(
+        stmt = (
             update(Module)
             .where(Module.lifecycle_status == "published")
             .values(lifecycle_status="retired")
             .returning(Module.id)
         )
+        if tenant_id is not None:
+            stmt = stmt.where(tenant_scope_filter(Module.tenant_id, tenant_id))
+        result = await self._db.execute(stmt)
         retired_ids = list(result.scalars().all())
         logger.info(
-            "Ingest mode=new: retired %d published module(s) before fresh ingestion",
+            "Ingest mode=new: retired %d published module(s) before fresh ingestion (tenant_id=%s)",
             len(retired_ids),
+            tenant_id,
         )
         return len(retired_ids), retired_ids
 
@@ -299,12 +319,14 @@ class IngestUploadService:
         titles: list[str],
         params: IngestUploadParams,
         override_flags: list[bool],
+        sync_published_visible_flags: list[bool],
     ) -> list[IngestUploadOutcome]:
         outcomes: list[IngestUploadOutcome] = []
-        for upload, doc_title, override_duplicate in zip(
+        for upload, doc_title, override_duplicate, sync_published_visible in zip(
             files,
             titles,
             override_flags,
+            sync_published_visible_flags,
             strict=True,
         ):
             outcomes.append(
@@ -313,6 +335,7 @@ class IngestUploadService:
                     title=doc_title,
                     params=params,
                     override_duplicate=override_duplicate,
+                    sync_published_visible=sync_published_visible,
                 )
             )
         return outcomes
@@ -324,6 +347,7 @@ class IngestUploadService:
         title: str,
         params: IngestUploadParams,
         override_duplicate: bool = False,
+        sync_published_visible: bool = False,
     ) -> IngestUploadOutcome:
         """Upload one file, persist provenance, and create a source_document."""
         self.validate_ingest_metadata(
@@ -355,7 +379,7 @@ class IngestUploadService:
                 )
             except ObjectStorageError:
                 logger.exception("Ingest object storage upload failed for %s", file.filename)
-                raise HTTPException(status_code=502, detail="object storage upload failed") from None
+                raise IngestValidationError("object storage upload failed", status_code=502) from None
 
             storage_path = stored.storage_path
             await record_file_upload(
@@ -381,10 +405,18 @@ class IngestUploadService:
                 content_sha256=content_sha256,
                 original_filename=original_filename,
                 uploaded_by=params.uploaded_by,
+                ingestion_instructions=params.ingestion_instructions,
+                sync_published_visible=sync_published_visible,
             )
-            audit_payload: dict[str, Any] = {"stored_path": storage_path, "source_type": source_type}
+            audit_payload: dict[str, Any] = {
+                "stored_path": storage_path,
+                "source_type": source_type,
+                "sync_published_visible": sync_published_visible,
+            }
             if params.retired_ids:
                 audit_payload["retired_module_ids"] = [str(mid) for mid in params.retired_ids]
+            if params.ingestion_instructions is not None:
+                audit_payload["ingestion_instructions"] = params.ingestion_instructions
             await record_attribution_event(
                 self._db,
                 event_type="ingest_started",
@@ -442,7 +474,7 @@ class IngestUploadService:
         )
 
 
-def _append_bytes_to_path(dest: Path, chunk: bytes, *, first: bool) -> None:
+def _append_bytes_to_path(dest: Path, chunk: bytes, first: bool) -> None:
     mode = "wb" if first else "ab"
     with dest.open(mode) as fh:
         fh.write(chunk)
@@ -463,16 +495,16 @@ async def stream_upload_to_path(
         while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
             bytes_seen += len(chunk)
             if source_type in _MEDIA_SOURCE_TYPES and bytes_seen > max_media_bytes:
-                raise HTTPException(
-                    status_code=413,
-                    detail=(
+                raise IngestValidationError(
+                    (
                         f"media upload exceeds {max_media_bytes} bytes; "
                         "larger audio/video requires chunking or provider file upload support"
                     ),
+                    status_code=413,
                 )
-            await anyio.to_thread.run_sync(_append_bytes_to_path, dest, chunk, first=first)
+            await anyio.to_thread.run_sync(lambda c=chunk, f=first: _append_bytes_to_path(dest, c, first=f))
             first = False
-    except HTTPException:
+    except IngestValidationError:
         dest.unlink(missing_ok=True)
         raise
     except Exception:

@@ -9,7 +9,9 @@ from platform_service.workers.extractors.base import (
 )
 from platform_service.workers.extractors.document_extractor import DocumentSourceExtractor
 from platform_service.workers.extractors.media_extractor import MediaSourceExtractor
-from platform_service.workers.extractors.text_extractor import ExtractedPage
+from platform_service.workers.extractors.media_splitter import MediaChunk
+from platform_service.workers.extractors.text_extractor import ExtractedPage, TextExtractionError
+from platform_service.workers.stage_a_extract import StageAExtractor
 
 pytestmark = pytest.mark.asyncio
 
@@ -44,8 +46,6 @@ class TestDocumentSourceExtractor:
         fake_fn.assert_called_once_with("/tmp/y.docx", "docx")
 
     async def test_propagates_extraction_errors(self) -> None:
-        from platform_service.workers.extractors.text_extractor import TextExtractionError
-
         fake_fn = MagicMock(side_effect=TextExtractionError("corrupt"))
         ext = DocumentSourceExtractor(extract_pages_fn=fake_fn)
 
@@ -73,11 +73,7 @@ class TestMediaSourceExtractor:
 
 async def test_orchestrator_default_registry_covers_all_supported_types() -> None:
     """The orchestrator's default registry should expose pdf, pptx, docx, audio, video."""
-    from unittest.mock import MagicMock as MM
-
-    from platform_service.workers.stage_a_extract import StageAExtractor
-
-    fake_session = MM()
+    fake_session = MagicMock()
     orchestrator = StageAExtractor(fake_session)
 
     assert set(orchestrator._extractors.keys()) == {"pdf", "pptx", "docx", "audio", "video"}
@@ -91,11 +87,7 @@ async def test_orchestrator_default_registry_covers_all_supported_types() -> Non
 
 async def test_orchestrator_uses_injected_text_extractor_fn() -> None:
     """Backward-compat: passing ``text_extractor_fn`` should reach the document wrapper."""
-    from unittest.mock import MagicMock as MM
-
-    from platform_service.workers.stage_a_extract import StageAExtractor
-
-    fake_session = MM()
+    fake_session = MagicMock()
     sentinel_pages = [ExtractedPage(page_number=1, markdown="injected")]
     fake_text_fn = MagicMock(return_value=sentinel_pages)
     orchestrator = StageAExtractor(fake_session, text_extractor_fn=fake_text_fn)
@@ -110,12 +102,7 @@ async def test_orchestrator_uses_injected_text_extractor_fn() -> None:
 async def test_orchestrator_uses_injected_media_transcriber_fn() -> None:
     """Orchestrator-level ``media_transcriber_fn`` hook reaches the chunked
     extractor's per-chunk transcribe call (signature: ``(bytes, mime_type) -> str``)."""
-    from unittest.mock import MagicMock as MM
-
-    from platform_service.workers.extractors.media_splitter import MediaChunk
-    from platform_service.workers.stage_a_extract import StageAExtractor
-
-    fake_session = MM()
+    fake_session = MagicMock()
     fake_transcribe = AsyncMock(return_value="some transcribed text from the chunk")
     orchestrator = StageAExtractor(fake_session, media_transcriber_fn=fake_transcribe)
 

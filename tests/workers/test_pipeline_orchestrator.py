@@ -47,7 +47,9 @@ from platform_service.services.run_state_service import (
     STAGE_EXTRACT,
     STAGE_MODULE_IDENTIFY,
     STEP_FAILED,
+    RunStateService,
 )
+from platform_service.workers.extractors.calibration import build_calibration_decision
 from platform_service.workers.pipeline_orchestrator import (
     PipelineOrchestrator,
 )
@@ -110,8 +112,6 @@ def _stage_a_mock(*, success: bool = True, raise_exc: Exception | None = None) -
     if raise_exc:
         m.run = AsyncMock(side_effect=raise_exc)
     else:
-        from platform_service.workers.extractors.calibration import build_calibration_decision
-
         result = StageAResult(
             source_document_id=uuid4(),
             total_pages=10,
@@ -354,8 +354,6 @@ class TestStageDPerCandidateFailures:
         # Stage A + C succeed; Stage C reports 3 candidates. Then we seed 3
         # rows that the orchestrator's candidate_repo will iterate.
         # First start the run so we have an ingestion_run_id.
-        from platform_service.services.run_state_service import RunStateService
-
         run_state = RunStateService(db_session)
         run = await run_state.start_run(source_document_id=sd_id)
         await db_session.commit()
@@ -385,8 +383,6 @@ class TestStageDPerCandidateFailures:
 
     async def test_all_candidates_succeed_run_succeeded(self, db_session: AsyncSession) -> None:
         sd_id = await _seed_source_document(db_session)
-        from platform_service.services.run_state_service import RunStateService
-
         run_state = RunStateService(db_session)
         run = await run_state.start_run(source_document_id=sd_id)
         await db_session.commit()
@@ -452,8 +448,6 @@ class TestResume:
         """If Stage A's step is already 'succeeded' on the resumable run,
         the orchestrator skips Stage A and continues from Stage C."""
         sd_id = await _seed_source_document(db_session)
-        from platform_service.services.run_state_service import RunStateService
-
         run_state = RunStateService(db_session)
         # Start a run with a completed extract step (worker interrupted before Stage C).
         run = await run_state.start_run(source_document_id=sd_id)
@@ -531,8 +525,6 @@ class TestGreenletCapture:
         self, db_session: AsyncSession
     ) -> None:
         sd_id = await _seed_source_document(db_session)
-        from platform_service.services.run_state_service import RunStateService
-
         run_state = RunStateService(db_session)
         run = await run_state.start_run(source_document_id=sd_id)
         await db_session.commit()

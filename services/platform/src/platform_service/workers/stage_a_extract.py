@@ -26,23 +26,20 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
 import anyio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from platform_service.config import get_settings
 from platform_service.db.repositories.source_repository import SourceRepository
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 from platform_service.workers.extractors.base import (
     SourceExtractor,
     UnsupportedSourceTypeError,
 )
-from platform_service.workers.extractors.calibration import (
-    CalibrationDecision,
-    build_calibration_decision,
-)
+from platform_service.workers.extractors.calibration import build_calibration_decision
 from platform_service.workers.extractors.document_extractor import DocumentSourceExtractor
 from platform_service.workers.extractors.media_extractor import MediaSourceExtractor
 from platform_service.workers.extractors.page_renderer import (
@@ -54,48 +51,13 @@ from platform_service.workers.extractors.stage_a_document_path import run_docume
 from platform_service.workers.extractors.stage_a_media_path import run_media_transcript_path
 from platform_service.workers.extractors.text_extractor import TextExtractionError
 from platform_service.workers.extractors.vision_extractor import VisionExtractor
+from platform_service.workers.stage_a_types import (
+    Stage1ExtractionError,
+    Stage1RecoveryFailedError,
+    StageAResult,
+)
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class StageAResult:
-    """Summary of one Stage 1 run for a single source document."""
-
-    source_document_id: UUID
-    total_pages: int
-    pages_persisted: int
-    extraction_method_counts: dict[str, int]  # {"text": N, "vision": M, "vision_failed": K}
-    calibration: CalibrationDecision
-    outline_section_count: int = 0
-
-
-class Stage1ExtractionError(Exception):
-    """Raised by Stage1Extractor.run when the stage cannot meet its success
-    contract. Currently used for the vision-recovery tolerance breach
-    (`Stage1RecoveryFailedError` subclass). Empty outline used to raise
-    here too (pre-c5b6635 outline-partitioner era); under the token-budget
-    chunker the outline is supplementary, so empty-outline now logs a
-    warning and proceeds. The orchestrator's typed handler at
-    pipeline_orchestrator.py:462 still maps this exception to
-    `error_jsonb.reason` for the dashboard."""
-
-
-class Stage1RecoveryFailedError(Stage1ExtractionError):
-    """Raised when the vision-recovery pass leaves more than
-    `stage_a_vision_failed_tolerance` pages still in `vision_failed` state."""
-
-    def __init__(self, failed_page_numbers: list[int], tolerance: int) -> None:
-        self.failed_page_numbers = failed_page_numbers
-        self.tolerance = tolerance
-        super().__init__(
-            f"Stage 1 vision recovery left {len(failed_page_numbers)} pages "
-            f"still vision_failed (tolerance={tolerance}): {failed_page_numbers}. "
-            f"This usually means Vertex per-project quota was exhausted "
-            f"throughout the run. Retry after quota resets, raise the "
-            f"per-project RPM limit, or set stage_a_vision_failed_tolerance "
-            f"higher if losing these pages is acceptable."
-        )
 
 
 class StageAExtractor:
@@ -130,15 +92,16 @@ class StageAExtractor:
         source_document_id: UUID,
         source_path: str | Path,
         source_type: str,
-        primary_language: str = "bn",
+        primary_language: str | None = None,
     ) -> StageAResult:
         """Execute Stage A end-to-end for one source document."""
+        resolved_primary_language = primary_language or get_settings().deployment_primary_locale
         total_pages = await self._count_pages_or_fail(source_document_id, source_path, source_type)
         if total_pages == 0:
             return await self._empty_document_result(source_document_id)
 
         extraction = await self._extract_source_or_fail(
-            source_document_id, source_path, source_type, primary_language
+            source_document_id, source_path, source_type, resolved_primary_language
         )
         if not extraction.requires_calibration:
             return await run_media_transcript_path(
@@ -147,14 +110,14 @@ class StageAExtractor:
                 source_document_id=source_document_id,
                 text_pages=extraction.pages,
                 total_pages=len(extraction.pages),
-                primary_language=primary_language,
+                primary_language=resolved_primary_language,
             )
         return await run_document_path(
             self,
             source_document_id=source_document_id,
             source_path=source_path,
             source_type=source_type,
-            primary_language=primary_language,
+            primary_language=resolved_primary_language,
             text_pages=extraction.pages,
             total_pages=total_pages,
         )

@@ -12,11 +12,31 @@ from httpx import ASGITransport, AsyncClient
 from platform_service.api.sync import router as sync_router
 from platform_service.config import get_settings
 from platform_service.deps import get_db, get_object_storage_client
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.api.conftest import (
+    _mock_storage,
+    _seed_module,
+    _seed_source_document,
+)
 from tests.conftest import platform_path, requires_db
 
 pytestmark = [requires_db, pytest.mark.asyncio]
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
+    yield
+    await db_session.rollback()
+    await db_session.execute(
+        text(
+            "TRUNCATE module_quiz_question, module, module_family, "
+            "content_block, source_page, source_document "
+            "RESTART IDENTITY CASCADE"
+        )
+    )
+    await db_session.commit()
 
 
 class _FakeStorage:
@@ -56,6 +76,12 @@ class TestSyncRoutes:
         assert resp.status_code == 200
         data = resp.json()
         assert "thresholds" in data
+        assert "locales" in data
+        locales = data["locales"]
+        settings = get_settings()
+        assert locales["primary"] == settings.deployment_primary_locale
+        assert "mirror" not in locales
+        assert locales["supported"] == settings.deployment_locale_config.supported
 
     async def test_modules_sync_requires_since(self, client: AsyncClient) -> None:
         resp = await client.get(platform_path("/sync/modules"))
@@ -65,4 +91,61 @@ class TestSyncRoutes:
         since = datetime.now(UTC).isoformat()
         resp = await client.get(platform_path("/sync/modules"), params={"since": since})
         assert resp.status_code == 200
-        assert resp.json()["modules"] == []
+        data = resp.json()
+        assert data["modules"] == []
+        assert data["assigned_module_ids"] == []
+
+
+class TestPublishedSourceDocuments:
+    async def test_returns_documents_for_published_modules_only(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        doc = await _seed_source_document(db_session, sync_published_visible=True)
+        await _seed_module(db_session, source_document_ids=[doc.id])
+        await _seed_module(db_session, title_localized={"bn": "Draft module"}, lifecycle_status="draft")
+
+        resp = await client.get(platform_path("/sync/source-documents/published"))
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "server_time_utc" in data
+        assert "modules" not in data
+        assert len(data["source_documents"]) == 1
+        entry = data["source_documents"][0]
+        assert entry["source_document_id"] == str(doc.id)
+        assert "title" not in entry
+        assert "cards" not in data
+        assert "module_cards" not in data
+
+    async def test_presigns_source_document_and_thumbnail(
+        self, app: FastAPI, db_session: AsyncSession
+    ) -> None:
+        doc = await _seed_source_document(db_session, title="RMNCH Manual", sync_published_visible=True)
+        doc.thumbnail_storage_path = "medtronics-storage/ingest/thumbnails/manual.png"
+        await db_session.commit()
+        await _seed_module(db_session, source_document_ids=[doc.id])
+
+        thumb_url = "https://minio.example/thumb.png"
+        mock_storage = _mock_storage(presigned_url=thumb_url)
+        app.dependency_overrides[get_object_storage_client] = lambda: mock_storage
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(platform_path("/sync/source-documents/published"))
+
+        assert resp.status_code == 200
+        entry = resp.json()["source_documents"][0]
+        assert entry["presigned_url"] == thumb_url
+        assert entry["presigned_expires_seconds"] == get_settings().admin_file_presigned_max_seconds
+        assert "thumbnail_storage_path" not in entry
+        assert entry["thumbnail_presigned_url"] == thumb_url
+        assert entry["thumbnail_presigned_expires_seconds"] == get_settings().admin_file_presigned_max_seconds
+
+    async def test_excludes_documents_when_sync_published_visible_false(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        doc = await _seed_source_document(db_session, sync_published_visible=False)
+        await _seed_module(db_session, source_document_ids=[doc.id])
+
+        resp = await client.get(platform_path("/sync/source-documents/published"))
+        assert resp.status_code == 200
+        assert resp.json()["source_documents"] == []

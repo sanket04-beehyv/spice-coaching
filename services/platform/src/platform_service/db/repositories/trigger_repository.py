@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from platform_service.db.models.module import Module
 from platform_service.db.models.trigger_definition import (
     ModuleTriggerBinding,
     TriggerDefinition,
@@ -84,7 +85,7 @@ class TriggerRepository:
     async def bind_module_to_trigger(
         self,
         *,
-        module_family_id: UUID,
+        module_id: UUID,
         trigger_definition_id: UUID,
         relationship: str = "primary",
         priority_weight: int = 10,
@@ -93,7 +94,7 @@ class TriggerRepository:
         if relationship not in ("primary", "secondary"):
             raise ValueError(f"relationship must be 'primary' or 'secondary', got {relationship!r}")
         binding = ModuleTriggerBinding(
-            module_family_id=module_family_id,
+            module_id=module_id,
             trigger_definition_id=trigger_definition_id,
             relationship=relationship,
             priority_weight=priority_weight,
@@ -111,33 +112,36 @@ class TriggerRepository:
         )
         return list(result.scalars().all())
 
-    async def list_bindings_for_module_family(self, module_family_id: UUID) -> list[ModuleTriggerBinding]:
+    async def list_bindings_for_module(self, module_id: UUID) -> list[ModuleTriggerBinding]:
         result = await self._session.execute(
-            select(ModuleTriggerBinding).where(ModuleTriggerBinding.module_family_id == module_family_id)
+            select(ModuleTriggerBinding).where(ModuleTriggerBinding.module_id == module_id)
         )
         return list(result.scalars().all())
 
     async def list_active_bindings_for_trigger_codes(
         self, trigger_codes: list[str]
-    ) -> list[tuple[ModuleTriggerBinding, TriggerDefinition]]:
-        """Join helper: return (binding, trigger) pairs for a list of trigger
-        codes, filtered to active triggers only. Used by ModuleSelector."""
+    ) -> list[tuple[ModuleTriggerBinding, TriggerDefinition, Module]]:
+        """Join helper: return (binding, trigger, module) triples for a list of
+        trigger codes, filtered to active triggers and published modules only.
+        Used by ModuleSelector."""
         if not trigger_codes:
             return []
         stmt = (
-            select(ModuleTriggerBinding, TriggerDefinition)
+            select(ModuleTriggerBinding, TriggerDefinition, Module)
             .join(
                 TriggerDefinition,
                 ModuleTriggerBinding.trigger_definition_id == TriggerDefinition.id,
             )
+            .join(Module, ModuleTriggerBinding.module_id == Module.id)
             .where(
                 TriggerDefinition.trigger_code.in_(trigger_codes),
                 TriggerDefinition.status == "active",
+                Module.lifecycle_status == "published",
             )
             .order_by(ModuleTriggerBinding.priority_weight.desc())
         )
         result = await self._session.execute(stmt)
-        return [(b, t) for b, t in result.all()]
+        return [(b, t, m) for b, t, m in result.all()]
 
     async def list_active_triggers_updated_since(
         self,
@@ -175,3 +179,55 @@ class TriggerRepository:
             )
         )
         return list((await self._session.execute(stmt)).scalars().all())
+
+    async def get_assessment_due_trigger(self, topic: str) -> TriggerDefinition | None:
+        from platform_service.services.assessment_topic_catalog import assessment_due_trigger_code
+
+        return await self.get_trigger_by_code(assessment_due_trigger_code(topic))
+
+    async def list_bindings_with_triggers_for_module(
+        self, module_id: UUID
+    ) -> list[tuple[ModuleTriggerBinding, TriggerDefinition]]:
+        stmt = (
+            select(ModuleTriggerBinding, TriggerDefinition)
+            .join(
+                TriggerDefinition,
+                ModuleTriggerBinding.trigger_definition_id == TriggerDefinition.id,
+            )
+            .where(ModuleTriggerBinding.module_id == module_id)
+            .order_by(ModuleTriggerBinding.priority_weight.desc())
+        )
+        return [(b, t) for b, t in (await self._session.execute(stmt)).all()]
+
+    async def replace_assessment_due_bindings_for_module(
+        self,
+        module_id: UUID,
+        *,
+        bindings: list[tuple[UUID, str, int]],
+    ) -> list[ModuleTriggerBinding]:
+        """Replace assessment-due workflow bindings for a single module."""
+        if relationship_invalid := [r for _, r, _ in bindings if r not in ("primary", "secondary")]:
+            raise ValueError(f"invalid relationship values: {relationship_invalid}")
+
+        existing = await self.list_bindings_with_triggers_for_module(module_id)
+        assessment_due_trigger_ids = {
+            trigger.id
+            for _, trigger in existing
+            if trigger.trigger_kind == "workflow_event"
+            and (trigger.predicate_jsonb or {}).get("spice_event_code") == "assessment_due"
+        }
+        for binding, trigger in existing:
+            if trigger.id in assessment_due_trigger_ids:
+                await self._session.delete(binding)
+
+        created: list[ModuleTriggerBinding] = []
+        for trigger_id, relationship, weight in bindings:
+            created.append(
+                await self.bind_module_to_trigger(
+                    module_id=module_id,
+                    trigger_definition_id=trigger_id,
+                    relationship=relationship,
+                    priority_weight=weight,
+                )
+            )
+        return created

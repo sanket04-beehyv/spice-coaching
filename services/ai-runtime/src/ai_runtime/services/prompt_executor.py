@@ -27,6 +27,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import InferenceImage, InferenceRequest, InferenceResponse, TokenUsage
 
 from ai_runtime.config import get_settings
@@ -35,35 +36,20 @@ from ai_runtime.providers.google import GoogleProvider
 from ai_runtime.providers.openai import OpenAIProvider
 from ai_runtime.services.embedding_vector import align_embedding_dimension
 from ai_runtime.services.response_parser import extract_json
+from ai_runtime.services.transient_errors import is_transient_provider_error
 
 logger = logging.getLogger(__name__)
 
 
-# Tokens that mark an exception as PERMANENT — retrying won't help.
-# Anything else is treated as transient (timeouts, 5xx, connection drops, and
-# 429 RESOURCE_EXHAUSTED quota responses).
-#
-# RESOURCE_EXHAUSTED was previously listed as permanent on the reasoning that
-# "retrying inside the same minute won't help" — true, but the right answer is
-# to wait long enough to span the quota window, not to give up. Per-minute
-# quotas refill at the start of the next minute, so a 60-90s total backoff
-# budget reliably clears them. The Stage 1 vision_failed cluster on the SK
-# manual was 24% of pages because every 429 was being treated as permanent.
-_PERMANENT_ERROR_MARKERS = (
-    "INVALID_ARGUMENT",
-    "PERMISSION_DENIED",
-    "UNAUTHENTICATED",
-    "NOT_FOUND",
-    "FAILED_PRECONDITION",
-    " 400 ",
-    " 401 ",
-    " 403 ",
-    " 404 ",
-    "code': 400",
-    "code': 401",
-    "code': 403",
-    "code': 404",
+# Generation types whose JSON output may be a top-level array (OpenAI json_object
+# mode only allows objects, so these use unconstrained JSON prompting).
+_JSON_ARRAY_GENERATION_TYPES = frozenset(
+    {
+        GenerationType.MODULE_IDENTIFICATION,
+        GenerationType.DISTRACTOR_CRITIQUE,
+    }
 )
+
 # Backoffs span past the typical 60s per-minute quota refill window. With
 # the previous (2.0, 5.0, 10.0) totalling 17s, retries were guaranteed to
 # hit the same exhausted bucket. (10.0, 30.0, 60.0) → 100s total, with
@@ -72,11 +58,14 @@ _RETRY_BACKOFFS_S = (10.0, 30.0, 60.0)
 
 
 def _is_transient(exc: Exception) -> bool:
-    """Heuristic: treat connection / timeout / 5xx errors as transient. We err
-    on the side of retrying — if we mis-classify a permanent error as
-    transient we just waste a few seconds before returning it."""
-    msg = str(exc) or type(exc).__name__
-    return not any(m in msg for m in _PERMANENT_ERROR_MARKERS)
+    """Backward-compatible alias for tests and legacy imports."""
+    return is_transient_provider_error(exc)
+
+
+def _json_root_for_generation(generation_type: GenerationType) -> str:
+    if generation_type in _JSON_ARRAY_GENERATION_TYPES:
+        return "any"
+    return "object"
 
 
 async def _call_with_transient_retry(
@@ -129,9 +118,9 @@ def _build_provider(provider_name: str) -> BaseProvider:
         service_account_info = None
         if settings.google_service_account_base64:
             try:
-                decoded = base64.b64decode(settings.google_service_account_base64.get_secret_value()).decode(
-                    "utf-8"
-                )
+                decoded = base64.b64decode(
+                    settings.google_service_account_base64.get_secret_value()
+                ).decode("utf-8")
                 service_account_info = json.loads(decoded)
             except Exception as exc:
                 logger.error("Failed to decode google_service_account_base64: %s", exc)
@@ -258,6 +247,7 @@ class PromptExecutor:
                     temperature=temperature,
                     images=provider_images or None,
                     output_format=request.constraints.output_format,
+                    json_root=_json_root_for_generation(request.generation_type),
                 ),
             )
         except Exception as exc:

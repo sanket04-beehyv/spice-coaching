@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -18,10 +19,19 @@ def _test_chw_id() -> int:
     return uuid4().int % (10**15) + 1
 
 
+@pytest.fixture(autouse=True)
+def _gap_state_telemetry_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing worker tests target behavioural-gap telemetry mode."""
+    monkeypatch.setattr(
+        module_completion_worker.get_settings(),
+        "telemetry_behavioural_gap_state_enabled",
+        True,
+    )
+
+
 @pytest.fixture
 def patch_session_local(db_session: AsyncSession):
     """Make module_completion_worker.SessionLocal yield our test session."""
-    from contextlib import asynccontextmanager
 
     @asynccontextmanager
     async def _factory():
@@ -55,7 +65,7 @@ async def _make_module(
         version=version,
         lifecycle_status="published",
         module_type="refresher",
-        title_bn="মডিউল",
+        title_localized={"bn": "মডিউল"},
         domain="hypertension",
         estimated_minutes=5,
         difficulty_level="basic",
@@ -93,9 +103,9 @@ async def _add_quiz_questions(
             question_order=idx + 1,
             question_family_id=uuid4(),
             question_version=1,
-            question_bn="q",
+            question_localized={"bn": "q"},
             question_type="single_select",
-            options_bn=["a", "b"],
+            options_localized={"bn": ["a", "b"]},
             correct_indices=[0],
         )
         session.add(q)

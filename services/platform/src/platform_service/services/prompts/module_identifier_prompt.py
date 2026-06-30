@@ -25,17 +25,46 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from mc_foundation.locale import get_locale_metadata, locale_display_name
+
+from platform_service.config import get_settings
 from platform_service.services.prompt_id_codec import PromptIdCodec
+from platform_service.services.prompts.symbol_verbalization import render_locale_map_field_schema
 
 MODULE_IDENTIFIER_TEMPLATE_ID = "v33-stage-c-module-identifier"
 # v6: content_domain replaces authority_kind; added clinical_with_app_action branch.
-# v7: add bilingual module descriptions (description_en/description_bn).
-MODULE_IDENTIFIER_TEMPLATE_VERSION = 7
+# v7: add bilingual module descriptions (locale-keyed description map).
+# v8: optional admin ingestion steering guidance (USER_INGESTION_GUIDANCE).
+# v9: ingestion guidance is a hard scope filter; per-candidate
+#     ingestion_instruction_rationale when guidance is present.
+# v10: ingestion guidance + rationale field only when USER_INGESTION_GUIDANCE
+#      is present — restores dev/v7-equivalent prompts for normal ingests.
+# v12: monolingual deployment — primary locale only.
+MODULE_IDENTIFIER_TEMPLATE_VERSION = 12
 
+_INGESTION_GUIDANCE_SYSTEM_SECTION = """\
+INGESTION GUIDANCE MODE (USER_INGESTION_GUIDANCE is present in the human message):
+- Treat it as a HARD scope filter for module selection — NOT as a title tweak
+  or soft preference. Only emit candidates whose topic is directly requested or
+  clearly implied by the guidance AND grounded in cited corpus blocks.
+- If no corpus-grounded topics satisfy the guidance, return
+  {{"candidates": []}}. Do NOT fall back to general corpus modules.
+- Guidance MUST NOT override: DO NOT invent topics, annexure exclusion, grouping
+  rules, citation token format, or content-domain branching.
+- For EACH emitted candidate, populate ingestion_instruction_rationale with
+  1-3 sentences explaining which part of the guidance the candidate satisfies
+  and how the cited corpus supports it.
+"""
 
-SYSTEM_PROMPT = """\
+_INGESTION_RATIONALE_JSON_FIELD = (
+    '  "ingestion_instruction_rationale": "string — 1-3 sentences explaining '
+    "which part of the guidance this candidate satisfies and how the cited "
+    'corpus supports it",\n'
+)
+
+_SYSTEM_PROMPT_BASE = """\
 You are drafting BEHAVIOURAL TOPIC modules for community health workers (CHWs)
-in rural Bangladesh.
+in {deployment_region_context}.
 
 A module covers ONE actionable behavioural topic the CHW must internalise correctly. Examples:
 - "Correct ANC referral by risk category"
@@ -72,9 +101,8 @@ GROUPING RULES — do NOT over-fragment, do NOT under-emit:
    reference tables (e.g. "Healthcare Services by Facility Level") are
    JOB AIDS — the CHW fills them out or looks at them on the job, not
    topics they internalise through training. Detection cues:
-   - Page or section heading begins with "Annexure", "Appendix",
-     "अनुलग्नक", "পরিশিষ্ট", "layXud" (legacy Hindi-Bijoy mojibake of
-     अनुलग्नक), or similar.
+   - Page or section heading begins with {annexure_terms}
+     or similar.
    - Content is dominated by blank fields, tick-box rows, signature
      lines, or columnar reference data the user fills in or looks up.
    The training-content equivalent (e.g. "How to fill the NCD reporting
@@ -83,6 +111,7 @@ GROUPING RULES — do NOT over-fragment, do NOT under-emit:
 
 DO NOT invent topics. Only group and label content present in the source corpus.
 
+{ingestion_guidance_section}
 You are receiving:
 1. Document outline — section structure with page ranges
 2. Already-published modules — DO NOT duplicate
@@ -106,10 +135,9 @@ expand the tokens. Copy them character-for-character.
 
 For EACH candidate module, return a JSON object with these fields:
 {{
-  "proposed_title": "string — short topic title (e.g. 'Correct ANC Referral by Risk Category')",
+  "proposed_title": "string — short topic title in the deployment primary locale",
   "scope_summary": "string — one paragraph, ~3-5 sentences",
-  "description_en": "string — one paragraph, ~2-4 sentences (English)",
-  "description_bn": "string — one paragraph, ~2-4 sentences (Bangla)",
+{description_field_schema}
   "source_provenance": [
     {{
       "source_document_id": "short token like 'd1' (NOT a UUID)",
@@ -122,7 +150,7 @@ For EACH candidate module, return a JSON object with these fields:
   "estimated_quiz_count": integer (3-10),
   "proposed_module_type": "refresher" | "content_update" | "digital_proficiency" | "initial_training",
   "clinical_review_notes": "string — what the reviewer should validate",
-  {content_update_fields}
+{ingestion_rationale_field}  {content_update_fields}
 }}
 
 Return STRICT JSON. The output must be a single JSON object with this top-level shape:
@@ -186,6 +214,17 @@ _CONTENT_UPDATE_FIELDS = """\
   "rationale_summary": "string or null — why it changed (content_update only)\""""
 
 
+def _annexure_terms_phrase(primary_locale: str) -> str:
+    terms: list[str] = []
+    for term in get_locale_metadata(primary_locale).annexure_terms:
+        if term not in terms:
+            terms.append(term)
+    if not terms:
+        return '"Annexure", "Appendix", or similar'
+    quoted = ", ".join(f'"{term}"' for term in terms)
+    return f"{quoted}, or similar"
+
+
 def _branch_instructions_for(content_domains: set[str]) -> str:
     """Pick the correct branch text for the workspace's content-domain mix."""
     if not content_domains:
@@ -201,11 +240,42 @@ def _branch_instructions_for(content_domains: set[str]) -> str:
     return _BRANCH_CLINICAL
 
 
-def render_system_prompt(content_domains: set[str]) -> str:
+def render_system_prompt(
+    content_domains: set[str],
+    *,
+    ingestion_instructions: str | None = None,
+    deployment_primary_locale: str | None = None,
+    deployment_region_context: str | None = None,
+) -> str:
     """Render the system prompt with the content-domain-specific branch."""
-    return SYSTEM_PROMPT.format(
+    settings = get_settings()
+    primary_locale = deployment_primary_locale or settings.deployment_primary_locale
+    region_context = deployment_region_context or settings.deployment_region_context
+
+    if ingestion_instructions:
+        ingestion_guidance_section = _INGESTION_GUIDANCE_SYSTEM_SECTION
+        ingestion_rationale_field = _INGESTION_RATIONALE_JSON_FIELD
+    else:
+        ingestion_guidance_section = ""
+        ingestion_rationale_field = ""
+
+    primary_label = locale_display_name(primary_locale)
+    description_desc = f"one paragraph, ~2-4 sentences ({primary_label})"
+    description_field_schema = render_locale_map_field_schema(
+        "description",
+        primary_locale=primary_locale,
+        description=description_desc,
+        primary_required=True,
+    )
+
+    return _SYSTEM_PROMPT_BASE.format(
+        deployment_region_context=region_context,
+        annexure_terms=_annexure_terms_phrase(primary_locale),
+        ingestion_guidance_section=ingestion_guidance_section,
         content_domain_branch_instructions=_branch_instructions_for(content_domains),
+        ingestion_rationale_field=ingestion_rationale_field,
         content_update_fields=_CONTENT_UPDATE_FIELDS,
+        description_field_schema=description_field_schema,
     )
 
 
@@ -215,6 +285,7 @@ def render_human_message(
     document_outlines: list[dict[str, Any]],
     page_corpus: list[dict[str, Any]],
     codec: PromptIdCodec,
+    ingestion_instructions: str | None = None,
 ) -> str:
     """Render the human-message payload.
 
@@ -234,6 +305,12 @@ def render_human_message(
         "document_outlines": document_outlines,
     }
     body_lines = ["## CORPUS ##"]
+    if codec.page_count == 1:
+        body_lines.append(
+            "\nNOTE: This corpus has exactly ONE page. The only valid source_page_id "
+            "token is p1 — do NOT use page_number values or block indices as page "
+            "tokens. Cite content blocks with b{n} tokens from the corpus headers."
+        )
     for doc in page_corpus:
         body_lines.append(
             f"\n### source_document_id={codec.doc_token(doc['source_document_id'])} "
@@ -255,10 +332,18 @@ def render_human_message(
         "document_outlines_repeat": document_outlines,
     }
 
-    return (
+    message = (
         json.dumps(head, ensure_ascii=False, indent=2)
         + "\n\n"
         + "\n".join(body_lines)
         + "\n\n"
         + json.dumps(tail, ensure_ascii=False, indent=2)
     )
+    if ingestion_instructions:
+        message += (
+            "\n\n## USER_INGESTION_GUIDANCE ##\n"
+            "<<<BEGIN_ADMIN_STEERING>>>\n"
+            f"{ingestion_instructions}\n"
+            "<<<END_ADMIN_STEERING>>>"
+        )
+    return message

@@ -42,10 +42,8 @@ class Module(Base):
     module_family_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
-    title_en: Mapped[str | None] = mapped_column(Text, nullable=True)
-    title_bn: Mapped[str] = mapped_column(Text, nullable=False)
-    description_en: Mapped[str | None] = mapped_column(Text, nullable=True)
-    description_bn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title_localized: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False)
+    description_localized: Mapped[dict[str, str] | None] = mapped_column(JSONB, nullable=True)
 
     domain: Mapped[str] = mapped_column(Text, nullable=False)
     sub_domain: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -73,10 +71,8 @@ class Module(Base):
     urgent_publish: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # ── module content (cards inline; no per-card tables) ───────────
-    # Shape: {"cards": [{"title_bn": ..., "title_en": ..., "body_bn": ...,
-    # "body_en": ..., "next_action_bn": ..., "next_action_en": ...,
-    # "source_block_ids": [...], ...}, ...]}. Keys mirror the legacy
-    # module_card fields so the drafter prompt schema is unchanged.
+    # Shape: {"cards": [{"title": {"bn": ...}, "body": {"bn": ...}, ...}, ...]}.
+    # Locale keys match deployment_primary_locale.
     module_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     # Per-module embedding vector. The migration defines it as vector(N)
@@ -103,6 +99,13 @@ class Module(Base):
     # uses `IS NULL` to distinguish "no flags set" from "explicit empty
     # flag set", so the storage representation has to match.
     quality_flags_jsonb: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
+
+    # LLM-generated bilingual keywords, search phrases, and topic tags for
+    # lexical retrieval (BM25 eval) and embedding enrichment. Written by the
+    # post-publish search_metadata worker after card drafting.
+    search_metadata_jsonb: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB(none_as_null=True), nullable=True
     )
 

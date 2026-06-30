@@ -56,8 +56,8 @@ class TestValidateModuleAttachments:
             "attachments": [_file_ref(attachment_id=aid)],
             "cards": [
                 {
-                    "title_bn": "C",
-                    "body_bn": "B",
+                    "title": {"bn": "C"},
+                    "body": {"bn": "B"},
                     "card_family_id": str(uuid4()),
                     "attachments": [_file_ref()],
                 }

@@ -6,10 +6,13 @@ candidate. Tests pin both the heuristic logic AND the contract that
 callers can use the result without it mutating their inputs.
 """
 
+import copy
+from dataclasses import FrozenInstanceError
 from uuid import uuid4
 
 import pytest
-from platform_service.services.insufficient_source_filter import evaluate_candidate
+from platform_service.config import get_settings
+from platform_service.services.insufficient_source_filter import FilterDecision, evaluate_candidate
 
 
 def _provenance(source_doc_id, source_page_id, *block_ids):
@@ -120,8 +123,6 @@ class TestShallowOutlineFallback:
         outline_section_count > 0 AND outline_section_count < min_headings.
         With default min_headings=1 the elif is unreachable, so bump
         min_headings to 3 to exercise the shallow-outline branch."""
-        from platform_service.config import get_settings
-
         monkeypatch.setattr(get_settings(), "stage_c_insufficient_source_min_headings", 3)
 
         b1 = uuid4()
@@ -217,8 +218,6 @@ class TestInputMutationSafety:
     or subsequent candidates would see corrupted state."""
 
     def test_evaluate_does_not_mutate_provenance(self) -> None:
-        import copy
-
         b1 = uuid4()
         provenance = _provenance(uuid4(), uuid4(), b1)
         snapshot = copy.deepcopy(provenance)
@@ -260,10 +259,6 @@ class TestInputMutationSafety:
 def test_filter_decision_is_frozen() -> None:
     """`FilterDecision` is a `@dataclass(frozen=True)` so callers can't
     accidentally mutate fail_reasons after the fact."""
-    from dataclasses import FrozenInstanceError
-
-    from platform_service.services.insufficient_source_filter import FilterDecision
-
     decision = FilterDecision(accepted=True, total_tokens=0, distinct_headings=0, fail_reasons=())
     with pytest.raises(FrozenInstanceError):
         decision.accepted = False  # type: ignore[misc]

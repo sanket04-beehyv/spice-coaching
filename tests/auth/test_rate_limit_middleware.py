@@ -55,7 +55,11 @@ async def rate_limit_client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[As
 @pytest.mark.asyncio
 async def test_rate_limit_blocks_after_threshold(rate_limit_client: AsyncClient) -> None:
     headers = {"Authorization": "Bearer test"}
-    assert (await rate_limit_client.post(f"{API_ROOT}/coaching/rag-query", headers=headers)).status_code == 200
-    assert (await rate_limit_client.post(f"{API_ROOT}/coaching/rag-query", headers=headers)).status_code == 200
+    assert (
+        await rate_limit_client.post(f"{API_ROOT}/coaching/rag-query", headers=headers)
+    ).status_code == 200
+    assert (
+        await rate_limit_client.post(f"{API_ROOT}/coaching/rag-query", headers=headers)
+    ).status_code == 200
     resp = await rate_limit_client.post(f"{API_ROOT}/coaching/rag-query", headers=headers)
     assert resp.status_code == 429

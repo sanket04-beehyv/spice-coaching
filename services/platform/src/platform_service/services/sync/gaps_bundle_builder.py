@@ -10,10 +10,12 @@ from mc_contracts.sync import (
     CHWBehaviouralGapStateSyncPayload,
     CHWModuleCompletionSyncPayload,
     CHWModulePartialCompletionSyncPayload,
+    CHWQuizQuestionStateSyncPayload,
     GapsSyncBundle,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from platform_service.config import get_settings
 from platform_service.db.repositories.behavioural_gap_repository import BehaviouralGapRepository
 from platform_service.db.repositories.chw_sync_repository import CHWSyncRepository
 from platform_service.db.repositories.module_completion_repository import ModuleCompletionRepository
@@ -52,6 +54,7 @@ class GapsBundleBuilder:
             return GapsSyncBundle(
                 behavioural_gaps=gap_payloads,
                 chw_behavioural_gap_states=[],
+                chw_quiz_question_states=[],
                 chw_module_completions=[],
                 chw_module_partial_completions=[],
                 server_time_utc=datetime.now(UTC).isoformat(),
@@ -59,25 +62,48 @@ class GapsBundleBuilder:
             )
 
         chw_sync_repo = CHWSyncRepository(self._session)
-        states = await chw_sync_repo.list_gap_states_for_chw(chw_id=chw_id, since=since)
-        state_payloads = [
-            CHWBehaviouralGapStateSyncPayload(
-                chw_id=state.chw_id,
-                behavioural_gap_id=state.behavioural_gap_id,
-                tenant_id=state.tenant_id,
-                severity_current=state.severity_current,
-                first_observed_at=state.first_observed_at,
-                last_observed_at=state.last_observed_at,
-                last_reinforced_at=state.last_reinforced_at,
-                occurrence_count=state.occurrence_count,
-                failed_attempts_count=state.failed_attempts_count,
-                last_failed_attempt_at=state.last_failed_attempt_at,
-                escalated_to_supervisor=state.escalated_to_supervisor,
-                status=state.status,
-                updated_at=state.updated_at,
-            )
-            for state in states
-        ]
+        gap_state_enabled = get_settings().telemetry_behavioural_gap_state_enabled
+
+        if gap_state_enabled:
+            states = await chw_sync_repo.list_gap_states_for_chw(chw_id=chw_id, since=since)
+            state_payloads = [
+                CHWBehaviouralGapStateSyncPayload(
+                    chw_id=state.chw_id,
+                    behavioural_gap_id=state.behavioural_gap_id,
+                    tenant_id=state.tenant_id,
+                    severity_current=state.severity_current,
+                    first_observed_at=state.first_observed_at,
+                    last_observed_at=state.last_observed_at,
+                    last_reinforced_at=state.last_reinforced_at,
+                    occurrence_count=state.occurrence_count,
+                    failed_attempts_count=state.failed_attempts_count,
+                    last_failed_attempt_at=state.last_failed_attempt_at,
+                    escalated_to_supervisor=state.escalated_to_supervisor,
+                    status=state.status,
+                    updated_at=state.updated_at,
+                )
+                for state in states
+            ]
+            quiz_state_payloads: list[CHWQuizQuestionStateSyncPayload] = []
+        else:
+            state_payloads = []
+            quiz_rows = await chw_sync_repo.list_quiz_question_states_for_chw(chw_id=chw_id, since=since)
+            quiz_state_payloads = [
+                CHWQuizQuestionStateSyncPayload(
+                    chw_id=row.chw_id,
+                    quiz_id=row.quiz_id,
+                    module_id=row.module_id,
+                    tenant_id=row.tenant_id,
+                    failed_attempts_count=row.failed_attempts_count,
+                    last_failed_attempt_at=row.last_failed_attempt_at,
+                    first_attempt_at=row.first_attempt_at,
+                    last_attempt_at=row.last_attempt_at,
+                    escalated_to_supervisor=row.escalated_to_supervisor,
+                    status=row.status,
+                    updated_at=row.updated_at,
+                )
+                for row in quiz_rows
+            ]
 
         comps = await ModuleCompletionRepository(self._session).list_for_chw_updated_since(
             chw_id=chw_id,
@@ -109,6 +135,7 @@ class GapsBundleBuilder:
         return GapsSyncBundle(
             behavioural_gaps=gap_payloads,
             chw_behavioural_gap_states=state_payloads,
+            chw_quiz_question_states=quiz_state_payloads,
             chw_module_completions=comp_payloads,
             chw_module_partial_completions=partial_payloads,
             server_time_utc=datetime.now(UTC).isoformat(),

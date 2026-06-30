@@ -18,9 +18,10 @@ from platform_service.workers.extractors.stage_a_vision_recovery import (
     run_vision_recovery_pass,
 )
 from platform_service.workers.extractors.text_extractor import ExtractedPage
+from platform_service.workers.stage_a_types import StageAResult
 
 if TYPE_CHECKING:
-    from platform_service.workers.stage_a_extract import StageAExtractor, StageAResult
+    from platform_service.workers.stage_a_extract import StageAExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -154,8 +155,6 @@ async def run_document_path(
         section_count,
         method_counts,
     )
-
-    from platform_service.workers.stage_a_extract import StageAResult
 
     return StageAResult(
         source_document_id=source_document_id,

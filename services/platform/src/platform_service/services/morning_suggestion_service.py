@@ -52,6 +52,7 @@ class MorningSuggestionService:
                     module_family_id=i.module_family_id,
                     source=i.source,
                     behavioural_gap_id=i.behavioural_gap_id,
+                    quiz_id=i.quiz_id,
                 )
                 for i in items
             ],

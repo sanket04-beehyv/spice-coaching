@@ -6,15 +6,21 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
+import platform_service.celery_tasks as celery_tasks
 import pytest
 from asyncpg import Range
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from platform_service.config import get_settings
+from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.content_block import ContentBlock
+from platform_service.db.models.module import Module
+from platform_service.db.models.module_behavioural_gap import ModuleBehaviouralGap
+from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
 from platform_service.db.models.source_page import SourcePage
 from platform_service.deps import get_object_storage_client
+from platform_service.integrations import ai_runtime_client as arc
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,14 +32,26 @@ from tests.api.conftest import (
     _unit_basis_vector,
 )
 from tests.conftest import platform_path, requires_db
+from tests.localized_helpers import loc, loc_options, primary_from_response
 
 pytestmark = [requires_db, pytest.mark.asyncio]
+
+_SAMPLE_SEARCH_METADATA = {
+    "schema_version": 1,
+    "keywords": {"en": ["cough"], "bn": []},
+    "search_phrases": {"en": ["child cough"], "bn": []},
+    "synonyms": {"en": {}},
+    "topic_tags": ["respiratory"],
+    "clinical_conditions": [],
+    "audience": "chw",
+    "rationale": "",
+}
 
 
 class TestListModules:
     async def test_returns_summaries(self, client: AsyncClient, db_session: AsyncSession) -> None:
-        await _seed_module(db_session, title_bn="Module A")
-        await _seed_module(db_session, title_bn="Module B")
+        await _seed_module(db_session, title_localized={"bn": "Module A"})
+        await _seed_module(db_session, title_localized={"bn": "Module B"})
 
         resp = await client.get(platform_path("/admin/modules"))
         assert resp.status_code == 200
@@ -43,70 +61,92 @@ class TestListModules:
         # Summary shape: must NOT include cards or quiz (those are detail-only).
         assert "cards" not in sample
         assert "quiz" not in sample
-        assert {"id", "title_bn", "card_count", "lifecycle_status", "clinically_reviewed"} <= set(sample)
+        assert {"id", "title", "card_count", "lifecycle_status", "clinically_reviewed"} <= set(sample)
+
+    async def test_search_metadata_null_when_unset(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _seed_module(db_session)
+        resp = await client.get(platform_path("/admin/modules"))
+        assert resp.json()[0]["search_metadata"] is None
+
+    async def test_search_metadata_round_trips_when_set(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _seed_module(db_session, search_metadata_jsonb=_SAMPLE_SEARCH_METADATA)
+        resp = await client.get(platform_path("/admin/modules"))
+        assert resp.json()[0]["search_metadata"] == _SAMPLE_SEARCH_METADATA
 
     async def test_card_count_reflects_module_json(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         await _seed_module(
             db_session,
-            module_json={"cards": [{"title_bn": "1"}, {"title_bn": "2"}, {"title_bn": "3"}]},
+            module_json={
+                "cards": [
+                    {"title": {"bn": "1"}},
+                    {"title": {"bn": "2"}},
+                    {"title": {"bn": "3"}},
+                ]
+            },
         )
         resp = await client.get(platform_path("/admin/modules"))
         assert resp.json()[0]["card_count"] == 3
 
     async def test_status_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
-        await _seed_module(db_session, title_bn="live")
-        await _seed_module(db_session, title_bn="gone", lifecycle_status="retired", set_family_pointer=False)
+        await _seed_module(db_session, title_localized={"bn": "live"})
+        await _seed_module(
+            db_session, title_localized={"bn": "gone"}, lifecycle_status="retired", set_family_pointer=False
+        )
 
         # Default excludes retired.
         default_resp = await client.get(platform_path("/admin/modules"))
-        titles = {m["title_bn"] for m in default_resp.json()}
+        titles = {primary_from_response(m) for m in default_resp.json()}
         assert "live" in titles and "gone" not in titles
 
         # Explicit retired filter shows only retired.
         retired_resp = await client.get(platform_path("/admin/modules?status=retired"))
-        titles = {m["title_bn"] for m in retired_resp.json()}
+        titles = {primary_from_response(m) for m in retired_resp.json()}
         assert titles == {"gone"}
 
     async def test_clinically_reviewed_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
-        await _seed_module(db_session, title_bn="reviewed", clinically_reviewed=True)
-        await _seed_module(db_session, title_bn="pending", clinically_reviewed=False)
+        await _seed_module(db_session, title_localized={"bn": "reviewed"}, clinically_reviewed=True)
+        await _seed_module(db_session, title_localized={"bn": "pending"}, clinically_reviewed=False)
 
         resp = await client.get(platform_path("/admin/modules?clinically_reviewed=true"))
-        titles = {m["title_bn"] for m in resp.json()}
+        titles = {primary_from_response(m) for m in resp.json()}
         assert titles == {"reviewed"}
 
         resp = await client.get(platform_path("/admin/modules?clinically_reviewed=false"))
-        titles = {m["title_bn"] for m in resp.json()}
+        titles = {primary_from_response(m) for m in resp.json()}
         assert titles == {"pending"}
 
     async def test_full_text_query_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
-        await _seed_module(db_session, title_bn="Pregnancy referral")
-        await _seed_module(db_session, title_bn="Diabetes screening")
+        await _seed_module(db_session, title_localized={"bn": "Pregnancy referral"})
+        await _seed_module(db_session, title_localized={"bn": "Diabetes screening"})
 
         resp = await client.get(platform_path("/admin/modules?q=referral"))
-        titles = {m["title_bn"] for m in resp.json()}
+        titles = {primary_from_response(m) for m in resp.json()}
         assert titles == {"Pregnancy referral"}
 
     async def test_has_visibility_window_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
         now = datetime.now(UTC)
         await _seed_module(
             db_session,
-            title_bn="windowed",
+            title_localized={"bn": "windowed"},
             visibility_window=Range(now, now + timedelta(days=7), lower_inc=True, upper_inc=False),
         )
-        await _seed_module(db_session, title_bn="no-window")
+        await _seed_module(db_session, title_localized={"bn": "no-window"})
 
         resp = await client.get(platform_path("/admin/modules?has_visibility_window=true"))
-        assert {m["title_bn"] for m in resp.json()} == {"windowed"}
+        assert {primary_from_response(m) for m in resp.json()} == {"windowed"}
 
         resp = await client.get(platform_path("/admin/modules?has_visibility_window=false"))
-        assert {m["title_bn"] for m in resp.json()} == {"no-window"}
+        assert {primary_from_response(m) for m in resp.json()} == {"no-window"}
 
     async def test_pagination_limit_offset(self, client: AsyncClient, db_session: AsyncSession) -> None:
         for i in range(5):
-            await _seed_module(db_session, title_bn=f"m{i}")
+            await _seed_module(db_session, title_localized={"bn": f"m{i}"})
 
         resp = await client.get(platform_path("/admin/modules?limit=2&offset=0"))
         assert len(resp.json()) == 2
@@ -129,29 +169,29 @@ class TestListModules:
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         flags = {"flags": ["insufficient_tokens"]}
-        await _seed_module(db_session, title_bn="flagged", quality_flags_jsonb=flags)
-        await _seed_module(db_session, title_bn="clean", quality_flags_jsonb=None)
+        await _seed_module(db_session, title_localized={"bn": "flagged"}, quality_flags_jsonb=flags)
+        await _seed_module(db_session, title_localized={"bn": "clean"}, quality_flags_jsonb=None)
 
         resp = await client.get(platform_path("/admin/modules"))
-        rows = {m["title_bn"]: m for m in resp.json()}
+        rows = {primary_from_response(m): m for m in resp.json()}
         assert rows["flagged"]["quality_flags"] == flags
         assert rows["clean"]["quality_flags"] is None
 
     async def test_has_quality_flags_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
         await _seed_module(
             db_session,
-            title_bn="flagged",
+            title_localized={"bn": "flagged"},
             quality_flags_jsonb={"flags": ["insufficient_tokens"]},
         )
-        await _seed_module(db_session, title_bn="clean-null", quality_flags_jsonb=None)
+        await _seed_module(db_session, title_localized={"bn": "clean-null"}, quality_flags_jsonb=None)
         # Empty dict should be treated as "no flags".
-        await _seed_module(db_session, title_bn="clean-empty", quality_flags_jsonb={})
+        await _seed_module(db_session, title_localized={"bn": "clean-empty"}, quality_flags_jsonb={})
 
         resp = await client.get(platform_path("/admin/modules?has_quality_flags=true"))
-        assert {m["title_bn"] for m in resp.json()} == {"flagged"}
+        assert {primary_from_response(m) for m in resp.json()} == {"flagged"}
 
         resp = await client.get(platform_path("/admin/modules?has_quality_flags=false"))
-        assert {m["title_bn"] for m in resp.json()} == {"clean-null", "clean-empty"}
+        assert {primary_from_response(m) for m in resp.json()} == {"clean-null", "clean-empty"}
 
 
 # ─── GET /admin/modules/{id} ───────────────────────────────────────────────
@@ -161,22 +201,30 @@ class TestGetModuleDetail:
     async def test_returns_full_payload(self, client: AsyncClient, db_session: AsyncSession) -> None:
         m = await _seed_module(
             db_session,
-            module_json={"cards": [{"title_bn": "C1", "body_bn": "B1"}]},
+            module_json={"cards": [{"title": {"bn": "C1"}, "body": {"bn": "B1"}}]},
         )
 
         resp = await client.get(platform_path(f"/admin/modules/{m.id}"))
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == str(m.id)
-        assert data["title_bn"] == "Sample"
+        assert data["title"]["bn"] == "Sample"
         assert isinstance(data["cards"], list)
         assert isinstance(data["quiz"], list)
-        assert data["cards"][0]["title_bn"] == "C1"
+        assert data["cards"][0]["title"]["bn"] == "C1"
         assert data["cards"][0]["source_pages"] == []
         # Detail-only fields are present.
         assert "difficulty_level" in data
         assert "pass_threshold_override" in data
         assert data["source_documents"] == []
+
+    async def test_search_metadata_round_trips_when_set(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        m = await _seed_module(db_session, search_metadata_jsonb=_SAMPLE_SEARCH_METADATA)
+        resp = await client.get(platform_path(f"/admin/modules/{m.id}"))
+        assert resp.status_code == 200
+        assert resp.json()["search_metadata"] == _SAMPLE_SEARCH_METADATA
 
     async def test_cards_include_source_pages_from_block_ids(
         self, client: AsyncClient, db_session: AsyncSession
@@ -207,8 +255,8 @@ class TestGetModuleDetail:
                 "cards": [
                     {
                         "id": "card-0",
-                        "title_bn": "C1",
-                        "body_bn": "B1",
+                        "title": {"bn": "C1"},
+                        "body": {"bn": "B1"},
                         "source_block_ids": [str(block.id)],
                     }
                 ]
@@ -285,8 +333,8 @@ class TestGetModuleDetail:
                     question_order=order,
                     question_family_id=uuid4(),
                     question_version=1,
-                    question_bn=f"Q{order}",
-                    options_bn=["a", "b", "c", "d"],
+                    question_localized={"bn": f"Q{order}"},
+                    options_localized={"bn": ["a", "b", "c", "d"]},
                     correct_indices=[0],
                 )
             )
@@ -340,17 +388,21 @@ class TestCreateModule:
         resp = await client.post(
             platform_path("/admin/modules"),
             json={
-                "title_bn": "নতুন মডিউল",
-                "title_en": "New Manual Module",
-                "description_en": "Manual desc",
+                "title": loc("নতুন মডিউল"),
+                "description": loc("Manual desc"),
                 "domain": "clinical",
                 "module_json": {
-                    "cards": [{"title_bn": "C1", "title_en": "Card 1", "body_bn": "B1", "body_en": "Body 1"}]
+                    "cards": [
+                        {
+                            "title": loc("C1"),
+                            "body": loc("B1"),
+                        }
+                    ]
                 },
                 "quiz": [
                     {
-                        "question_bn": "Q1 Bangla",
-                        "options_bn": ["A", "B"],
+                        "question": loc("Q1 Bangla"),
+                        "options": loc_options(["A", "B"]),
                         "correct_indices": [0],
                     }
                 ],
@@ -365,13 +417,6 @@ class TestCreateModule:
         new_id = UUID(body["id"])
 
         # Verify created entities in DB
-        from platform_service.db.models.behavioural_gap import BehaviouralGap
-        from platform_service.db.models.module import Module
-        from platform_service.db.models.module_behavioural_gap import ModuleBehaviouralGap
-        from platform_service.db.models.module_family import ModuleFamily
-        from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
-        from sqlalchemy import select
-
         # Module family
         family = (
             await db_session.execute(
@@ -384,8 +429,8 @@ class TestCreateModule:
         # Module
         module = (await db_session.execute(select(Module).where(Module.id == new_id))).scalar_one_or_none()
         assert module is not None
-        assert module.title_bn == "নতুন মডিউল"
-        assert module.title_en == "New Manual Module"
+        assert module.title_localized["bn"] == "নতুন মডিউল"
+        assert module.title_localized["en"] == "New Manual Module"
         assert module.lifecycle_status == "draft"
         assert module.clinically_reviewed is False
 
@@ -400,7 +445,7 @@ class TestCreateModule:
             .all()
         )
         assert len(questions) == 1
-        assert questions[0].question_bn == "Q1 Bangla"
+        assert questions[0].question_localized["bn"] == "Q1 Bangla"
         assert questions[0].question_version == 1
 
         # Primary gap auto-creation
@@ -427,10 +472,6 @@ class TestCreateModule:
     async def test_creates_manual_module_uses_provided_gaps(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        from platform_service.db.models.behavioural_gap import BehaviouralGap
-        from platform_service.db.models.module import Module
-        from sqlalchemy import select
-
         # Pre-seed a behavioral gap
         gap = BehaviouralGap(
             gap_code="custom_gap_code_123",
@@ -447,8 +488,7 @@ class TestCreateModule:
         resp = await client.post(
             platform_path("/admin/modules"),
             json={
-                "title_bn": "নতুন মডিউল ২",
-                "title_en": "Manual Module 2",
+                "title": loc("নতুন মডিউল ২"),
                 "domain": "clinical",
                 "behavioural_gap_ids": [str(gap.id)],
                 "primary_gap_id": str(gap.id),
@@ -468,11 +508,11 @@ class TestCreateModule:
 
 class TestEditModule:
     async def test_creates_new_version(self, client: AsyncClient, db_session: AsyncSession) -> None:
-        v1 = await _seed_module(db_session, title_bn="v1 title")
+        v1 = await _seed_module(db_session, title_localized={"bn": "v1 title"})
 
         resp = await client.put(
             platform_path(f"/admin/modules/{v1.id}"),
-            json={"title_bn": "v2 title"},
+            json={"title": loc("v2 title")},
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -483,21 +523,21 @@ class TestEditModule:
         assert body["id"] != str(v1.id)
 
     async def test_adds_quiz_questions(self, client: AsyncClient, db_session: AsyncSession) -> None:
-        v1 = await _seed_module(db_session, title_bn="v1 title")
+        v1 = await _seed_module(db_session, title_localized={"bn": "v1 title"})
 
         resp = await client.put(
             platform_path(f"/admin/modules/{v1.id}"),
             json={
-                "title_bn": "v2 title",
+                "title": loc("v2 title"),
                 "quiz": [
                     {
-                        "question_bn": "Q1 Bangla",
-                        "options_bn": ["A", "B", "C", "D"],
+                        "question": loc("Q1 Bangla"),
+                        "options": loc_options(["A", "B", "C", "D"]),
                         "correct_indices": [0],
                     },
                     {
-                        "question_bn": "Q2 Bangla",
-                        "options_bn": ["W", "X", "Y", "Z"],
+                        "question": loc("Q2 Bangla"),
+                        "options": loc_options(["W", "X", "Y", "Z"]),
                         "correct_indices": [1],
                     },
                 ],
@@ -508,8 +548,6 @@ class TestEditModule:
         new_module_id = body["id"]
 
         # Verify questions were created
-        from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
-
         # Need to use a fresh session or refresh to see the changes committed by the endpoint
         # Wait, the endpoint commits, so we should be able to see it in db_session if we don't use cache.
         # Let's use a select statement.
@@ -519,25 +557,23 @@ class TestEditModule:
         assert len(questions) == 2
         # Order might be by id or question_order. We didn't specify question_order in request,
         # so it defaults to index (1, 2).
-        # Let's check by question_bn to be safe.
-        q_bns = {q.question_bn for q in questions}
+        # Let's check by primary locale question text to be safe.
+        q_bns = {q.question_localized["bn"] for q in questions}
         assert q_bns == {"Q1 Bangla", "Q2 Bangla"}
 
     async def test_updates_existing_quiz_question(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        v1 = await _seed_module(db_session, title_bn="v1 title")
+        v1 = await _seed_module(db_session, title_localized={"bn": "v1 title"})
 
         # Create a question for v1
-        from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
-
         q1 = ModuleQuizQuestion(
             module_id=v1.id,
             question_order=1,
             question_family_id=uuid4(),
             question_version=1,
-            question_bn="Q1 Original",
-            options_bn=["A", "B", "C", "D"],
+            question_localized={"bn": "Q1 Original"},
+            options_localized={"bn": ["A", "B", "C", "D"]},
             correct_indices=[0],
         )
         db_session.add(q1)
@@ -546,12 +582,12 @@ class TestEditModule:
         resp = await client.put(
             platform_path(f"/admin/modules/{v1.id}"),
             json={
-                "title_bn": "v2 title",
+                "title": loc("v2 title"),
                 "quiz": [
                     {
                         "id": str(q1.id),
-                        "question_bn": "Q1 Updated",
-                        "options_bn": ["A", "B", "C", "D"],
+                        "question": loc("Q1 Updated"),
+                        "options": loc_options(["A", "B", "C", "D"]),
                         "correct_indices": [0],
                     },
                 ],
@@ -567,25 +603,25 @@ class TestEditModule:
         result = await db_session.execute(stmt)
         questions = result.scalars().all()
         assert len(questions) == 1
-        assert questions[0].question_bn == "Q1 Updated"
+        assert questions[0].question_localized["bn"] == "Q1 Updated"
         assert questions[0].question_family_id == q1.question_family_id
         assert questions[0].question_version == 2
 
     async def test_adds_quiz_questions_from_module_json(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        v1 = await _seed_module(db_session, title_bn="v1 title")
+        v1 = await _seed_module(db_session, title_localized={"bn": "v1 title"})
 
         resp = await client.put(
             platform_path(f"/admin/modules/{v1.id}"),
             json={
-                "title_bn": "v2 title",
+                "title": loc("v2 title"),
                 "module_json": {
                     "cards": [],
                     "quiz": [
                         {
-                            "question_en": "Test question from json",
-                            "options_bn": ["A"],
+                            "question": loc("Test question from json"),
+                            "options": loc_options(["A"]),
                             "correct_indices": [0],
                         }
                     ],
@@ -597,25 +633,23 @@ class TestEditModule:
         new_module_id = body["id"]
 
         # Verify questions were created
-        from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
-
         stmt = select(ModuleQuizQuestion).where(ModuleQuizQuestion.module_id == UUID(new_module_id))
         result = await db_session.execute(stmt)
         questions = result.scalars().all()
         assert len(questions) == 1
-        assert questions[0].question_en == "Test question from json"
-        assert questions[0].question_bn == ""  # Fallback handled
+        assert questions[0].question_localized["en"] == "Test question from json"
+        assert questions[0].question_localized.get("bn", "") == ""
 
     async def test_returns_404_for_unknown(self, client: AsyncClient) -> None:
         resp = await client.put(
             platform_path(f"/admin/modules/{uuid4()}"),
-            json={"title_bn": "noop"},
+            json={"title": loc("noop")},
         )
         assert resp.status_code == 404
 
     async def test_returns_404_for_retired(self, client: AsyncClient, db_session: AsyncSession) -> None:
         m = await _seed_module(db_session, lifecycle_status="retired", set_family_pointer=False)
-        resp = await client.put(platform_path(f"/admin/modules/{m.id}"), json={"title_bn": "won't take"})
+        resp = await client.put(platform_path(f"/admin/modules/{m.id}"), json={"title": loc("won't take")})
         assert resp.status_code == 404
 
     async def test_put_persists_file_and_youtube_attachments(
@@ -629,8 +663,8 @@ class TestEditModule:
             module_json={
                 "cards": [
                     {
-                        "title_bn": "Card",
-                        "body_bn": "Body",
+                        "title": loc("Card"),
+                        "body": loc("Body"),
                         "card_family_id": card_family_id,
                     }
                 ]
@@ -654,8 +688,8 @@ class TestEditModule:
             ],
             "cards": [
                 {
-                    "title_bn": "Card",
-                    "body_bn": "Body",
+                    "title": loc("Card"),
+                    "body": loc("Body"),
                     "card_family_id": card_family_id,
                     "attachments": [
                         {
@@ -689,6 +723,84 @@ class TestEditModule:
         assert len(card["attachments"]) == 1
         assert card["attachments"][0]["object_name"] == "media/diagram.png"
         assert "presigned_url" not in card["attachments"][0]
+
+    async def test_put_round_trips_prosemirror_card_body(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        v1 = await _seed_module(db_session)
+        rich_body = {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": "Rich body text"}],
+                }
+            ],
+        }
+        module_json = {
+            "cards": [
+                {
+                    "title": loc("কার্ড"),
+                    "body": {"bn": rich_body, "en": rich_body},
+                }
+            ]
+        }
+        put_resp = await client.put(
+            platform_path(f"/admin/modules/{v1.id}"), json={"module_json": module_json}
+        )
+        assert put_resp.status_code == 200
+        new_id = put_resp.json()["id"]
+
+        get_resp = await client.get(platform_path(f"/admin/modules/{new_id}"))
+        assert get_resp.status_code == 200
+        card = get_resp.json()["cards"][0]
+        assert card["body"]["bn"] == rich_body
+        assert card["body"]["en"] == rich_body
+
+    async def test_put_round_trips_block_list_card_body(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        v1 = await _seed_module(db_session)
+        rich_body = [
+            {
+                "type": "paragraph",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Rich block list body",
+                        "marks": [{"type": "bold"}],
+                    }
+                ],
+            }
+        ]
+        module_json = {
+            "cards": [
+                {
+                    "title": loc("কার্ড"),
+                    "body": {"bn": rich_body, "en": rich_body},
+                }
+            ]
+        }
+        put_resp = await client.put(
+            platform_path(f"/admin/modules/{v1.id}"), json={"module_json": module_json}
+        )
+        assert put_resp.status_code == 200
+        new_id = put_resp.json()["id"]
+
+        get_resp = await client.get(platform_path(f"/admin/modules/{new_id}"))
+        assert get_resp.status_code == 200
+        card = get_resp.json()["cards"][0]
+        assert card["body"]["bn"] == rich_body
+        assert card["body"]["en"] == rich_body
+
+    async def test_put_rejects_invalid_card_body_shape(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        v1 = await _seed_module(db_session)
+        module_json = {"cards": [{"title": loc("কার্ড"), "body": {"bn": {"foo": 1}}}]}
+        resp = await client.put(platform_path(f"/admin/modules/{v1.id}"), json={"module_json": module_json})
+        assert resp.status_code == 400
+        assert resp.json()["detail"]["code"] == "invalid_card_body"
 
     async def test_put_rejects_invalid_attachment_prefix(
         self, client: AsyncClient, db_session: AsyncSession
@@ -806,7 +918,7 @@ class TestVisibilityWindowEndpoint:
 
 class TestRetireEndpoint:
     async def test_delete_retires_module(self, client: AsyncClient, db_session: AsyncSession) -> None:
-        m = await _seed_module(db_session, title_bn="bye")
+        m = await _seed_module(db_session, title_localized={"bn": "bye"})
 
         resp = await client.delete(platform_path(f"/admin/modules/{m.id}"))
         assert resp.status_code == 200
@@ -826,9 +938,9 @@ class TestSemanticSearch:
     async def test_top_k_modules_by_cosine_distance(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        a = await _seed_module(db_session, title_bn="A", embedding=_unit_basis_vector(0))
-        await _seed_module(db_session, title_bn="B", embedding=_unit_basis_vector(1))
-        await _seed_module(db_session, title_bn="C", embedding=_unit_basis_vector(2))
+        a = await _seed_module(db_session, title_localized={"bn": "A"}, embedding=_unit_basis_vector(0))
+        await _seed_module(db_session, title_localized={"bn": "B"}, embedding=_unit_basis_vector(1))
+        await _seed_module(db_session, title_localized={"bn": "C"}, embedding=_unit_basis_vector(2))
 
         resp = await client.post(
             platform_path("/admin/modules/search"),
@@ -843,8 +955,10 @@ class TestSemanticSearch:
     async def test_skips_modules_without_embedding(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        with_emb = await _seed_module(db_session, title_bn="indexed", embedding=_unit_basis_vector(0))
-        await _seed_module(db_session, title_bn="not-indexed", embedding=None)
+        with_emb = await _seed_module(
+            db_session, title_localized={"bn": "indexed"}, embedding=_unit_basis_vector(0)
+        )
+        await _seed_module(db_session, title_localized={"bn": "not-indexed"}, embedding=None)
 
         resp = await client.post(
             platform_path("/admin/modules/search"),
@@ -865,10 +979,10 @@ class TestSemanticSearch:
         embeds via ai-runtime and feeds the result into search_by_embedding.
         Mock the AIRuntimeClient.embed call to return a known vector."""
 
-        from platform_service.integrations import ai_runtime_client as arc
-
-        target = await _seed_module(db_session, title_bn="target", embedding=_unit_basis_vector(0))
-        await _seed_module(db_session, title_bn="other", embedding=_unit_basis_vector(1))
+        target = await _seed_module(
+            db_session, title_localized={"bn": "target"}, embedding=_unit_basis_vector(0)
+        )
+        await _seed_module(db_session, title_localized={"bn": "other"}, embedding=_unit_basis_vector(1))
 
         embed_mock = AsyncMock(return_value=[_unit_basis_vector(0)])
         monkeypatch.setattr(arc.AIRuntimeClient, "embed", embed_mock)
@@ -897,8 +1011,6 @@ class TestRegeneratePostPublish:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
 
-        from platform_service import celery_tasks
-
         delay_mock = MagicMock()
         monkeypatch.setattr(celery_tasks.generate_module_quiz_task, "delay", delay_mock)
 
@@ -917,8 +1029,6 @@ class TestRegeneratePostPublish:
         db_session: AsyncSession,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-
-        from platform_service import celery_tasks
 
         delay_mock = MagicMock()
         monkeypatch.setattr(celery_tasks.generate_module_embedding_task, "delay", delay_mock)

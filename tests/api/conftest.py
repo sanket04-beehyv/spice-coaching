@@ -132,11 +132,13 @@ def _mock_storage(*, presigned_url: str = _PRESIGNED_URL) -> MagicMock:
 async def _seed_source_document(
     session: AsyncSession,
     *,
+    title: str = "module-detail-presign-test",
     storage_path: str = _STORAGE_PATH,
     original_filename: str | None = "manual.pdf",
+    sync_published_visible: bool = False,
 ) -> SourceDocument:
     doc = SourceDocument(
-        title="module-detail-presign-test",
+        title=title,
         source_type="pdf",
         primary_language="bn",
         content_domain="clinical",
@@ -144,6 +146,7 @@ async def _seed_source_document(
         authority_label="BRAC",
         original_storage_path=storage_path,
         original_filename=original_filename,
+        sync_published_visible=sync_published_visible,
     )
     session.add(doc)
     await session.flush()
@@ -154,8 +157,8 @@ async def _seed_source_document(
 async def _seed_module(
     session: AsyncSession,
     *,
-    title_bn: str = "Sample",
-    title_en: str | None = None,
+    title_localized: dict[str, str] | None = None,
+    description_localized: dict[str, str] | None = None,
     domain: str = "rmnch",
     lifecycle_status: str = "published",
     clinically_reviewed: bool = False,
@@ -163,6 +166,7 @@ async def _seed_module(
     embedding: list[float] | None = None,
     module_json: dict | None = None,
     quality_flags_jsonb: dict | None = None,
+    search_metadata_jsonb: dict | None = None,
     source_document_ids: list[UUID] | None = None,
     set_family_pointer: bool = True,
 ) -> Module:
@@ -172,16 +176,17 @@ async def _seed_module(
     module = Module(
         module_family_id=family.id,
         version=1,
-        title_bn=title_bn,
-        title_en=title_en,
+        title_localized=title_localized or {"bn": "Sample"},
+        description_localized=description_localized,
         domain=domain,
         module_type="refresher",
         lifecycle_status=lifecycle_status,
         clinically_reviewed=clinically_reviewed,
         visibility_window=visibility_window,
         embedding=embedding,
-        module_json=module_json or {"cards": [{"title_bn": "C1", "body_bn": "B1"}]},
+        module_json=module_json or {"cards": [{"title": {"bn": "C1"}, "body": {"bn": "B1"}}]},
         quality_flags_jsonb=quality_flags_jsonb,
+        search_metadata_jsonb=search_metadata_jsonb,
         source_document_ids=source_document_ids,
         published_at=datetime.now(UTC) if lifecycle_status == "published" else None,
     )

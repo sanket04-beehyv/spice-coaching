@@ -24,6 +24,12 @@ from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.repositories.module_gap_repository import ModuleGapRepository
+from platform_service.localized import (
+    candidate_description_localized,
+    migrate_legacy_card,
+    primary_text,
+    to_localized_string,
+)
 from platform_service.services.card_normalisation import project_runtime_card
 from platform_service.services.module_thumbnail_service import resolve_default_module_thumbnail
 
@@ -37,6 +43,15 @@ def _slugify(text: str) -> str:
     cleaned = re.sub(r"\s+", "-", (text or "").strip().lower())
     cleaned = re.sub(r"[^\w\-]+", "", cleaned, flags=re.UNICODE)
     return cleaned[:80] or "module"
+
+
+def _first_card_primary_title(cards_payload: list[dict[str, Any]]) -> str:
+    for card in cards_payload:
+        migrated = migrate_legacy_card(card)
+        title = primary_text(migrated.get("title"))
+        if title and title.strip():
+            return title.strip()
+    return ""
 
 
 class ModuleDrafterRepository:
@@ -98,44 +113,16 @@ class ModuleDrafterRepository:
         cards_payload = [project_runtime_card(c) for c in cards]
         module_json: dict[str, Any] = {"cards": cards_payload}
 
-        # Title resolution. The Stage 2 candidate's `proposed_title` is in
-        # English (the consolidator prompt outputs in English). Cards have
-        # proper bilingual titles per the Stage 2-draft prompt schema.
-        # Compose:
-        #   - title_en = candidate's proposed_title (English from Stage 2)
-        #   - title_bn = first card's title_bn (Bangla from Stage 2-draft).
-        # Fallback to candidate.proposed_title in BOTH slots when cards
-        # somehow lack a Bangla title — better than empty.
+        # Title: first card primary title, else candidate proposed_title.
         proposed_title = candidate.get("proposed_title", "") or ""
-        first_card_title_bn = ""
-        for c in cards_payload:
-            t = (c.get("title_bn") or "").strip()
-            if t:
-                first_card_title_bn = t
-                break
-        title_en = proposed_title.strip()
-        title_bn = first_card_title_bn or title_en
-        # Hard-fail when both are empty: a module without any title is
-        # un-renderable. Caller (Stage 2-draft) catches this and skips
-        # the candidate rather than persisting a faceless module row.
-        if not title_bn and not title_en:
+        first_card_title_primary = _first_card_primary_title(cards_payload)
+        primary_title = first_card_title_primary or proposed_title.strip()
+        title_localized = to_localized_string(primary_title or None)
+        if not primary_text(title_localized):
             raise ValueError(
                 f"create_published_module: candidate has no usable title "
                 f"(proposed_title={proposed_title!r}, "
-                f"cards={len(cards_payload)} with no title_bn)"
-            )
-        # Hard-fail on missing English title for module types that are
-        # discoverable by English-language content admins. `content_update`
-        # is Bangla-primary (supervisor updates); the others ship to the
-        # admin dashboard where reviewers work in English.
-        _module_type = candidate.get("proposed_module_type", "refresher")
-        _requires_title_en = _module_type in {"initial_training", "refresher", "digital_proficiency"}
-        if _requires_title_en and not title_en:
-            raise ValueError(
-                f"create_published_module: module_type={_module_type!r} requires "
-                f"a non-empty title_en but proposed_title is empty. "
-                f"The consolidation prompt must emit English proposed_title values; "
-                f"check Stage 2 consolidation output for this candidate."
+                f"cards={len(cards_payload)} with no primary card title)"
             )
 
         thumbnail_storage_path = await resolve_default_module_thumbnail(self._session, source_document_ids)
@@ -143,10 +130,8 @@ class ModuleDrafterRepository:
         module = Module(
             module_family_id=family.id,
             version=version,
-            title_bn=title_bn,
-            title_en=title_en or None,
-            description_en=candidate.get("description_en") or candidate.get("scope_summary"),
-            description_bn=candidate.get("description_bn"),
+            title_localized=title_localized,
+            description_localized=candidate.get("description_localized"),
             domain=candidate.get("domain") or get_settings().default_module_domain,
             sub_domain=candidate.get("sub_domain"),
             module_type=candidate.get("proposed_module_type", "refresher"),
@@ -164,7 +149,7 @@ class ModuleDrafterRepository:
         self._session.add(module)
         await self._session.flush()
 
-        gap_description = title_en or proposed_title or title_bn
+        gap_description = primary_text(title_localized) or proposed_title or ""
         await self._create_and_link_primary_gap(module, description=gap_description)
 
         # Do not update family.current_published_module_id for drafts.
@@ -192,23 +177,19 @@ class ModuleDrafterRepository:
         module_json: dict[str, Any] = {"cards": cards_payload}
 
         proposed_title = candidate.get("proposed_title", "") or ""
-        first_card_title_bn = ""
-        for c in cards_payload:
-            t = (c.get("title_bn") or "").strip()
-            if t:
-                first_card_title_bn = t
-                break
-        title_en = proposed_title.strip() or matched_published.title_en
-        title_bn = first_card_title_bn or matched_published.title_bn
-        if not title_bn and not title_en:
+        first_card_title_primary = _first_card_primary_title(cards_payload)
+        primary_title = (
+            first_card_title_primary
+            or primary_text(matched_published.title_localized)
+            or proposed_title.strip()
+        )
+        title_localized = to_localized_string(primary_title or None)
+        if not primary_text(title_localized):
             raise ValueError(
                 f"create_merged_draft_module: no usable title (proposed_title={proposed_title!r})"
             )
 
         _module_type = candidate.get("proposed_module_type", matched_published.module_type)
-        _requires_title_en = _module_type in {"initial_training", "refresher", "digital_proficiency"}
-        if _requires_title_en and not title_en:
-            raise ValueError(f"create_merged_draft_module: module_type={_module_type!r} requires title_en")
 
         merged_quality = _merge_quality_flags(
             quality_flags,
@@ -225,14 +206,9 @@ class ModuleDrafterRepository:
         module = Module(
             module_family_id=matched_published.module_family_id,
             version=version,
-            title_bn=title_bn,
-            title_en=title_en or None,
-            description_en=(
-                candidate.get("description_en")
-                or candidate.get("scope_summary")
-                or matched_published.description_en
-            ),
-            description_bn=candidate.get("description_bn") or matched_published.description_bn,
+            title_localized=title_localized,
+            description_localized=candidate_description_localized(candidate)
+            or matched_published.description_localized,
             domain=candidate.get("domain") or matched_published.domain,
             sub_domain=candidate.get("sub_domain") or matched_published.sub_domain,
             module_type=_module_type,

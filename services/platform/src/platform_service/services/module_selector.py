@@ -29,6 +29,7 @@ from platform_service.db.repositories.trigger_repository import TriggerRepositor
 class ModuleCandidate:
     """One module surfaced for a CHW, with the trigger that selected it."""
 
+    module_id: UUID
     module_family_id: UUID
     trigger_code: str
     priority_weight: int
@@ -56,8 +57,8 @@ class ModuleSelector:
 
         For each fired trigger, gather its bindings, drop modules in their
         periodic_refresh window, then merge across triggers — when the same
-        module is reached via multiple triggers, the higher priority_weight
-        wins (a module appears at most once in the output).
+        family is reached via multiple triggers, the higher priority_weight
+        wins (a family appears at most once in the output).
         """
         if not fired_trigger_codes:
             return []
@@ -69,24 +70,25 @@ class ModuleSelector:
 
         # Per-CHW completion lookup: module_family_id → completion row.
         completions = await self._load_completions(
-            chw_id, [b.module_family_id for b, _ in bindings_with_trigger]
+            chw_id, [m.module_family_id for _, _, m in bindings_with_trigger]
         )
         ts = now or _now()
 
         out: dict[UUID, ModuleCandidate] = {}
-        for binding, trigger in bindings_with_trigger:
-            comp = completions.get(binding.module_family_id)
+        for binding, trigger, module in bindings_with_trigger:
+            comp = completions.get(module.module_family_id)
             in_refresh_window = _within_refresh_window(comp, ts)
             cand = ModuleCandidate(
-                module_family_id=binding.module_family_id,
+                module_id=binding.module_id,
+                module_family_id=module.module_family_id,
                 trigger_code=trigger.trigger_code,
                 priority_weight=binding.priority_weight,
                 relationship=binding.relationship,
                 skipped_due_to_completion=in_refresh_window,
             )
-            existing = out.get(binding.module_family_id)
+            existing = out.get(module.module_family_id)
             if existing is None or binding.priority_weight > existing.priority_weight:
-                out[binding.module_family_id] = cand
+                out[module.module_family_id] = cand
 
         # Drop entries skipped due to completion; sort survivors by priority desc.
         active = [c for c in out.values() if not c.skipped_due_to_completion]

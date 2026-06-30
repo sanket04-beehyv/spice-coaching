@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 from platform_service.db.models.chw_module_completion import CHWModuleCompletion
+from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.repositories.trigger_repository import TriggerRepository
 from platform_service.services.module_selector import ModuleSelector
@@ -26,6 +27,21 @@ async def _make_family(session: AsyncSession) -> ModuleFamily:
     return family
 
 
+async def _make_published_module(session: AsyncSession, family: ModuleFamily) -> Module:
+    module = Module(
+        module_family_id=family.id,
+        version=1,
+        title_localized={"bn": "selector test"},
+        domain="iccm",
+        module_type="refresher",
+        lifecycle_status="published",
+        module_json={"cards": []},
+    )
+    session.add(module)
+    await session.flush()
+    return module
+
+
 async def _make_trigger_with_bindings(
     session: AsyncSession,
     *,
@@ -40,8 +56,9 @@ async def _make_trigger_with_bindings(
         predicate_jsonb={"behavioural_gap_code": "x"} if trigger_kind == "gap" else {},
     )
     for family, weight in bindings or []:
+        module = await _make_published_module(session, family)
         await repo.bind_module_to_trigger(
-            module_family_id=family.id,
+            module_id=module.id,
             trigger_definition_id=trigger.id,
             priority_weight=weight,
         )

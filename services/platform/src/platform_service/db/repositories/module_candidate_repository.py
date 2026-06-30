@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+from mc_contracts.localized import LocalizedString
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,8 +29,7 @@ class ModuleCandidateRepository:
         ingestion_run_id: UUID,
         proposed_title: str,
         scope_summary: str,
-        description_en: str | None = None,
-        description_bn: str | None = None,
+        description_localized: LocalizedString | None = None,
         source_provenance: list[dict[str, Any]],
         estimated_card_count: int,
         estimated_quiz_count: int,
@@ -40,14 +40,14 @@ class ModuleCandidateRepository:
         previous_practice_summary: str | None = None,
         current_practice_summary: str | None = None,
         rationale_summary: str | None = None,
+        ingestion_instruction_rationale: str | None = None,
     ) -> ModuleCandidateDraft:
         cand = ModuleCandidateDraft(
             ingestion_run_id=ingestion_run_id,
             proposed_title=proposed_title,
             behavioural_gap_code=behavioural_gap_code,
             scope_summary=scope_summary,
-            description_en=description_en,
-            description_bn=description_bn,
+            description_localized=description_localized,
             source_provenance_jsonb=source_provenance,
             estimated_card_count=estimated_card_count,
             estimated_quiz_count=estimated_quiz_count,
@@ -57,6 +57,7 @@ class ModuleCandidateRepository:
             previous_practice_summary=previous_practice_summary,
             current_practice_summary=current_practice_summary,
             rationale_summary=rationale_summary,
+            ingestion_instruction_rationale=ingestion_instruction_rationale,
         )
         self._session.add(cand)
         await self._session.flush()

@@ -44,8 +44,8 @@ class TestListQuizQuestions:
                     question_order=order,
                     question_family_id=uuid4(),
                     question_version=1,
-                    question_bn=f"Q{order}",
-                    options_bn=["a", "b", "c", "d"],
+                    question_localized={"bn": f"Q{order}"},
+                    options_localized={"bn": ["a", "b", "c", "d"]},
                     correct_indices=[0],
                 )
             )
@@ -69,8 +69,8 @@ class TestListQuizQuestions:
                 question_order=1,
                 question_family_id=uuid4(),
                 question_version=1,
-                question_bn="for m1",
-                options_bn=["a", "b", "c", "d"],
+                question_localized={"bn": "for m1"},
+                options_localized={"bn": ["a", "b", "c", "d"]},
                 correct_indices=[0],
             )
         )
@@ -80,8 +80,8 @@ class TestListQuizQuestions:
                 question_order=1,
                 question_family_id=uuid4(),
                 question_version=1,
-                question_bn="for m2",
-                options_bn=["a", "b", "c", "d"],
+                question_localized={"bn": "for m2"},
+                options_localized={"bn": ["a", "b", "c", "d"]},
                 correct_indices=[0],
             )
         )
@@ -89,7 +89,7 @@ class TestListQuizQuestions:
         repo = ModuleRepository(db_session)
         rows = await repo.list_quiz_questions(m1.id)
         assert len(rows) == 1
-        assert rows[0].question_bn == "for m1"
+        assert rows[0].question_localized["bn"] == "for m1"
 
 
 # ─── search_by_embedding (pgvector cosine distance) ─────────────────────────

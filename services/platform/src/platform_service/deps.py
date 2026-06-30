@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from platform_service.clickhouse.client import ClickHouseClient
 from platform_service.config import get_settings
 from platform_service.db.base import SessionLocal, dispose_all_engines
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
@@ -52,11 +53,9 @@ def get_redis_client() -> Redis:
 
 
 def get_clickhouse_client():
-    """Return the process-scoped ClickHouse client (lazy import avoids cycles)."""
+    """Return the process-scoped ClickHouse client."""
     global _clickhouse_client
     if _clickhouse_client is None:
-        from platform_service.clickhouse.client import ClickHouseClient
-
         _clickhouse_client = ClickHouseClient()
     return _clickhouse_client
 

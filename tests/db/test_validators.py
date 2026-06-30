@@ -15,31 +15,51 @@ from platform_service.db.validators import (
     validate_trigger_predicate,
 )
 
+from tests.localized_helpers import loc
+
 # ── Module card content completeness ────────────────────────────────────
 
 
 class TestModuleCardContentCompleteness:
-    def test_refresher_with_body_bn_passes(self) -> None:
-        validate_module_card_content_completeness({"body_bn": "কিছু বাংলা"}, "refresher")
+    def test_refresher_with_body_passes(self) -> None:
+        validate_module_card_content_completeness({"body": loc("কিছু বাংলা")}, "refresher")
 
-    def test_refresher_without_body_bn_fails(self) -> None:
+    def test_refresher_with_prosemirror_body_passes(self) -> None:
+        validate_module_card_content_completeness(
+            {
+                "body": {
+                    "bn": {
+                        "type": "doc",
+                        "content": [
+                            {
+                                "type": "paragraph",
+                                "content": [{"type": "text", "text": "কিছু বাংলা"}],
+                            }
+                        ],
+                    }
+                }
+            },
+            "refresher",
+        )
+
+    def test_refresher_without_body_fails(self) -> None:
         with pytest.raises(ValidationError) as exc_info:
-            validate_module_card_content_completeness({"body_en": "english only"}, "refresher")
+            validate_module_card_content_completeness({"body": {"en": "english only"}}, "refresher")
         assert exc_info.value.code == "card_required_fields_missing"
 
-    def test_refresher_with_empty_body_bn_fails(self) -> None:
+    def test_refresher_with_empty_body_fails(self) -> None:
         with pytest.raises(ValidationError):
-            validate_module_card_content_completeness({"body_bn": "   "}, "refresher")
+            validate_module_card_content_completeness({"body": loc("   ")}, "refresher")
 
-    def test_digital_proficiency_with_body_bn_passes(self) -> None:
-        validate_module_card_content_completeness({"body_bn": "x"}, "digital_proficiency")
+    def test_digital_proficiency_with_body_passes(self) -> None:
+        validate_module_card_content_completeness({"body": loc("x")}, "digital_proficiency")
 
     def test_content_update_with_all_three_fields_passes(self) -> None:
         validate_module_card_content_completeness(
             {
-                "previous_practice_bn": "old",
-                "current_practice_bn": "new",
-                "rationale_for_change_bn": "why",
+                "previous_practice": loc("old"),
+                "current_practice": loc("new"),
+                "rationale_for_change": loc("why"),
             },
             "content_update",
         )
@@ -48,28 +68,28 @@ class TestModuleCardContentCompleteness:
         with pytest.raises(ValidationError) as exc_info:
             validate_module_card_content_completeness(
                 {
-                    "current_practice_bn": "new",
-                    "rationale_for_change_bn": "why",
+                    "current_practice": loc("new"),
+                    "rationale_for_change": loc("why"),
                 },
                 "content_update",
             )
         assert exc_info.value.code == "card_required_fields_missing"
-        assert "previous_practice_bn" in exc_info.value.message
+        assert "previous_practice" in exc_info.value.message
 
     def test_content_update_missing_rationale_fails(self) -> None:
         with pytest.raises(ValidationError) as exc_info:
             validate_module_card_content_completeness(
                 {
-                    "previous_practice_bn": "old",
-                    "current_practice_bn": "new",
+                    "previous_practice": loc("old"),
+                    "current_practice": loc("new"),
                 },
                 "content_update",
             )
-        assert "rationale_for_change_bn" in exc_info.value.message
+        assert "rationale_for_change" in exc_info.value.message
 
     def test_unknown_module_type_fails(self) -> None:
         with pytest.raises(ValidationError) as exc_info:
-            validate_module_card_content_completeness({"body_bn": "x"}, "weird_type")
+            validate_module_card_content_completeness({"body": loc("x")}, "weird_type")
         assert exc_info.value.code == "unknown_module_type"
 
 
@@ -208,7 +228,7 @@ class TestReviewAspects:
         validate_module_review_aspects_complete(
             {
                 "clinical_correctness": True,
-                "bangla_content": True,
+                "primary_language_content": True,
                 "source_provenance": True,
             }
         )
@@ -217,7 +237,7 @@ class TestReviewAspects:
         validate_module_review_aspects_complete(
             {
                 "clinical_correctness": True,
-                "bangla_content": True,
+                "primary_language_content": True,
                 "source_provenance": True,
                 "tts_rendering": True,
             }
@@ -233,7 +253,9 @@ class TestReviewAspects:
 
     def test_one_aspect_missing_fails(self) -> None:
         with pytest.raises(ValidationError) as exc_info:
-            validate_module_review_aspects_complete({"clinical_correctness": True, "bangla_content": True})
+            validate_module_review_aspects_complete(
+                {"clinical_correctness": True, "primary_language_content": True}
+            )
         assert exc_info.value.code == "review_aspects_incomplete"
         assert "source_provenance" in exc_info.value.message
 
@@ -242,7 +264,7 @@ class TestReviewAspects:
             validate_module_review_aspects_complete(
                 {
                     "clinical_correctness": True,
-                    "bangla_content": False,
+                    "primary_language_content": False,
                     "source_provenance": True,
                 }
             )

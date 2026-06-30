@@ -1,5 +1,7 @@
 """W-4 — content_block_parser unit tests."""
 
+from uuid import uuid4
+
 from platform_service.workers.extractors.content_block_parser import (
     estimate_token_count,
     parse_page_blocks,
@@ -107,8 +109,6 @@ class TestEmptyAndEdgeCases:
         assert [b.block_order for b in blocks] == list(range(len(blocks)))
 
     def test_to_repo_dict_shape(self) -> None:
-        from uuid import uuid4
-
         blocks = parse_page_blocks("# A")
         d = blocks[0].to_repo_dict(source_page_id=uuid4(), content_language="en")
         assert d["block_type"] == "heading"

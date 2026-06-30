@@ -68,19 +68,16 @@ async def _seed_module_with_primary(session: AsyncSession) -> tuple[Module, Beha
     module = Module(
         module_family_id=fam.id,
         version=1,
-        title_bn="শিরোনাম",
-        title_en="Hypertension referral",
-        description_en="Teaches correct BP referral thresholds.",
+        title_localized={"bn": "শিরোনাম", "en": "Hypertension referral"},
+        description_localized={"en": "Teaches correct BP referral thresholds."},
         domain="hypertension",
         module_type="refresher",
         primary_gap_id=primary.id,
         module_json={
             "cards": [
                 {
-                    "title_bn": "কার্ড",
-                    "body_bn": "বিষয়বস্তু",
-                    "title_en": "Card",
-                    "body_en": "Content about referral when BP is high.",
+                    "title": {"bn": "কার্ড"},
+                    "body": {"bn": "বিষয়বস্তু"},
                 }
             ]
         },

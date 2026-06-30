@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import BaseModel, Field
+
+from mc_contracts.localized import LocalizedString
 
 
 class GapSummary(BaseModel):
@@ -33,15 +37,20 @@ class SupervisorDashboardResponse(BaseModel):
     fallback_rate: float | None = None
 
 
-class DistrictDashboardResponse(BaseModel):
-    """Tier 1 district-level aggregation."""
+class DigitalHelpModuleUsageItem(BaseModel):
+    module_family_id: UUID
+    module_id: UUID | None = None
+    query_count: int
+    title: LocalizedString | None = None
 
-    upazila_id: str
-    period_days: int = 30
-    total_chws: int
-    avg_card_acceptance_rate: float | None = None
-    avg_quiz_correct_rate: float | None = None
-    top_gap_scenarios: list[str] = Field(default_factory=list)
+
+class DigitalHelpModuleUsageResponse(BaseModel):
+    period_days: int
+    total_queries: int
+    total_modules: int = 0
+    limit: int
+    offset: int
+    modules: list[DigitalHelpModuleUsageItem] = Field(default_factory=list)
 
 
 class LLMQualityResponse(BaseModel):

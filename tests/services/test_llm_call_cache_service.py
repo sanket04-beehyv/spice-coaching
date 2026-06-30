@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -16,11 +16,13 @@ from mc_contracts.internal_ai import (
     PromptSpec,
     TokenUsage,
 )
+from platform_service.db.models.llm_call_cache import LlmCallCache
 from platform_service.services.llm_call_cache_service import (
     CachingAIRuntimeClient,
     LlmCallCacheService,
     compute_input_hash,
 )
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import requires_db
@@ -274,8 +276,6 @@ async def test_put_uses_own_session_not_orchestrators(
     methods are called on it; the writes go to the SessionLocal-derived
     session instead.
     """
-    from unittest.mock import MagicMock
-
     orch_session = MagicMock(name="orchestrator_session")
     orch_session.add = MagicMock()
     orch_session.flush = AsyncMock()
@@ -330,9 +330,6 @@ async def test_cache_row_survives_orchestrator_rollback(
     session has uncommitted state, then rollback the orchestrator session,
     then read the row back. It must still exist.
     """
-    from platform_service.db.models.llm_call_cache import LlmCallCache
-    from sqlalchemy import select
-
     unique_hash = f"survive-rollback-{uuid4().hex}"
 
     # `db_session` plays the role of the orchestrator's session.

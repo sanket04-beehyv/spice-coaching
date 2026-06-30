@@ -112,6 +112,19 @@ def resolve_tenant_id_for_device_route(
     return _tenant_from_spice_user(user)
 
 
+def resolve_tenant_id_for_admin(
+    request: Request,
+    requested_tenant_id: UUID | None = None,
+) -> UUID | None:
+    """Resolve tenant scope for admin-plane routes (modules, ingest).
+
+    When auth is disabled, returns ``requested_tenant_id`` unchanged (``None`` = global).
+    When auth is enabled, device principals receive their mapped tenant; admin principals
+    may pass an explicit ``requested_tenant_id`` or fall back to their mapped tenant.
+    """
+    return resolve_tenant_id_for_dashboard(request, requested_tenant_id)
+
+
 def resolve_tenant_id_for_dashboard(
     request: Request,
     requested_tenant_id: UUID | None = None,

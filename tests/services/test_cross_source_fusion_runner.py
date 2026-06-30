@@ -91,7 +91,7 @@ async def _seed_succeeded_run_with_candidate(
 async def _seed_published_module(
     session: AsyncSession,
     *,
-    title_en: str,
+    title: str,
     source_document_id: UUID,
 ) -> Module:
     family = ModuleFamily(module_code=f"family-{uuid.uuid4().hex[:8]}")
@@ -100,9 +100,8 @@ async def _seed_published_module(
     module = Module(
         module_family_id=family.id,
         version=1,
-        title_bn=title_en,
-        title_en=title_en,
-        description_bn="desc",
+        title_localized={"bn": title, "en": title},
+        description_localized={"bn": "desc"},
         domain="rmnch",
         module_type="initial_training",
         lifecycle_status="published",
@@ -228,12 +227,12 @@ class TestCrossSourceFusionRunnerRetireHeuristic:
         fx = await _seed_two_source_fusion_inputs(db_session)
         mod_a = await _seed_published_module(
             db_session,
-            title_en=fx.cand_a.proposed_title,
+            title=fx.cand_a.proposed_title,
             source_document_id=fx.sd_a.id,
         )
         mod_b = await _seed_published_module(
             db_session,
-            title_en=fx.cand_b.proposed_title,
+            title=fx.cand_b.proposed_title,
             source_document_id=fx.sd_b.id,
         )
         await db_session.commit()
@@ -265,7 +264,7 @@ class TestCrossSourceFusionRunnerRetireHeuristic:
         fx = await _seed_two_source_fusion_inputs(db_session)
         unrelated = await _seed_published_module(
             db_session,
-            title_en="Totally different module",
+            title="Totally different module",
             source_document_id=fx.sd_a.id,
         )
         await db_session.commit()

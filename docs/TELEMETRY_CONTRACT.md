@@ -184,7 +184,7 @@ Idempotency is enforced by the **`event_id` primary key** on `chw_learning_point
 
 For digital events, the `payload_json` may include `success: bool` and `error_type: string` — the ingest extracts these into dedicated columns. (Note: legacy SDKs sometimes ship a `sucess` typo; the ingest tolerates it.)
 
-**Chat-bot usage** is a UX-quality signal, not a compliance signal — the chatbot is a delivery surface for content the CHW already has via modules. For now, treat any chat usage as `digital_help_used`. If lightweight chatbot-usage analytics becomes useful later, add `chatbot_query_made` to `DigitalEventType` and route through this same `digital_events` path. **Do not give chat its own `event_family`** — the existing routing handles it cleanly.
+**Chat usage** is a UX-quality signal, not a compliance signal — chat is a delivery surface for content the CHW already has via modules. For now, treat any chat usage as `digital_help_used`. If lightweight chat-usage analytics becomes useful later, add `chat_query_made` to `DigitalEventType` and route through this same `digital_events` path. **Do not give chat its own `event_family`** — the existing routing handles it cleanly.
 
 ---
 
@@ -244,7 +244,21 @@ Postgres module completion (`chw_module_quiz_progress` / `chw_module_completion`
 
 ### `digital_help_used`
 
-CHW invoked the in-app chatbot.
+CHW invoked the in-app chat experience.
+
+`payload_json` keys:
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `question` | string | **Required for FAQ mining.** Free-text query the CHW typed. Fallback key: `query`. |
+| `topic` | string | Optional coarse label (e.g. `blood_pressure_cuff`). |
+| `success` | bool | Whether the chat interaction succeeded. |
+| `error_type` | string | Optional failure discriminator when `success` is false. |
+
+**Nightly FAQ pipeline:** Platform aggregates `question` values from `digital_help_used`
+events, semantically clusters paraphrases via embeddings, and uses an LLM to synthesize
+5–6 bilingual FAQ suggestion chips per tenant. Devices sync the synthesized FAQs via
+`GET /sync/chat-faqs` — they are **not** raw telemetry strings.
 
 ```json
 {
@@ -257,7 +271,11 @@ CHW invoked the in-app chatbot.
   "validator_status": "pass",
   "fallback_used": false,
   "network_state": "offline",
-  "payload_json": {"topic": "blood_pressure_cuff", "success": true},
+  "payload_json": {
+    "question": "How do I measure respiratory rate in a child?",
+    "topic": "respiratory_rate",
+    "success": true
+  },
   "event_date": "2026-04-28",
   "timestamp_local": 1714306200,
   "timestamp_utc": 1714284000

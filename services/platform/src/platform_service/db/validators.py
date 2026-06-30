@@ -10,6 +10,10 @@ Per Implementation Plan v2 §3 / Data Model v3.3 §11.
 from typing import Any
 from uuid import UUID
 
+from platform_service.config import get_settings
+from platform_service.localized import primary_text
+from platform_service.services.card_body_text import card_body_is_nonempty
+
 
 class ValidationError(ValueError):
     """Raised when an application-layer invariant is violated."""
@@ -21,15 +25,38 @@ class ValidationError(ValueError):
 
 
 # ── Module card content completeness (Data Model v3.3 §5.3 constraint) ───
-# Refresher / digital_proficiency cards need body_bn populated.
-# content_update cards need previous_practice_bn AND current_practice_bn AND
-# rationale_for_change_bn populated.
+# Refresher / digital_proficiency cards need primary-locale body populated.
+# content_update cards need previous_practice AND current_practice AND
+# rationale_for_change populated in the deployment primary locale.
 
 _REQUIRED_FIELDS_BY_MODULE_TYPE: dict[str, tuple[str, ...]] = {
-    "refresher": ("body_bn",),
-    "digital_proficiency": ("body_bn",),
-    "content_update": ("previous_practice_bn", "current_practice_bn", "rationale_for_change_bn"),
+    "refresher": ("body",),
+    "digital_proficiency": ("body",),
+    "content_update": ("previous_practice", "current_practice", "rationale_for_change"),
 }
+
+
+def _primary_locale_field_value(card_dict: dict[str, Any], field: str) -> Any:
+    """Return the deployment-primary locale value for a localized card field."""
+    raw = card_dict.get(field)
+    if raw is None:
+        return None
+    settings = get_settings()
+    primary = settings.deployment_primary_locale
+    if isinstance(raw, dict) and primary in raw:
+        return raw.get(primary)
+    return raw
+
+
+def _field_has_primary_content(card_dict: dict[str, Any], field: str) -> bool:
+    raw = card_dict.get(field)
+    if field == "body":
+        return card_body_is_nonempty(_primary_locale_field_value(card_dict, field))
+    if isinstance(raw, dict):
+        return bool((primary_text(raw) or "").strip())
+    if isinstance(raw, str):
+        return bool(raw.strip())
+    return bool(raw)
 
 
 def validate_module_card_content_completeness(card_dict: dict[str, Any], module_type: str) -> None:
@@ -44,7 +71,7 @@ def validate_module_card_content_completeness(card_dict: dict[str, Any], module_
             "unknown_module_type",
             f"module_type='{module_type}' is not one of {sorted(_REQUIRED_FIELDS_BY_MODULE_TYPE)}",
         )
-    missing = [f for f in required if not (card_dict.get(f) or "").strip()]
+    missing = [f for f in required if not _field_has_primary_content(card_dict, f)]
     if missing:
         raise ValidationError(
             "card_required_fields_missing",
@@ -149,7 +176,7 @@ def validate_module_card_membership_referent(
 
 _REQUIRED_REVIEW_ASPECTS: tuple[str, ...] = (
     "clinical_correctness",
-    "bangla_content",
+    "primary_language_content",
     "source_provenance",
 )
 

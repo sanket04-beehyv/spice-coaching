@@ -28,4 +28,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_column("module_candidate_draft", "description_bn")
     op.drop_column("module_candidate_draft", "description_en")
-

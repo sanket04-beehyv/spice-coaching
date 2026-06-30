@@ -18,7 +18,12 @@ def resolve_parsed_json(
     *,
     fallback_text: str | None = None,
 ) -> Any:
-    """Return parsed_json when present, otherwise parse raw_text."""
+    """Return parsed_json when present, otherwise parse raw_text.
+
+    Callers must check ``response.error`` before calling this helper.
+    """
+    if response.error:
+        raise ValueError(f"cannot resolve LLM payload: ai-runtime error: {response.error}")
     if response.parsed_json is not None:
         return response.parsed_json
     text = fallback_text if fallback_text is not None else response.raw_text

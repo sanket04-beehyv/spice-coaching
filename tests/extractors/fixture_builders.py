@@ -11,6 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pymupdf  # type: ignore[import-untyped]
+from docx import Document  # type: ignore[import-untyped]
+from pptx import Presentation  # type: ignore[import-untyped]
 
 # ── PDF builders ───────────────────────────────────────────────────────
 
@@ -113,8 +115,6 @@ def build_empty_pdf(out_path: Path) -> Path:
 
 def build_clean_english_pptx(out_path: Path, slide_count: int = 3) -> Path:
     """Build a small pptx with title + body text per slide."""
-    from pptx import Presentation  # type: ignore[import-untyped]
-
     prs = Presentation()
     layout = prs.slide_layouts[1]  # Title and Content
     for i in range(slide_count):
@@ -135,8 +135,6 @@ def build_clean_english_pptx(out_path: Path, slide_count: int = 3) -> Path:
 
 def build_clean_english_docx(out_path: Path) -> Path:
     """Build a small docx with Heading 1, Heading 2, and body paragraphs."""
-    from docx import Document  # type: ignore[import-untyped]
-
     doc = Document()
     doc.add_heading("BRAC SK Manual: Antenatal Care", level=1)
     doc.add_paragraph("Antenatal care is a set of services for pregnant women.")

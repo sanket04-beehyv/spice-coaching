@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
+from platform_service.config import get_settings
 from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.chw_behavioural_gap_state import CHWBehaviouralGapState
 from platform_service.db.models.module import Module
@@ -17,6 +18,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tests.conftest import requires_db
 
 pytestmark = [requires_db, pytest.mark.asyncio]
+
+
+@pytest.fixture(autouse=True)
+def _gap_state_telemetry_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing suggestion tests target behavioural-gap telemetry mode."""
+    monkeypatch.setattr(
+        get_settings(),
+        "telemetry_behavioural_gap_state_enabled",
+        True,
+    )
 
 
 def _test_chw_id() -> int:
@@ -62,13 +73,13 @@ async def _make_published_module(
     mod = Module(
         module_family_id=family.id,
         version=1,
-        title_bn="t",
+        title_localized={"bn": "t"},
         domain="rmnch",
         module_type="refresher",
         lifecycle_status="published",
         tenant_id=tenant_id,
         primary_gap_id=primary_gap_id,
-        module_json={"cards": [{"title_bn": "c"}]},
+        module_json={"cards": [{"title": {"bn": "c"}}]},
         published_at=now,
         created_at=created_at or now,
     )
@@ -321,13 +332,13 @@ async def test_prefers_current_published_pointer_over_old_version(
     v1 = Module(
         module_family_id=fam.id,
         version=1,
-        title_bn="v1",
+        title_localized={"bn": "v1"},
         domain="rmnch",
         module_type="refresher",
         lifecycle_status="published",
         tenant_id=tenant_id,
         primary_gap_id=gap.id,
-        module_json={"cards": [{"title_bn": "c"}]},
+        module_json={"cards": [{"title": {"bn": "c"}}]},
         published_at=datetime.now(UTC),
     )
     db_session.add(v1)
@@ -335,13 +346,13 @@ async def test_prefers_current_published_pointer_over_old_version(
     v2 = Module(
         module_family_id=fam.id,
         version=2,
-        title_bn="v2",
+        title_localized={"bn": "v2"},
         domain="rmnch",
         module_type="refresher",
         lifecycle_status="published",
         tenant_id=tenant_id,
         primary_gap_id=gap.id,
-        module_json={"cards": [{"title_bn": "c"}]},
+        module_json={"cards": [{"title": {"bn": "c"}}]},
         published_at=datetime.now(UTC),
     )
     db_session.add(v2)
@@ -428,3 +439,58 @@ async def test_module_with_multiple_gaps_matches_either_active_gap(
     assert out[0].module_id == mod.id
     assert out[0].behavioural_gap_id == gap_b.id
     assert out[0].source == "gap"
+
+
+async def test_quiz_state_driven_suggestions(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        get_settings(),
+        "telemetry_behavioural_gap_state_enabled",
+        False,
+    )
+    from platform_service.db.models.chw_quiz_question_state import CHWQuizQuestionState
+    from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
+
+    tenant_id = uuid4()
+    chw_id = _test_chw_id()
+    fam = await _make_family(db_session)
+    mod = await _make_published_module(
+        db_session,
+        family=fam,
+        tenant_id=tenant_id,
+        primary_gap_id=None,
+    )
+    quiz = ModuleQuizQuestion(
+        module_id=mod.id,
+        question_order=1,
+        question_family_id=uuid4(),
+        question_version=1,
+        question_localized={"bn": "q"},
+        question_type="single_select",
+        options_localized={"bn": ["a", "b"]},
+        correct_indices=[0],
+    )
+    db_session.add(quiz)
+    await db_session.flush()
+    db_session.add(
+        CHWQuizQuestionState(
+            chw_id=chw_id,
+            quiz_id=quiz.id,
+            module_id=mod.id,
+            tenant_id=tenant_id,
+            failed_attempts_count=2,
+            status="active",
+            last_failed_attempt_at=datetime.now(UTC),
+        )
+    )
+    await db_session.flush()
+
+    svc = ModuleSuggestionService(db_session)
+    out = await svc.suggest_for_chw(chw_id=chw_id, tenant_id=tenant_id)
+    assert len(out) == 1
+    assert out[0].module_id == mod.id
+    assert out[0].source == "quiz"
+    assert out[0].quiz_id == quiz.id
+    assert out[0].behavioural_gap_id is None

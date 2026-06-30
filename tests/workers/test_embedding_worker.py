@@ -26,6 +26,7 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
+from platform_service.config import get_settings
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.workers.embedding_worker import (
@@ -42,9 +43,8 @@ from tests.conftest import requires_db
 
 def _make_module_obj(
     *,
-    title_bn: str | None = "শিরোনাম",
-    title_en: str | None = "Title",
-    description_bn: str | None = "বর্ণনা",
+    title_localized: dict[str, str] | None = None,
+    description_localized: dict[str, str] | None = None,
     cards: list[dict] | None = None,
 ) -> Module:
     """Build a Module without touching a DB. Useful for the pure-unit tests
@@ -52,9 +52,8 @@ def _make_module_obj(
     return Module(
         module_family_id=uuid4(),
         version=1,
-        title_bn=title_bn,
-        title_en=title_en,
-        description_bn=description_bn,
+        title_localized=title_localized or {"bn": "শিরোনাম", "en": "Title"},
+        description_localized=description_localized or {"bn": "বর্ণনা"},
         domain="rmnch",
         module_type="refresher",
         module_json={"cards": cards} if cards is not None else None,
@@ -64,9 +63,8 @@ def _make_module_obj(
 class TestModuleTextForEmbedding:
     def test_titles_and_description_in_order(self) -> None:
         m = _make_module_obj(
-            title_bn="bn-title",
-            title_en="en-title",
-            description_bn="bn-desc",
+            title_localized={"bn": "bn-title", "en": "en-title"},
+            description_localized={"bn": "bn-desc"},
             cards=[],
         )
         text = _module_text_for_embedding(m)
@@ -76,40 +74,98 @@ class TestModuleTextForEmbedding:
         idx_desc = text.index("bn-desc")
         assert idx_bn < idx_en < idx_desc
 
-    def test_card_fields_appended_in_field_order(self) -> None:
+    def test_prosemirror_body_fields_use_plain_text(self) -> None:
         m = _make_module_obj(
-            title_bn=None,
-            title_en=None,
-            description_bn=None,
+            title_localized=None,
+            description_localized=None,
             cards=[
                 {
-                    "title_bn": "card-title-bn",
-                    "title_en": "card-title-en",
-                    "body_bn": "body-bn",
-                    "body_en": "body-en",
-                    "next_action_bn": "next",
+                    "title": {"bn": "card-title-bn", "en": "card-title-en"},
+                    "body": {
+                        "bn": {
+                            "type": "doc",
+                            "content": [
+                                {
+                                    "type": "paragraph",
+                                    "content": [{"type": "text", "text": "rich-body-bn"}],
+                                }
+                            ],
+                        },
+                        "en": {
+                            "type": "doc",
+                            "content": [
+                                {
+                                    "type": "paragraph",
+                                    "content": [{"type": "text", "text": "rich-body-en"}],
+                                }
+                            ],
+                        },
+                    },
                 }
             ],
         )
         text = _module_text_for_embedding(m)
-        # Field order per the implementation: title_bn → title_en → body_bn →
-        # body_en → previous_practice_bn → current_practice_bn →
-        # rationale_for_change_bn → next_action_bn.
+        assert "rich-body-bn" in text
+        assert "rich-body-en" in text
+        assert "'type': 'doc'" not in text
+
+    def test_block_list_body_fields_use_plain_text(self) -> None:
+        m = _make_module_obj(
+            title_localized=None,
+            description_localized=None,
+            cards=[
+                {
+                    "title": {"bn": "card-title-bn", "en": "card-title-en"},
+                    "body": {
+                        "bn": [
+                            {
+                                "type": "paragraph",
+                                "content": [{"type": "text", "text": "block-list-bn"}],
+                            }
+                        ],
+                        "en": [
+                            {
+                                "type": "paragraph",
+                                "content": [{"type": "text", "text": "block-list-en"}],
+                            }
+                        ],
+                    },
+                }
+            ],
+        )
+        text = _module_text_for_embedding(m)
+        assert "block-list-bn" in text
+        assert "block-list-en" in text
+        assert "'type': 'paragraph'" not in text
+
+    def test_card_fields_appended_in_field_order(self) -> None:
+        m = _make_module_obj(
+            title_localized=None,
+            description_localized=None,
+            cards=[
+                {
+                    "title": {"bn": "card-title-bn", "en": "card-title-en"},
+                    "body": {"bn": "body-bn", "en": "body-en"},
+                    "next_action": {"bn": "next"},
+                }
+            ],
+        )
+        text = _module_text_for_embedding(m)
+        # Field order per the implementation: primary title → body → next_action.
         positions = [
             text.index("card-title-bn"),
-            text.index("card-title-en"),
             text.index("body-bn"),
-            text.index("body-en"),
             text.index("next"),
         ]
         assert positions == sorted(positions)
+        assert "card-title-en" not in text
+        assert "body-en" not in text
 
     def test_skips_empty_card_fields(self) -> None:
         m = _make_module_obj(
-            title_bn=None,
-            title_en=None,
-            description_bn=None,
-            cards=[{"title_bn": "only-this"}],
+            title_localized=None,
+            description_localized=None,
+            cards=[{"title": {"bn": "only-this"}}],
         )
         text = _module_text_for_embedding(m)
         # Only the populated field shows up.
@@ -117,23 +173,22 @@ class TestModuleTextForEmbedding:
 
     def test_skips_non_dict_cards(self) -> None:
         m = _make_module_obj(
-            title_bn="t",
-            title_en=None,
-            description_bn=None,
-            cards=["not a dict", {"title_bn": "ok"}],  # type: ignore[list-item]
+            title_localized={"bn": "t"},
+            description_localized=None,
+            cards=["not a dict", {"title": {"bn": "ok"}}],  # type: ignore[list-item]
         )
         text = _module_text_for_embedding(m)
         assert "ok" in text
         assert "t" in text
 
     def test_handles_null_module_json(self) -> None:
-        m = _make_module_obj(title_bn="t", cards=None)
+        m = _make_module_obj(title_localized={"bn": "t"}, cards=None)
         m.module_json = None
         text = _module_text_for_embedding(m)
         assert "t" in text
 
     def test_returns_empty_string_for_empty_module(self) -> None:
-        m = _make_module_obj(title_bn=None, title_en=None, description_bn=None, cards=[])
+        m = _make_module_obj(title_localized=None, description_localized=None, cards=[])
         text = _module_text_for_embedding(m)
         assert text == ""
 
@@ -142,12 +197,12 @@ class TestModuleTextForEmbedding:
         because the cache hashes the text. If the order or join character
         drifts, every re-run misses cache."""
         m1 = _make_module_obj(
-            title_bn="t",
-            cards=[{"title_bn": "a"}, {"title_bn": "b"}],
+            title_localized={"bn": "t"},
+            cards=[{"title": {"bn": "a"}}, {"title": {"bn": "b"}}],
         )
         m2 = _make_module_obj(
-            title_bn="t",
-            cards=[{"title_bn": "a"}, {"title_bn": "b"}],
+            title_localized={"bn": "t"},
+            cards=[{"title": {"bn": "a"}}, {"title": {"bn": "b"}}],
         )
         assert _module_text_for_embedding(m1) == _module_text_for_embedding(m2)
 
@@ -178,13 +233,12 @@ async def seeded_module_id(db_session: AsyncSession) -> UUID:
     module = Module(
         module_family_id=fam.id,
         version=1,
-        title_bn="শিরোনাম",
-        title_en="Title",
-        description_bn="বর্ণনা",
+        title_localized={"bn": "শিরোনাম", "en": "Title"},
+        description_localized={"bn": "বর্ণনা"},
         domain="rmnch",
         module_type="refresher",
         lifecycle_status="published",
-        module_json={"cards": [{"title_bn": "C1", "body_bn": "Body of card 1"}]},
+        module_json={"cards": [{"title": {"bn": "C1"}, "body": {"bn": "Body of card 1"}}]},
         published_at=datetime.now(UTC),
     )
     db_session.add(module)
@@ -195,8 +249,6 @@ async def seeded_module_id(db_session: AsyncSession) -> UUID:
 
 
 def _expected_dim() -> int:
-    from platform_service.config import get_settings
-
     return get_settings().embedding_dimension
 
 
@@ -262,16 +314,19 @@ class TestHappyPath:
         module = Module(
             module_family_id=fam.id,
             version=1,
-            title_bn="title-bn",
-            title_en="title-en",
-            description_bn="desc-bn",
+            title_localized={"bn": "title-bn", "en": "title-en"},
+            description_localized={"bn": "desc-bn"},
             domain="rmnch",
             module_type="refresher",
             lifecycle_status="published",
             module_json={
                 "cards": [
-                    {"title_bn": "c1-title", "body_bn": "c1-body", "next_action_bn": "c1-next"},
-                    {"title_bn": "c2-title"},
+                    {
+                        "title": {"bn": "c1-title"},
+                        "body": {"bn": "c1-body"},
+                        "next_action": {"bn": "c1-next"},
+                    },
+                    {"title": {"bn": "c2-title"}},
                 ]
             },
             published_at=datetime.now(UTC),
@@ -321,16 +376,14 @@ class TestFailureReturnFalse:
         module = Module(
             module_family_id=fam.id,
             version=1,
-            title_bn=None,  # No title
-            description_bn=None,
+            title_localized={"bn": ""},
+            description_localized=None,
             domain="rmnch",
             module_type="refresher",
             lifecycle_status="published",
             module_json={"cards": []},
             published_at=datetime.now(UTC),
         )
-        # Module.title_bn is NOT NULL — ORM fail. Use empty string instead.
-        module.title_bn = ""
         db_session.add(module)
         await db_session.flush()
         await db_session.commit()

@@ -35,7 +35,7 @@ async def _seed_module(session: AsyncSession, *, thumbnail_storage_path: str | N
     module = Module(
         module_family_id=family.id,
         version=1,
-        title_bn="thumb test",
+        title_localized={"bn": "thumb test"},
         domain="rmnch",
         module_type="refresher",
         lifecycle_status="published",

@@ -5,16 +5,13 @@ WORKDIR /app
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
-# Copy workspace files
-COPY pyproject.toml /app/pyproject.toml
+# Copy workspace files (all lockfile members required for locked workspace sync)
+COPY pyproject.toml uv.lock /app/
 COPY packages/ /app/packages/
-COPY services/ai-runtime/ /app/services/ai-runtime/
+COPY services/ /app/services/
 
-# Install ai-runtime and its workspace dependencies
-RUN uv pip install --system --no-cache \
-    -e /app/packages/contracts \
-    -e /app/packages/foundation \
-    -e /app/services/ai-runtime
+RUN uv sync --locked --no-dev --package ai-runtime
+ENV PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
 

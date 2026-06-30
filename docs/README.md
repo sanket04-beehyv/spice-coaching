@@ -5,14 +5,17 @@ Use this directory as the first stop when onboarding to the codebase.
 ## Core Docs
 
 - `../README.md`: canonical architecture, endpoint contract, and local run commands.
+- `ARCHITECTURE.md`: consolidated system architecture (C4-style, diagrams, data model, workflows).
+- `ARCHITECTURE_RESET.md`: corrected domain model and pipeline semantics (supersedes drifted v3.3 assumptions).
 - `SETUP_TROUBLESHOOTING.md`: setup issues seen in local/dev environments and verified fixes.
 - `PROJECT_NAVIGATION.md`: where to make changes for common engineering tasks.
 
 ## Suggested Reading Order For New Contributors
 
 1. `../README.md`
-2. `SETUP_TROUBLESHOOTING.md`
-3. `PROJECT_NAVIGATION.md`
+2. `ARCHITECTURE.md`
+3. `SETUP_TROUBLESHOOTING.md`
+4. `PROJECT_NAVIGATION.md`
 
 ## Keeping Docs Accurate
 

@@ -14,7 +14,7 @@ from platform_service.db.repositories.module_repository import (
     ModuleNotFoundError,
     ModuleRepository,
 )
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import requires_db
@@ -29,16 +29,16 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 class TestEditModule:
     async def test_creates_new_version_with_supersedes_pointer(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
-        v1 = await _make_module(db_session, family=fam, title_bn="v1 title", version=1)
+        v1 = await _make_module(db_session, family=fam, title_localized={"bn": "v1 title"}, version=1)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_bn="v2 title")
+        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2 title"})
 
         assert v2.id != v1.id
         assert v2.module_family_id == fam.id
         assert v2.version == 2
         assert v2.supersedes_module_id == v1.id
-        assert v2.title_bn == "v2 title"
+        assert v2.title_localized["bn"] == "v2 title"
 
     async def test_resets_clinically_reviewed_to_false(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
@@ -51,7 +51,7 @@ class TestEditModule:
         v1.clinically_reviewed_by = uuid4()
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_bn="new title")
+        v2 = await repo.edit_module(v1.id, title_localized={"bn": "new title"})
         # New version starts unreviewed regardless of v1's flag.
         assert v2.clinically_reviewed is False
 
@@ -60,8 +60,8 @@ class TestEditModule:
         v1 = await _make_module(
             db_session,
             family=fam,
-            title_bn="v1",
-            description_bn="original desc",
+            title_localized={"bn": "v1"},
+            description_localized={"bn": "original desc"},
             domain="rmnch",
         )
         v1.estimated_minutes = 15
@@ -70,11 +70,11 @@ class TestEditModule:
 
         repo = ModuleRepository(db_session)
         # Edit ONLY the title.
-        v2 = await repo.edit_module(v1.id, title_bn="v2")
+        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"})
 
-        assert v2.title_bn == "v2"
+        assert v2.title_localized["bn"] == "v2"
         # Untouched fields copy forward.
-        assert v2.description_bn == "original desc"
+        assert v2.description_localized["bn"] == "original desc"
         assert v2.domain == "rmnch"
         assert v2.estimated_minutes == 15
         assert v2.difficulty_level == "hard"
@@ -82,31 +82,31 @@ class TestEditModule:
 
     async def test_updates_family_current_pointer(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
-        v1 = await _make_module(db_session, family=fam, title_bn="v1")
+        v1 = await _make_module(db_session, family=fam, title_localized={"bn": "v1"})
         # Verify pointer starts at v1.
         await db_session.refresh(fam)
         assert fam.current_published_module_id == v1.id
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_bn="v2")
+        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"})
         await db_session.refresh(fam)
         assert fam.current_published_module_id == v2.id
 
     async def test_edit_unknown_module_raises(self, db_session: AsyncSession) -> None:
         repo = ModuleRepository(db_session)
         with pytest.raises(ModuleNotFoundError):
-            await repo.edit_module(uuid4(), title_bn="x")
+            await repo.edit_module(uuid4(), title_localized={"bn": "x"})
 
     async def test_previous_version_is_retired_on_edit(self, db_session: AsyncSession) -> None:
         """Without retiring v1, the dashboard's default `?status=published`
         list returns BOTH versions for one family (B1 review finding)."""
         fam = await _make_family(db_session)
-        v1 = await _make_module(db_session, family=fam, title_bn="v1")
+        v1 = await _make_module(db_session, family=fam, title_localized={"bn": "v1"})
         assert v1.lifecycle_status == "published"
         assert v1.deprecated_at is None
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_bn="v2")
+        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"})
         await db_session.refresh(v1)
 
         assert v1.lifecycle_status == "retired"
@@ -126,20 +126,20 @@ class TestEditModule:
 
         repo = ModuleRepository(db_session)
         with pytest.raises(ModuleNotFoundError):
-            await repo.edit_module(m.id, title_bn="post-retire")
+            await repo.edit_module(m.id, title_localized={"bn": "post-retire"})
 
     async def test_edit_replaces_module_json_when_provided(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
-        v1 = await _make_module(db_session, family=fam, module_json={"cards": [{"title_bn": "old"}]})
+        v1 = await _make_module(db_session, family=fam, module_json={"cards": [{"title": {"bn": "old"}}]})
 
         repo = ModuleRepository(db_session)
-        new_cards = {"cards": [{"title_bn": "new1"}, {"title_bn": "new2"}]}
+        new_cards = {"cards": [{"title": {"bn": "new1"}}, {"title": {"bn": "new2"}}]}
         v2 = await repo.edit_module(v1.id, module_json=new_cards)
         assert v2.module_json == new_cards
 
     async def test_edit_copies_behavioural_gap_links(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
-        v1 = await _make_module(db_session, family=fam, title_bn="v1")
+        v1 = await _make_module(db_session, family=fam, title_localized={"bn": "v1"})
         gap_a = BehaviouralGap(
             gap_code=f"gap_a_{uuid4().hex[:8]}",
             description="a",
@@ -158,7 +158,7 @@ class TestEditModule:
         await gap_repo.replace_links(v1.id, gap_ids=[gap_a.id, gap_b.id], primary_gap_id=gap_a.id)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_bn="v2")
+        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"})
 
         v2_gap_ids = await gap_repo.get_gap_ids(v2.id)
         assert set(v2_gap_ids) == {gap_a.id, gap_b.id}
@@ -171,7 +171,7 @@ class TestEditModule:
         v1 = await _make_module(db_session, family=fam, thumbnail_storage_path=thumb)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_bn="v2")
+        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"})
 
         assert v2.thumbnail_storage_path == thumb
 
@@ -181,7 +181,7 @@ class TestEditModule:
         v1 = await _make_module(db_session, family=fam, thumbnail_storage_path=thumb)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_bn="v2", thumbnail_storage_path=None)
+        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"}, thumbnail_storage_path=None)
 
         assert v2.thumbnail_storage_path is None
 
@@ -192,7 +192,7 @@ class TestEditModule:
         v1 = await _make_module(db_session, family=fam, thumbnail_storage_path=old_thumb)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_bn="v2", thumbnail_storage_path=new_thumb)
+        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"}, thumbnail_storage_path=new_thumb)
 
         assert v2.thumbnail_storage_path == new_thumb
 
@@ -265,8 +265,6 @@ class TestSetVisibilityWindow:
         # TSTZRANGE column. Reading via a raw SQL select bypasses the
         # session's identity-map cache so we know we're seeing actual
         # DB-side state, not the just-set Python attribute.
-        from sqlalchemy import text
-
         row = (
             await db_session.execute(
                 text(
@@ -323,11 +321,11 @@ class TestRetireModule:
 
     async def test_retire_falls_back_to_prior_published_version(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
-        v1 = await _make_module(db_session, family=fam, title_bn="v1", version=1)
+        v1 = await _make_module(db_session, family=fam, title_localized={"bn": "v1"}, version=1)
         v2 = await _make_module(
             db_session,
             family=fam,
-            title_bn="v2",
+            title_localized={"bn": "v2"},
             version=2,
             published_at=datetime.now(UTC) + timedelta(seconds=1),
         )
@@ -345,7 +343,7 @@ class TestRetireModule:
         self, db_session: AsyncSession
     ) -> None:
         fam = await _make_family(db_session)
-        v1 = await _make_module(db_session, family=fam, title_bn="only")
+        v1 = await _make_module(db_session, family=fam, title_localized={"bn": "only"})
         await db_session.refresh(fam)
         assert fam.current_published_module_id == v1.id
 
@@ -361,8 +359,10 @@ class TestRetireModule:
         """Retiring v1 when v2 is the family's current pointer must leave
         the pointer at v2."""
         fam = await _make_family(db_session)
-        v1 = await _make_module(db_session, family=fam, title_bn="v1", version=1, set_family_pointer=False)
-        v2 = await _make_module(db_session, family=fam, title_bn="v2", version=2)
+        v1 = await _make_module(
+            db_session, family=fam, title_localized={"bn": "v1"}, version=1, set_family_pointer=False
+        )
+        v2 = await _make_module(db_session, family=fam, title_localized={"bn": "v2"}, version=2)
         # Pointer is on v2.
         await db_session.refresh(fam)
         assert fam.current_published_module_id == v2.id
@@ -385,11 +385,11 @@ class TestRetireModule:
 class TestCountModules:
     async def test_default_excludes_retired(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
-        await _make_module(db_session, family=fam, title_bn="live")
+        await _make_module(db_session, family=fam, title_localized={"bn": "live"})
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="retired",
+            title_localized={"bn": "retired"},
             lifecycle_status="retired",
             set_family_pointer=False,
         )
@@ -411,19 +411,19 @@ class TestCountModules:
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            description_bn=marker,
+            description_localized={"bn": marker},
             clinically_reviewed=True,
         )
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            description_bn=marker,
+            description_localized={"bn": marker},
             clinically_reviewed=False,
         )
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            description_bn=marker,
+            description_localized={"bn": marker},
             clinically_reviewed=False,
         )
 
@@ -436,7 +436,7 @@ class TestCountModules:
                     select(
                         ModuleRepository.__init__.__globals__["Module"]
                     ).where(  # use Module from the repo's namespace
-                        Module.description_bn == marker, Module.clinically_reviewed.is_(True)
+                        Module.description_localized["bn"] == marker, Module.clinically_reviewed.is_(True)
                     )
                 )
             )
@@ -447,7 +447,7 @@ class TestCountModules:
             (
                 await db_session.execute(
                     select(Module).where(
-                        Module.description_bn == marker, Module.clinically_reviewed.is_(False)
+                        Module.description_localized["bn"] == marker, Module.clinically_reviewed.is_(False)
                     )
                 )
             )
@@ -468,15 +468,15 @@ class TestListActiveModulesForMerge:
         v1 = await _make_module(
             db_session,
             family=fam,
-            title_bn="v1 published",
+            title_localized={"bn": "v1 published"},
             lifecycle_status="published",
             version=1,
             module_json={
                 "cards": [
                     {
-                        "title_bn": "c1",
-                        "body_bn": "b",
-                        "next_action_bn": "n",
+                        "title": {"bn": "c1"},
+                        "body": {"bn": "b"},
+                        "next_action": {"bn": "n"},
                         "source_block_ids": [],
                     }
                 ]
@@ -485,15 +485,15 @@ class TestListActiveModulesForMerge:
         v2 = await _make_module(
             db_session,
             family=fam,
-            title_bn="v2 draft",
+            title_localized={"bn": "v2 draft"},
             lifecycle_status="draft",
             version=2,
             module_json={
                 "cards": [
                     {
-                        "title_bn": "c2",
-                        "body_bn": "b",
-                        "next_action_bn": "n",
+                        "title": {"bn": "c2"},
+                        "body": {"bn": "b"},
+                        "next_action": {"bn": "n"},
                         "source_block_ids": [],
                     }
                 ]
@@ -502,15 +502,15 @@ class TestListActiveModulesForMerge:
         )
         await _make_module(
             db_session,
-            title_bn="retired row",
+            title_localized={"bn": "retired row"},
             lifecycle_status="retired",
             version=1,
             module_json={
                 "cards": [
                     {
-                        "title_bn": "c",
-                        "body_bn": "b",
-                        "next_action_bn": "n",
+                        "title": {"bn": "c"},
+                        "body": {"bn": "b"},
+                        "next_action": {"bn": "n"},
                         "source_block_ids": [],
                     }
                 ]
@@ -527,7 +527,7 @@ class TestListActiveModulesForMerge:
         repo = ModuleRepository(db_session)
         await _make_module(
             db_session,
-            title_bn="no cards",
+            title_localized={"bn": "no cards"},
             module_json={"cards": []},
             lifecycle_status="published",
         )

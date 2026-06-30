@@ -77,12 +77,6 @@ class GenerationType(str, enum.Enum):
     - VISION_EXTRACTION  — Stage A vision fallback (page image → markdown)
     """
 
-    # Legacy v1 types
-    COUNSELLING = "counselling"
-    IT_HELP = "it_help"
-    EXTRACTION = "extraction"
-    QUIZ = "quiz"
-
     # v3.3 content pipeline types
     OUTLINE_INFERENCE = "outline_inference"
     MODULE_IDENTIFICATION = "module_identification"
@@ -106,6 +100,14 @@ class GenerationType(str, enum.Enum):
     COACHING_RAG = "coaching_rag"
     # Post-publish: map a drafted module to seeded behavioural_gap registry codes.
     MODULE_GAP_CLASSIFICATION = "module_gap_classification"
+    # Post-publish: map a drafted module to assessment-due topic triggers.
+    MODULE_ASSESSMENT_TOPIC_CLASSIFICATION = "module_assessment_topic_classification"
+    # Post-publish: generate bilingual search metadata for lexical retrieval.
+    MODULE_SEARCH_METADATA = "module_search_metadata"
+    # Post-publish: generate per-card bilingual search metadata for BM25 retrieval.
+    CARD_SEARCH_METADATA = "card_search_metadata"
+    # Nightly: synthesize bilingual chat FAQ chips from clustered telemetry.
+    CHAT_FAQ_SYNTHESIS = "chat_faq_synthesis"
 
 
 class SourceDocumentType(str, enum.Enum):

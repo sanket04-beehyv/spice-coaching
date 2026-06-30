@@ -4,13 +4,13 @@ Distinct from `services/card_validator.py` which validates the v3.0
 `CoachingCardResponse` shape. This module operates on the v3.3 module-
 pipeline shapes and adds 5 rules per Implementation Plan §11:
 
-1. **Bangla bleed** — `_bn` fields shouldn't contain >X% Latin alphabet
-   characters (catches LLM forgetting language and outputting English in
-   the Bangla slot).
+1. **Primary-script bleed** — primary-locale fields shouldn't contain >X%
+   characters outside the deployment's native script (catches LLM forgetting
+   language and outputting the wrong script in the primary locale slot).
 2. **Threshold consistency** — when `thresholds_jsonb` declares a
    numerical cutoff, the body / next_action must not contradict it.
-3. **Body length cap** — `body_bn` under a configured token cap so the
-   card fits a mobile screen.
+3. **Body length cap** — primary-locale body under a configured token cap so
+   the card fits a mobile screen.
 4. **Quiz options pairwise-distinct** — no two options identical (bug
    that makes the right answer obvious).
 5. **Forbidden patterns** — reuses `_DOSAGE_RE`, `_DRUG_RE`,
@@ -32,7 +32,16 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from mc_foundation.locale import LOCALIZED_CARD_TEXT_FIELDS, get_script_range
+
 from platform_service.config import Settings, get_settings
+from platform_service.localized import primary_options, primary_text
+from platform_service.services.card_body_text import (
+    card_body_char_len,
+    card_body_is_nonempty,
+    card_body_plain_text,
+    is_rich_text_body,
+)
 
 # Forbidden-expression regexes for clinical safety checks. Originally lived
 # in the v3.0 card_validator (deleted in the architecture reset); kept here
@@ -77,16 +86,16 @@ logger = logging.getLogger(__name__)
 # ── Tunable thresholds ──────────────────────────────────────────────────
 # Hard-coded for now; promote to settings if reviewers want them per-tenant.
 
-# A Bangla-content field can have *some* Latin characters (English drug
+# A primary-locale field can have *some* out-of-script characters (English drug
 # names mid-prose, abbreviations like "BP", number units like "mg"). >25%
-# means most of the field is English — that's bleed-through.
-_BANGLA_BLEED_LATIN_RATIO = 0.25
-_BANGLA_BLEED_MIN_LENGTH = 30  # don't flag very short fields
+# means most of the field is the wrong script — that's bleed-through.
+_PRIMARY_SCRIPT_BLEED_RATIO = 0.25
+_PRIMARY_SCRIPT_BLEED_MIN_LENGTH = 30  # don't flag very short fields
 
 # Approximation of "fits one mobile screen at 18sp body type".
-_MAX_BODY_BN_CHARS = 1200
-_MAX_TITLE_BN_CHARS = 120
-_MAX_NEXT_ACTION_BN_CHARS = 400
+_MAX_BODY_CHARS = 1200
+_MAX_TITLE_CHARS = 120
+_MAX_NEXT_ACTION_CHARS = 400
 
 # Threshold drift tolerance: if thresholds_jsonb says 140 and body says 138,
 # that's a real contradiction. ±2 is the slack we allow for rounding.
@@ -126,18 +135,44 @@ class QuizValidationResult:
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
-def _latin_alpha_ratio(s: str) -> float:
-    """Fraction of *alpha* characters that are ASCII letters. Numbers,
-    punctuation, whitespace, and Bangla codepoints don't count."""
-    if not s:
+def _out_of_script_alpha_ratio(s: str, script_range: tuple[int, int] | None) -> float:
+    """Fraction of *alpha* characters outside the deployment's native script."""
+    if not s or script_range is None:
         return 0.0
+    start, end = script_range
     alpha = [c for c in s if c.isalpha()]
     if not alpha:
         return 0.0
-    latin = sum(1 for c in alpha if c.isascii())
-    return latin / len(alpha)
+    out_of_script = sum(1 for c in alpha if not (start <= ord(c) <= end))
+    return out_of_script / len(alpha)
 
 
+def _primary_locale_raw(card: dict[str, Any], field: str, settings: Settings) -> Any:
+    """Return the deployment-primary value for a localized card field."""
+    raw = card.get(field)
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        return raw
+    primary = settings.deployment_primary_locale
+    if primary in raw:
+        return raw.get(primary)
+    if field == "body" and is_rich_text_body(raw):
+        return raw
+    return primary_text(raw, settings=settings)
+
+
+def _primary_field_plain_text(card: dict[str, Any], field: str, settings: Settings) -> str:
+    raw = _primary_locale_raw(card, field, settings)
+    if field == "body":
+        return card_body_plain_text(raw)
+    if isinstance(raw, str):
+        return raw.strip()
+    return ""
+
+
+_CARD_BLEED_FIELDS = LOCALIZED_CARD_TEXT_FIELDS
+_QUIZ_BLEED_FIELDS = ("question", "explanation", "case_setup")
 _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 
 
@@ -193,61 +228,54 @@ class ModuleCardValidator:
 
         cfid = str(card.get("card_family_id") or card.get("id") or "")
 
-        title_bn = (card.get("title_bn") or "").strip()
-        body_bn = (card.get("body_bn") or "").strip()
-        prev_bn = (card.get("previous_practice_bn") or "").strip()
-        curr_bn = (card.get("current_practice_bn") or "").strip()
-        rationale_bn = (card.get("rationale_for_change_bn") or "").strip()
+        title = _primary_field_plain_text(card, "title", self._settings)
+        body = _primary_field_plain_text(card, "body", self._settings)
+        prev = _primary_field_plain_text(card, "previous_practice", self._settings)
+        curr = _primary_field_plain_text(card, "current_practice", self._settings)
+        rationale = _primary_field_plain_text(card, "rationale_for_change", self._settings)
 
         # Required minimums. Refresher / digital_proficiency cards carry
-        # body_bn; content_update cards put their content in the practice
-        # fields and leave body_bn empty by design (W-5 §7).
-        is_content_update_shape = bool(prev_bn and curr_bn and rationale_bn)
-        if not body_bn and not is_content_update_shape:
+        # body; content_update cards put their content in the practice
+        # fields and leave body empty by design (W-5 §7).
+        is_content_update_shape = bool(prev and curr and rationale)
+        body_raw = _primary_locale_raw(card, "body", self._settings)
+        if not card_body_is_nonempty(body_raw) and not is_content_update_shape:
             hard.append(
-                "body_bn is empty and content_update fields "
-                "(previous/current_practice_bn + rationale_for_change_bn) are not all populated"
+                "body is empty and content_update fields "
+                "(previous_practice + current_practice + rationale_for_change) are not all populated"
             )
 
-        # Bangla bleed checks.
-        for fld in (
-            "title_bn",
-            "body_bn",
-            "next_action_bn",
-            "previous_practice_bn",
-            "current_practice_bn",
-            "rationale_for_change_bn",
-        ):
-            value = (card.get(fld) or "").strip()
-            if len(value) < _BANGLA_BLEED_MIN_LENGTH:
+        # Primary-script bleed checks.
+        script_range = get_script_range(self._settings.deployment_primary_locale)
+        for fld in _CARD_BLEED_FIELDS:
+            value = _primary_field_plain_text(card, fld, self._settings)
+            if len(value) < _PRIMARY_SCRIPT_BLEED_MIN_LENGTH:
                 continue
-            if _latin_alpha_ratio(value) > _BANGLA_BLEED_LATIN_RATIO:
+            if _out_of_script_alpha_ratio(value, script_range) > _PRIMARY_SCRIPT_BLEED_RATIO:
                 soft.append(
-                    f"{fld} contains >{int(_BANGLA_BLEED_LATIN_RATIO * 100)}% Latin "
-                    f"letters (likely English bleed-through)"
+                    f"{fld} contains >{int(_PRIMARY_SCRIPT_BLEED_RATIO * 100)}% "
+                    f"out-of-script characters (likely language bleed-through)"
                 )
 
         # Length caps (soft — these are layout hints, not safety issues).
-        if len(title_bn) > _MAX_TITLE_BN_CHARS:
-            soft.append(f"title_bn too long ({len(title_bn)} > {_MAX_TITLE_BN_CHARS})")
-        if len(body_bn) > _MAX_BODY_BN_CHARS:
-            soft.append(f"body_bn too long ({len(body_bn)} > {_MAX_BODY_BN_CHARS})")
-        next_action_bn = (card.get("next_action_bn") or "").strip()
-        if len(next_action_bn) > _MAX_NEXT_ACTION_BN_CHARS:
-            soft.append(f"next_action_bn too long ({len(next_action_bn)} > {_MAX_NEXT_ACTION_BN_CHARS})")
+        if len(title) > _MAX_TITLE_CHARS:
+            soft.append(f"title too long ({len(title)} > {_MAX_TITLE_CHARS})")
+        if card_body_char_len(body_raw) > _MAX_BODY_CHARS:
+            soft.append(f"body too long ({card_body_char_len(body_raw)} > {_MAX_BODY_CHARS})")
+        next_action = _primary_field_plain_text(card, "next_action", self._settings)
+        if len(next_action) > _MAX_NEXT_ACTION_CHARS:
+            soft.append(f"next_action too long ({len(next_action)} > {_MAX_NEXT_ACTION_CHARS})")
 
         # Forbidden patterns across all narrative fields (hard — safety).
         narrative = " ".join(
             v
             for v in (
-                title_bn,
-                body_bn,
-                next_action_bn,
-                card.get("previous_practice_bn") or "",
-                card.get("current_practice_bn") or "",
-                card.get("rationale_for_change_bn") or "",
-                card.get("title_en") or "",
-                card.get("body_en") or "",
+                title,
+                body,
+                next_action,
+                _primary_field_plain_text(card, "previous_practice", self._settings),
+                _primary_field_plain_text(card, "current_practice", self._settings),
+                _primary_field_plain_text(card, "rationale_for_change", self._settings),
             )
             if v
         )
@@ -264,7 +292,7 @@ class ModuleCardValidator:
         thresholds = card.get("thresholds_jsonb") or card.get("thresholds")
         threshold_values = _flatten_threshold_values(thresholds)
         if threshold_values:
-            body_numbers = _extract_numbers(body_bn) + _extract_numbers(next_action_bn)
+            body_numbers = _extract_numbers(body) + _extract_numbers(next_action)
             # Flag only body numbers that are a "near miss" of a threshold —
             # off by 1–15. Equal means it matches; off by more than 15 is
             # almost certainly a different concept (e.g. diastolic vs
@@ -282,8 +310,8 @@ class ModuleCardValidator:
         # Referral destination check — only when the card carries an EXPLICIT
         # referral_destination field (not a v3.3 ModuleCard concept by default,
         # but tolerated in case Stage D ever adds it). v3.3 modules embed
-        # referral guidance inside next_action_bn as Bangla prose, so we don't
-        # try to parse facility names out of it.
+        # referral guidance inside next_action as primary-locale prose, so we
+        # don't try to parse facility names out of it.
         referral = card.get("referral_destination")
         if isinstance(referral, str) and referral:
             if len(referral) <= 80 and referral not in self._settings.spice_referral_set:
@@ -304,20 +332,24 @@ class ModuleCardValidator:
 
         qfid = str(q.get("question_family_id") or q.get("id") or "")
 
-        question_bn = (q.get("question_bn") or "").strip()
-        if not question_bn:
-            hard.append("question_bn is empty")
+        question = (primary_text(q.get("question"), settings=self._settings) or "").strip()
+        if not question:
+            hard.append("question is empty")
 
-        # Bangla bleed on question text + explanation.
-        for fld in ("question_bn", "explanation_bn", "case_setup_bn"):
-            value = (q.get(fld) or "").strip()
-            if len(value) < _BANGLA_BLEED_MIN_LENGTH:
+        # Primary-script bleed on question text + explanation.
+        script_range = get_script_range(self._settings.deployment_primary_locale)
+        for fld in _QUIZ_BLEED_FIELDS:
+            value = (primary_text(q.get(fld), settings=self._settings) or "").strip()
+            if len(value) < _PRIMARY_SCRIPT_BLEED_MIN_LENGTH:
                 continue
-            if _latin_alpha_ratio(value) > _BANGLA_BLEED_LATIN_RATIO:
-                soft.append(f"{fld} contains >{int(_BANGLA_BLEED_LATIN_RATIO * 100)}% Latin letters")
+            if _out_of_script_alpha_ratio(value, script_range) > _PRIMARY_SCRIPT_BLEED_RATIO:
+                soft.append(
+                    f"{fld} contains >{int(_PRIMARY_SCRIPT_BLEED_RATIO * 100)}% "
+                    f"out-of-script characters (likely language bleed-through)"
+                )
 
         # Options validation.
-        options = q.get("options_bn") or []
+        options = primary_options(q.get("options"), settings=self._settings) or []
         if not isinstance(options, list) or len(options) < 2:
             hard.append("quiz must have at least 2 options")
         else:

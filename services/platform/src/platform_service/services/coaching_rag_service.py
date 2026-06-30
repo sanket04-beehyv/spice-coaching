@@ -8,7 +8,6 @@ import uuid
 from typing import Any
 from uuid import UUID
 
-from fastapi import HTTPException
 from mc_contracts.coaching_rag import (
     CoachingRagRequest,
     CoachingRagResponse,
@@ -25,6 +24,7 @@ from mc_contracts.internal_ai import (
     PromptSpec,
     TraceContext,
 )
+from mc_foundation.locale import locale_display_name
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.config import Settings, get_settings
@@ -33,6 +33,13 @@ from platform_service.db.repositories.module_repository import ModuleRepository
 from platform_service.db.repositories.source_repository import SourceRepository
 from platform_service.exceptions import EmbeddingDimensionError
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
+from platform_service.localized import (
+    deployment_locales,
+    migrate_legacy_card,
+    primary_text,
+)
+from platform_service.services.card_body_text import card_body_plain_text
+from platform_service.services.coaching_rag_errors import CoachingRagError
 from platform_service.services.embedding_vector import assert_embedding_dimension
 from platform_service.services.llm_text_utils import strip_json_fence
 from platform_service.services.object_storage import (
@@ -44,7 +51,6 @@ from platform_service.services.object_storage import (
 
 logger = logging.getLogger(__name__)
 
-_CONTEXT_MAX_CHARS = 28_000
 _KNOWN_SOURCE_TYPES = frozenset(e.value for e in SourceDocumentType)
 
 
@@ -54,10 +60,7 @@ def parse_rag_json(raw_text: str, parsed_json: Any) -> dict[str, Any]:
     try:
         return json.loads(strip_json_fence(raw_text))
     except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"model returned non-JSON answer: {exc}",
-        ) from exc
+        raise CoachingRagError(f"model returned non-JSON answer: {exc}") from exc
 
 
 class CoachingRagService:
@@ -81,45 +84,48 @@ class CoachingRagService:
         tenant_id: UUID | None = None,
     ) -> CoachingRagResponse:
         settings = self._settings
-        ttl = min(body.presigned_url_ttl_seconds, settings.admin_file_presigned_max_seconds)
+        ttl = min(
+            settings.coaching_rag_presigned_url_ttl_seconds,
+            settings.admin_file_presigned_max_seconds,
+        )
 
         try:
             vectors = await self._ai.embed([body.question])
         except Exception:
             logger.exception("ai-runtime embed failed for rag-query")
-            raise HTTPException(status_code=502, detail="ai-runtime embed failed") from None
+            raise CoachingRagError("ai-runtime embed failed") from None
         if not vectors:
-            raise HTTPException(status_code=502, detail="ai-runtime returned no embedding for query")
+            raise CoachingRagError("ai-runtime returned no embedding for query")
 
         query_vec = self._assert_query_embedding(vectors[0], expected_dim=settings.embedding_dimension)
         pairs = await ModuleRepository(self._session).search_by_embedding(
             query_vector=query_vec,
-            limit=body.module_limit,
+            limit=settings.coaching_rag_module_limit,
             tenant_id=tenant_id,
         )
         if not pairs:
-            raise HTTPException(
+            raise CoachingRagError(
+                "no published modules with embeddings matched the corpus; ingest/publish modules first",
                 status_code=404,
-                detail="no published modules with embeddings matched the corpus; ingest/publish modules first",
             )
 
-        per_mod = max(800, _CONTEXT_MAX_CHARS // max(1, len(pairs)))
+        per_mod = max(800, settings.coaching_rag_context_max_chars // max(1, len(pairs)))
         context = self._build_retrieval_context(pairs, per_module_budget=per_mod)
         resp = await self._generate_answer(body, context)
         if resp.error:
-            raise HTTPException(status_code=502, detail=f"ai-runtime error: {resp.error}")
+            raise CoachingRagError(f"ai-runtime error: {resp.error}")
 
         payload = parse_rag_json(resp.raw_text, resp.parsed_json)
         answer = (payload.get("answer") or "").strip()
         if not answer:
-            raise HTTPException(status_code=502, detail="model JSON missing non-empty 'answer' field")
+            raise CoachingRagError("model JSON missing non-empty 'answer' field")
 
         cited_ids = self._parse_cited_module_ids(payload.get("cited_module_ids") or [])
+        suggested_questions = self._parse_suggested_questions(payload.get("suggested_questions"))
         retrieved_hits = [
             RetrievedModuleHit(
                 module_id=m.id,
-                title_bn=m.title_bn,
-                title_en=m.title_en,
+                title=m.title_localized,
                 domain=m.domain,
                 cosine_distance=dist,
             )
@@ -132,6 +138,7 @@ class CoachingRagService:
                 source_documents=[],
                 model=resp.model or settings.text_model,
                 cited_module_ids=[],
+                suggested_questions=suggested_questions,
             )
 
         attributions = await self._build_attribution(
@@ -145,6 +152,7 @@ class CoachingRagService:
             source_documents=attributions,
             model=resp.model or settings.text_model,
             cited_module_ids=cited_ids,
+            suggested_questions=suggested_questions,
         )
 
     @staticmethod
@@ -152,27 +160,28 @@ class CoachingRagService:
         try:
             return assert_embedding_dimension(vec, expected_dim=expected_dim)
         except EmbeddingDimensionError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise CoachingRagError(str(exc)) from exc
 
-    @staticmethod
-    def _cards_text_for_module(module: Module, budget_chars: int) -> str:
+    def _cards_text_for_module(self, module: Module, budget_chars: int) -> str:
         mj = module.module_json or {}
         cards = mj.get("cards") or []
+        primary_locale = deployment_locales(self._settings)
         lines: list[str] = []
         used = 0
         for i, card in enumerate(cards):
             if not isinstance(card, dict):
                 continue
-            title_bn = (card.get("title_bn") or "").strip()
-            title_en = (card.get("title_en") or "").strip()
-            body_bn = (card.get("body_bn") or "").strip()
-            body_en = (card.get("body_en") or "").strip()
+            migrated = migrate_legacy_card(dict(card), primary=primary_locale)
+            title_map = migrated.get("title") if isinstance(migrated.get("title"), dict) else {}
+            body_map = migrated.get("body") if isinstance(migrated.get("body"), dict) else {}
+            title_primary = primary_text(title_map, settings=self._settings) or ""
+            body_primary = card_body_plain_text(
+                body_map.get(primary_locale) if isinstance(body_map, dict) else None
+            )
             chunk = (
                 f"--- card_index={i} ---\n"
-                f"title_bn: {title_bn}\n"
-                f"title_en: {title_en}\n"
-                f"body_bn: {body_bn}\n"
-                f"body_en: {body_en}\n"
+                f"title[{primary_locale}]: {title_primary}\n"
+                f"body[{primary_locale}]: {body_primary}\n"
             )
             if used + len(chunk) > budget_chars:
                 lines.append(f"... truncated after card_index={i - 1} (char budget)")
@@ -187,31 +196,45 @@ class CoachingRagService:
         *,
         per_module_budget: int,
     ) -> str:
+        primary_locale = deployment_locales(self._settings)
         blocks: list[str] = []
         for mod, dist in pairs:
             cards_blob = self._cards_text_for_module(mod, per_module_budget)
+            title_primary = primary_text(mod.title_localized, settings=self._settings) or ""
             blocks.append(
                 f"[[[ MODULE_BLOCK module_id={mod.id} cosine_distance={dist:.6f} ]]]\n"
-                f"title_bn: {mod.title_bn}\n"
-                f"title_en: {mod.title_en or ''}\n"
+                f"title[{primary_locale}]: {title_primary}\n"
                 f"domain: {mod.domain}\n"
                 f"CARD_CONTENT:\n{cards_blob}\n"
             )
         text = "\n\n".join(blocks)
-        if len(text) > _CONTEXT_MAX_CHARS:
-            return text[:_CONTEXT_MAX_CHARS] + "\n... CONTEXT TRUNCATED ..."
+        context_max_chars = self._settings.coaching_rag_context_max_chars
+        if len(text) > context_max_chars:
+            return text[:context_max_chars] + "\n... CONTEXT TRUNCATED ..."
         return text
 
     async def _generate_answer(self, body: CoachingRagRequest, context: str) -> InferenceResponse:
         settings = self._settings
-        lang = body.response_language
+        lang = body.response_language.strip() or settings.deployment_primary_locale
+        supported = settings.deployment_locale_config.supported
+        if lang not in supported:
+            raise CoachingRagError(
+                f"response_language must be one of {supported!r}, got {lang!r}",
+                status_code=400,
+            )
+        lang_label = locale_display_name(lang)
         system = (
             "You are a clinical / CHW training assistant. Answer ONLY using the MODULE_BLOCK excerpts. "
             "If the context is insufficient, say so explicitly. Respond with a single JSON object, no markdown fences, keys:\n"
             '- "answer": string (primary language: '
-            f"{'Bangla (bn)' if lang == 'bn' else 'English (en)'}"
+            f"{lang_label}"
             ")\n"
             '- "cited_module_ids": array of UUID strings — only modules you relied on from the MODULE_BLOCK headers\n'
+            '- "suggested_questions": array of 3–5 strings — follow-up questions a CHW might ask next; '
+            "each MUST be fully answerable solely from the CARD_CONTENT inside the MODULE_BLOCK excerpts "
+            "(not general medical knowledge or content absent from the excerpts); "
+            "do not repeat or lightly rephrase the current user question; "
+            f"primary language: {lang_label}; return fewer items or [] if context is insufficient\n"
             '- "confidence": optional string "high"|"medium"|"low"\n'
         )
         human = (
@@ -240,7 +263,28 @@ class CoachingRagService:
             return await self._ai.generate(req)
         except Exception:
             logger.exception("ai-runtime generate failed for rag-query")
-            raise HTTPException(status_code=502, detail="ai-runtime generation failed") from None
+            raise CoachingRagError("ai-runtime generation failed") from None
+
+    @staticmethod
+    def _parse_suggested_questions(raw: Any, *, max_count: int = 5) -> list[str]:
+        if not isinstance(raw, list):
+            return []
+        seen: set[str] = set()
+        out: list[str] = []
+        for item in raw:
+            if not isinstance(item, str):
+                continue
+            text = item.strip()
+            if not text:
+                continue
+            key = text.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(text)
+            if len(out) >= max_count:
+                break
+        return out
 
     @staticmethod
     def _parse_cited_module_ids(cited_raw: list[Any]) -> list[UUID]:

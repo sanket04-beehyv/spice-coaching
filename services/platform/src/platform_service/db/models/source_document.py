@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Date, DateTime, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -54,6 +54,12 @@ class SourceDocument(Base):
     # Stage A calibration result per Pipeline v3.3 §4.4:
     # { "vision_pct": 0.55, "text_pct": 0.45, "sample_pages_evaluated": [3, 17, ...], "decision_at": "..." }
     extraction_calibration_jsonb: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+    # Optional admin steering text for Stage C module identification (sanitized at ingest).
+    ingestion_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # When true, document may appear in GET /sync/source-documents/published.
+    sync_published_visible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # ingesting | ingested | failed
     status: Mapped[str] = mapped_column(Text, nullable=False, default="ingesting")

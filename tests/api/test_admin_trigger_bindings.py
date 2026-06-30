@@ -24,7 +24,7 @@ class TestTriggerBindings:
     async def _seed_trigger_and_binding(
         self,
         db_session: AsyncSession,
-        family_id: UUID,
+        module_id: UUID,
         *,
         relationship: str = "primary",
         priority_weight: int = 10,
@@ -38,7 +38,7 @@ class TestTriggerBindings:
         await db_session.flush()
         binding = ModuleTriggerBinding(
             trigger_definition_id=td.id,
-            module_family_id=family_id,
+            module_id=module_id,
             relationship=relationship,
             priority_weight=priority_weight,
         )
@@ -47,17 +47,17 @@ class TestTriggerBindings:
         await db_session.commit()
         return td, binding
 
-    async def test_list_by_family(self, client: AsyncClient, db_session: AsyncSession) -> None:
+    async def test_list_by_module(self, client: AsyncClient, db_session: AsyncSession) -> None:
         m = await _seed_module(db_session)
         td, binding = await self._seed_trigger_and_binding(
-            db_session, m.module_family_id, relationship="primary", priority_weight=10
+            db_session, m.id, relationship="primary", priority_weight=10
         )
 
-        resp = await client.get(platform_path(f"/admin/trigger-bindings/by-module/{m.module_family_id}"))
+        resp = await client.get(platform_path(f"/admin/trigger-bindings/by-module/{m.id}"))
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
-        assert data[0]["module_family_id"] == str(m.module_family_id)
+        assert data[0]["module_id"] == str(m.id)
         assert data[0]["trigger_definition_id"] == str(td.id)
         assert data[0]["relationship"] == "primary"
         assert data[0]["priority_weight"] == 10
@@ -76,7 +76,7 @@ class TestTriggerBindings:
             platform_path("/admin/trigger-bindings"),
             json={
                 "trigger_definition_id": str(td.id),
-                "module_family_id": str(m.module_family_id),
+                "module_id": str(m.id),
                 "relationship": "secondary",
                 "priority_weight": 25,
                 "notes": "covers refresher cadence",
@@ -102,7 +102,7 @@ class TestTriggerBindings:
             platform_path("/admin/trigger-bindings"),
             json={
                 "trigger_definition_id": str(td.id),
-                "module_family_id": str(m.module_family_id),
+                "module_id": str(m.id),
             },
         )
         assert resp.status_code == 200
@@ -116,7 +116,7 @@ class TestTriggerBindings:
     ) -> None:
         m = await _seed_module(db_session)
         td, binding = await self._seed_trigger_and_binding(
-            db_session, m.module_family_id, relationship="primary", priority_weight=10
+            db_session, m.id, relationship="primary", priority_weight=10
         )
 
         # Update only priority_weight; relationship should remain "primary".
@@ -133,7 +133,7 @@ class TestTriggerBindings:
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         m = await _seed_module(db_session)
-        td, binding = await self._seed_trigger_and_binding(db_session, m.module_family_id)
+        td, binding = await self._seed_trigger_and_binding(db_session, m.id)
         resp = await client.put(
             platform_path(f"/admin/trigger-bindings/{binding.id}"),
             json={"relationship": "tertiary"},  # not in allowed set
@@ -149,12 +149,12 @@ class TestTriggerBindings:
 
     async def test_delete_binding(self, client: AsyncClient, db_session: AsyncSession) -> None:
         m = await _seed_module(db_session)
-        td, binding = await self._seed_trigger_and_binding(db_session, m.module_family_id)
+        td, binding = await self._seed_trigger_and_binding(db_session, m.id)
 
         resp = await client.delete(platform_path(f"/admin/trigger-bindings/{binding.id}"))
         assert resp.status_code == 200
-        # And listing again returns no bindings for this family.
-        list_resp = await client.get(platform_path(f"/admin/trigger-bindings/by-module/{m.module_family_id}"))
+        # And listing again returns no bindings for this module.
+        list_resp = await client.get(platform_path(f"/admin/trigger-bindings/by-module/{m.id}"))
         assert list_resp.json() == []
 
     async def test_delete_binding_404_for_unknown(self, client: AsyncClient) -> None:

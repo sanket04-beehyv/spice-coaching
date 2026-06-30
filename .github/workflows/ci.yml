@@ -67,13 +67,16 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Bandit security scan
-        run: uv run bandit -r packages services -lll -x tests,infra/alembic -s B101
+        run: uv run bandit -r packages services eval -lll -x tests,infra/alembic -s B101
 
       - name: Dependency audit
         run: uv run pip-audit
 
       - name: Pyright type check
-        run: uv run pyright packages/contracts/src packages/foundation/src services/ai-runtime/src services/platform/src
+        run: uv run pyright
 
-      - name: Run tests
-        run: uv run pytest tests services/ai-runtime/tests
+      - name: Run tests with coverage
+        run: >-
+          uv run pytest tests services/ai-runtime/tests
+          --cov=platform_service.workers --cov=ai_runtime
+          --cov-report=term-missing --cov-fail-under=70

@@ -2,6 +2,7 @@
 
 from platform_service.services.module_completion.gap_escalation_handler import GapEscalationHandler
 from platform_service.services.module_completion.learning_points_handler import LearningPointsHandler
+from platform_service.services.module_completion.quiz_escalation_handler import QuizEscalationHandler
 from platform_service.services.module_completion.quiz_progress_handler import QuizProgressHandler
 from platform_service.services.module_completion.telemetry_parsing import (
     coerce_tenant_uuid,
@@ -16,6 +17,7 @@ from platform_service.services.module_completion.telemetry_parsing import (
 __all__ = [
     "GapEscalationHandler",
     "LearningPointsHandler",
+    "QuizEscalationHandler",
     "QuizProgressHandler",
     "coerce_tenant_uuid",
     "module_quiz_outcome_kind",

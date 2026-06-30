@@ -46,6 +46,10 @@ dev = [
     "pyright>=1.1.400,<2.0.0",
 ]
 
+[tool.coverage.run]
+source = ["services/platform/src/platform_service", "services/ai-runtime/src/ai_runtime"]
+omit = ["*/tests/*"]
+
 [tool.ruff]
 line-length = 110
 target-version = "py311"

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from platform_service.config import get_settings
 from platform_service.main import create_app
 
 from tests.conftest import platform_path, requires_db
@@ -42,8 +43,6 @@ async def test_ready_returns_ok_when_dependencies_healthy(client: AsyncClient) -
         patch("platform_service.main.get_object_storage_client", return_value=storage_mock),
         patch("platform_service.main.httpx.AsyncClient") as httpx_cls,
     ):
-        from platform_service.config import get_settings
-
         ai_client = AsyncMock()
         ai_resp = MagicMock()
         ai_resp.raise_for_status = MagicMock()

@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 from mc_contracts.admin_ingest import FusionRequest
 from mc_contracts.enums import EventFamily
+from mc_contracts.localized import LocaleConfig
 from mc_contracts.sync import ConfigSyncBundle, ModulesSyncBundle
 from mc_contracts.telemetry import TelemetryBatch, TelemetryEvent
 from pydantic import ValidationError
@@ -57,11 +58,18 @@ def test_modules_sync_bundle_requires_lists() -> None:
         server_time_utc=datetime.now(UTC).isoformat(),
     )
     assert bundle.modules == []
+    assert bundle.assigned_module_ids == []
 
 
 def test_config_sync_bundle_accepts_threshold_map() -> None:
-    bundle = ConfigSyncBundle(thresholds={"gap_escalation_days": 7}, server_time_utc="2026-01-01T00:00:00Z")
+    bundle = ConfigSyncBundle(
+        thresholds={"gap_escalation_days": 7},
+        locales=LocaleConfig(primary="bn", supported=["bn"]),
+        server_time_utc="2026-01-01T00:00:00Z",
+    )
     assert bundle.thresholds["gap_escalation_days"] == 7
+    assert bundle.locales.primary == "bn"
+    assert bundle.locales.supported == ["bn"]
 
 
 def test_fusion_request_requires_at_least_two_source_documents() -> None:

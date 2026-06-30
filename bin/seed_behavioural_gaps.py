@@ -19,6 +19,8 @@ import json
 import sys
 from pathlib import Path
 
+from platform_service.db.base import SessionLocal
+from platform_service.db.models.behavioural_gap import BehaviouralGap
 from sqlalchemy import select
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -26,10 +28,6 @@ DEFAULT_SEED = REPO_ROOT / "seed" / "behavioural_gaps_pilot.json"
 
 
 async def _seed(path: Path) -> None:
-    # Local import so module discovery works from project root.
-    from platform_service.db.base import SessionLocal
-    from platform_service.db.models.behavioural_gap import BehaviouralGap
-
     payload = json.loads(path.read_text(encoding="utf-8"))
     gaps = payload.get("gaps", [])
     if not gaps:

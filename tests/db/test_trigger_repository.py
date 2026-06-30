@@ -5,12 +5,32 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.repositories.trigger_repository import TriggerRepository
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import requires_db
+
+
+async def _make_module(db_session: AsyncSession, family: ModuleFamily | None = None) -> Module:
+    if family is None:
+        family = ModuleFamily(module_code=f"BIND-{uuid4().hex[:8]}")
+        db_session.add(family)
+        await db_session.flush()
+    module = Module(
+        module_family_id=family.id,
+        version=1,
+        title_localized={"bn": "test module"},
+        domain="iccm",
+        module_type="refresher",
+        lifecycle_status="published",
+        module_json={"cards": []},
+    )
+    db_session.add(module)
+    await db_session.flush()
+    return module
 
 
 @pytest.mark.asyncio
@@ -83,16 +103,14 @@ async def test_deprecate_trigger_hides_from_active_list(db_session: AsyncSession
 @requires_db
 async def test_bind_module_to_trigger_creates_row(db_session: AsyncSession) -> None:
     repo = TriggerRepository(db_session)
-    family = ModuleFamily(module_code=f"BIND-{uuid4().hex[:8]}")
-    db_session.add(family)
-    await db_session.flush()
+    module = await _make_module(db_session)
     trigger = await repo.create_trigger(
         trigger_kind="gap",
         trigger_code=f"bindtrig_{uuid4().hex[:8]}",
         predicate_jsonb={"behavioural_gap_code": "x"},
     )
     binding = await repo.bind_module_to_trigger(
-        module_family_id=family.id,
+        module_id=module.id,
         trigger_definition_id=trigger.id,
         priority_weight=20,
     )
@@ -106,9 +124,7 @@ async def test_bind_module_to_trigger_creates_row(db_session: AsyncSession) -> N
 @requires_db
 async def test_bind_invalid_relationship_rejected(db_session: AsyncSession) -> None:
     repo = TriggerRepository(db_session)
-    family = ModuleFamily(module_code=f"BR-{uuid4().hex[:8]}")
-    db_session.add(family)
-    await db_session.flush()
+    module = await _make_module(db_session)
     trigger = await repo.create_trigger(
         trigger_kind="gap",
         trigger_code=f"br_{uuid4().hex[:8]}",
@@ -116,7 +132,7 @@ async def test_bind_invalid_relationship_rejected(db_session: AsyncSession) -> N
     )
     with pytest.raises(ValueError, match="relationship"):
         await repo.bind_module_to_trigger(
-            module_family_id=family.id,
+            module_id=module.id,
             trigger_definition_id=trigger.id,
             relationship="tertiary",
         )
@@ -126,17 +142,15 @@ async def test_bind_invalid_relationship_rejected(db_session: AsyncSession) -> N
 @requires_db
 async def test_duplicate_binding_rejected(db_session: AsyncSession) -> None:
     repo = TriggerRepository(db_session)
-    family = ModuleFamily(module_code=f"DB-{uuid4().hex[:8]}")
-    db_session.add(family)
-    await db_session.flush()
+    module = await _make_module(db_session)
     trigger = await repo.create_trigger(
         trigger_kind="gap",
         trigger_code=f"db_{uuid4().hex[:8]}",
         predicate_jsonb={"behavioural_gap_code": "x"},
     )
-    await repo.bind_module_to_trigger(module_family_id=family.id, trigger_definition_id=trigger.id)
+    await repo.bind_module_to_trigger(module_id=module.id, trigger_definition_id=trigger.id)
     with pytest.raises(IntegrityError):
-        await repo.bind_module_to_trigger(module_family_id=family.id, trigger_definition_id=trigger.id)
+        await repo.bind_module_to_trigger(module_id=module.id, trigger_definition_id=trigger.id)
 
 
 @pytest.mark.asyncio
@@ -145,19 +159,17 @@ async def test_list_active_bindings_for_trigger_codes_skips_deprecated(
     db_session: AsyncSession,
 ) -> None:
     repo = TriggerRepository(db_session)
-    family = ModuleFamily(module_code=f"AC-{uuid4().hex[:8]}")
-    db_session.add(family)
-    await db_session.flush()
+    module = await _make_module(db_session)
     code = f"ac_{uuid4().hex[:8]}"
     trigger = await repo.create_trigger(
         trigger_kind="gap", trigger_code=code, predicate_jsonb={"behavioural_gap_code": "x"}
     )
     await repo.bind_module_to_trigger(
-        module_family_id=family.id, trigger_definition_id=trigger.id, priority_weight=7
+        module_id=module.id, trigger_definition_id=trigger.id, priority_weight=7
     )
-    pairs = await repo.list_active_bindings_for_trigger_codes([code])
-    assert len(pairs) == 1
+    triples = await repo.list_active_bindings_for_trigger_codes([code])
+    assert len(triples) == 1
 
     await repo.deprecate_trigger(trigger.id)
-    pairs = await repo.list_active_bindings_for_trigger_codes([code])
-    assert pairs == []
+    triples = await repo.list_active_bindings_for_trigger_codes([code])
+    assert triples == []

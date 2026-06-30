@@ -9,7 +9,8 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from asyncpg import Range  # type: ignore[import-untyped]
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from mc_contracts.admin_modules import (
     ClinicalFlagRequest,
     ModuleCreateRequest,
@@ -21,6 +22,13 @@ from mc_contracts.admin_modules import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from platform_service.auth.spice_identity import resolve_tenant_id_for_admin
+from platform_service.celery_tasks import (
+    bind_assessment_triggers_task,
+    classify_module_gaps_task,
+    generate_module_embedding_task,
+    generate_module_quiz_task,
+)
 from platform_service.config import Settings, get_settings
 from platform_service.db.models.module import Module
 from platform_service.db.repositories.module_gap_repository import (
@@ -35,6 +43,7 @@ from platform_service.db.validators import ValidationError
 from platform_service.deps import get_ai_client, get_db, get_object_storage_client
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 from platform_service.services.module_attachment_validator import validate_module_attachments
+from platform_service.services.module_card_body_validator import validate_module_card_bodies
 from platform_service.services.module_presenter import (
     cards_with_source_pages,
     get_quiz_counts,
@@ -61,6 +70,7 @@ async def create_new_module(
     module_json = body.module_json
     if module_json is not None:
         try:
+            module_json = validate_module_card_bodies(module_json)
             module_json = await validate_module_attachments(
                 module_json,
                 settings=settings,
@@ -72,10 +82,8 @@ async def create_new_module(
     repo = ModuleRepository(session)
     try:
         new_module = await repo.create_module(
-            title_bn=body.title_bn,
-            title_en=body.title_en,
-            description_bn=body.description_bn,
-            description_en=body.description_en,
+            title=body.title,
+            description=body.description,
             domain=body.domain,
             sub_domain=body.sub_domain,
             module_type=body.module_type,
@@ -106,6 +114,7 @@ async def create_new_module(
 
 @router.get("/modules", response_model=list[ModuleSummary])
 async def list_modules(
+    request: Request,
     status: str | None = Query(None, description="draft | published | retired"),
     clinically_reviewed: bool | None = Query(None),
     has_visibility_window: bool | None = Query(None),
@@ -115,6 +124,10 @@ async def list_modules(
     ),
     domain: str | None = Query(None),
     q: str | None = Query(None, description="full-text query against title + description"),
+    tenant_id: UUID | None = Query(
+        default=None,
+        description="Optional tenant UUID override (admin principals only when auth is enabled).",
+    ),
     latest_version_only: bool = Query(
         True,
         description="When true (default), collapse to one row per module_family showing the highest-version row that matches filters. Set false to see every version.",
@@ -124,6 +137,7 @@ async def list_modules(
     session: AsyncSession = Depends(get_db),
     storage: ObjectStorageClient = Depends(get_object_storage_client),
 ) -> list[ModuleSummary]:
+    effective_tenant = resolve_tenant_id_for_admin(request, tenant_id)
     repo = ModuleRepository(session)
     modules = await repo.list_modules(
         status=status,
@@ -133,6 +147,7 @@ async def list_modules(
         domain=domain,
         full_text_query=q,
         latest_version_only=latest_version_only,
+        tenant_id=effective_tenant,
         limit=limit,
         offset=offset,
     )
@@ -205,6 +220,7 @@ async def edit_module(
     module_json = body.module_json
     if module_json is not None:
         try:
+            module_json = validate_module_card_bodies(module_json)
             module_json = await validate_module_attachments(
                 module_json,
                 settings=settings,
@@ -227,9 +243,8 @@ async def edit_module(
     try:
         new_module = await repo.edit_module(
             module_id,
-            title_bn=body.title_bn,
-            title_en=body.title_en,
-            description_bn=body.description_bn,
+            title=body.title,
+            description=body.description,
             module_json=module_json,
             editor_id=body.editor_id,
             **thumbnail_kw,
@@ -301,8 +316,6 @@ async def set_visibility_window(
     body: VisibilityWindowRequest,
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    from asyncpg import Range  # type: ignore[import-untyped]
-
     repo = ModuleRepository(session)
     window: Range | None
     if body.starts_at is None and body.ends_at is None:
@@ -347,7 +360,12 @@ async def retire_module(
 
 @router.post("/modules/search", response_model=list[ModuleSummary])
 async def semantic_search(
+    request: Request,
     body: SemanticSearchRequest,
+    tenant_id: UUID | None = Query(
+        default=None,
+        description="Optional tenant UUID override (admin principals only when auth is enabled).",
+    ),
     session: AsyncSession = Depends(get_db),
     storage: ObjectStorageClient = Depends(get_object_storage_client),
     ai_client: AIRuntimeClient = Depends(get_ai_client),
@@ -361,8 +379,13 @@ async def semantic_search(
         if not vectors:
             raise HTTPException(status_code=502, detail="ai-runtime returned no embedding")
         vec = vectors[0]
+    effective_tenant = resolve_tenant_id_for_admin(request, tenant_id)
     repo = ModuleRepository(session)
-    pairs = await repo.search_by_embedding(query_vector=vec, limit=body.limit)
+    pairs = await repo.search_by_embedding(
+        query_vector=vec,
+        limit=body.limit,
+        tenant_id=effective_tenant,
+    )
     modules = [m for m, _distance in pairs]
     quiz_counts = await get_quiz_counts(session, [m.id for m in modules])
     return [
@@ -383,8 +406,6 @@ async def regenerate_quiz(
 ) -> dict[str, Any]:
     if await session.get(Module, module_id) is None:
         raise HTTPException(status_code=404, detail="module not found")
-    from platform_service.celery_tasks import generate_module_quiz_task
-
     generate_module_quiz_task.delay(str(module_id))
     return {"id": str(module_id), "enqueued": "platform.generate_module_quiz"}
 
@@ -396,8 +417,6 @@ async def regenerate_embedding(
 ) -> dict[str, Any]:
     if await session.get(Module, module_id) is None:
         raise HTTPException(status_code=404, detail="module not found")
-    from platform_service.celery_tasks import generate_module_embedding_task
-
     generate_module_embedding_task.delay(str(module_id))
     return {"id": str(module_id), "enqueued": "platform.generate_module_embedding"}
 
@@ -409,7 +428,16 @@ async def regenerate_gap_classification(
 ) -> dict[str, Any]:
     if await session.get(Module, module_id) is None:
         raise HTTPException(status_code=404, detail="module not found")
-    from platform_service.celery_tasks import classify_module_gaps_task
-
     classify_module_gaps_task.delay(str(module_id))
     return {"id": str(module_id), "enqueued": "platform.classify_module_gaps"}
+
+
+@router.post("/modules/{module_id}/bind-assessment-triggers")
+async def bind_assessment_triggers(
+    module_id: UUID,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if await session.get(Module, module_id) is None:
+        raise HTTPException(status_code=404, detail="module not found")
+    bind_assessment_triggers_task.delay(str(module_id))
+    return {"id": str(module_id), "enqueued": "platform.bind_assessment_triggers"}

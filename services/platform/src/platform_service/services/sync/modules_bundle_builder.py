@@ -15,8 +15,15 @@ from mc_contracts.sync import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.models.source_document import SourceDocument
+from platform_service.db.repositories.module_gap_repository import ModuleGapRepository
 from platform_service.db.repositories.module_repository import ModuleRepository
 from platform_service.db.repositories.source_repository import SourceRepository
+from platform_service.services.card_provenance import (
+    block_ids_from_card,
+    render_card_provenance,
+    resolve_card_provenance,
+)
+from platform_service.services.sync.module_assignment_resolver import resolve_assigned_module_ids
 
 
 def build_source_document_sync_payloads(
@@ -50,14 +57,23 @@ class ModulesBundleBuilder:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def build(self, *, since: datetime, tenant_id: UUID | None = None) -> ModulesSyncBundle:
+    async def build(
+        self,
+        *,
+        since: datetime,
+        tenant_id: UUID | None = None,
+        user_id: int | None = None,
+        organization_ids: list[int] | None = None,
+    ) -> ModulesSyncBundle:
         module_repo = ModuleRepository(self._session)
         families = await module_repo.list_families_created_since(since, tenant_id=tenant_id)
         modules = await module_repo.list_published_modules_updated_since(since, tenant_id=tenant_id)
 
         quiz_by_module_id: dict[UUID, list[ModuleQuizQuestionPayload]] = {}
         module_ids = [module.id for module in modules]
+        gap_ids_by_module: dict[UUID, list[UUID]] = {}
         if module_ids:
+            gap_ids_by_module = await ModuleGapRepository(self._session).get_gap_ids_by_module_ids(module_ids)
             quiz_rows = await module_repo.list_quiz_questions_for_module_ids(module_ids)
             for row in quiz_rows:
                 if row.module_id is None:
@@ -66,15 +82,11 @@ class ModulesBundleBuilder:
                     ModuleQuizQuestionPayload(
                         id=row.id,
                         question_order=row.question_order,
-                        question_bn=row.question_bn,
-                        question_en=row.question_en,
-                        case_setup_bn=row.case_setup_bn,
-                        case_setup_en=row.case_setup_en,
-                        options_bn=list(row.options_bn or []),
-                        options_en=list(row.options_en) if row.options_en else None,
+                        question=row.question_localized,
+                        case_setup=row.case_setup_localized,
+                        options=row.options_localized,
                         correct_indices=list(row.correct_indices or []),
-                        explanation_bn=row.explanation_bn,
-                        explanation_en=row.explanation_en,
+                        explanation=row.explanation_localized,
                         difficulty=row.difficulty,
                     )
                 )
@@ -92,19 +104,28 @@ class ModulesBundleBuilder:
             docs = await SourceRepository(self._session).list_source_documents_by_ids(all_doc_ids)
             doc_by_id = {doc.id: doc for doc in docs}
 
+        module_cards = [(module, list((module.module_json or {}).get("cards", []))) for module in modules]
+        all_cards = [card for _, cards in module_cards for card in cards]
+        provenance_context = await resolve_card_provenance(self._session, all_cards, storage=None)
+
         payloads = []
-        for module in modules:
-            cards = list((module.module_json or {}).get("cards", []))
+        for module, cards in module_cards:
+            enriched_cards = []
+            for card in cards:
+                payload = dict(card)
+                payload["source_pages"] = render_card_provenance(
+                    block_ids_from_card(card),
+                    provenance_context,
+                )
+                enriched_cards.append(payload)
             doc_ids = list(module.source_document_ids or [])
             payloads.append(
                 ModuleSyncPayload(
                     id=module.id,
                     module_family_id=module.module_family_id,
                     version=module.version,
-                    title_bn=module.title_bn,
-                    title_en=module.title_en,
-                    description_bn=module.description_bn,
-                    description_en=module.description_en,
+                    title=module.title_localized,
+                    description=module.description_localized,
                     domain=module.domain,
                     sub_domain=module.sub_domain,
                     module_type=module.module_type,
@@ -117,8 +138,22 @@ class ModulesBundleBuilder:
                     updated_at=module.updated_at,
                     source_documents=build_source_document_sync_payloads(doc_ids, doc_by_id),
                     has_thumbnail=bool(module.thumbnail_storage_path),
-                    cards=cards,
+                    search_metadata=module.search_metadata_jsonb,
+                    primary_gap_id=module.primary_gap_id,
+                    behavioural_gap_ids=gap_ids_by_module.get(module.id, []),
+                    cards=enriched_cards,
                     quiz=list(quiz_by_module_id.get(module.id, [])),
+                )
+            )
+
+        if user_id is None:
+            assigned_module_ids: list[UUID] = []
+        else:
+            assigned_module_ids = sorted(
+                await resolve_assigned_module_ids(
+                    self._session,
+                    user_id=user_id,
+                    organization_ids=organization_ids,
                 )
             )
 
@@ -134,5 +169,6 @@ class ModulesBundleBuilder:
                 )
                 for family in families
             ],
+            assigned_module_ids=assigned_module_ids,
             server_time_utc=datetime.now(UTC).isoformat(),
         )

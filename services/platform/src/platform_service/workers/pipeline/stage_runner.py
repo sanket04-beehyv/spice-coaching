@@ -17,6 +17,7 @@ from platform_service.db.models.module_candidate_draft import ModuleCandidateDra
 from platform_service.db.repositories.module_candidate_repository import (
     ModuleCandidateRepository,
 )
+from platform_service.db.repositories.source_repository import SourceRepository
 from platform_service.services.run_state_service import (
     STAGE_CARD_DRAFT,
     STAGE_EXTRACT,
@@ -120,10 +121,16 @@ class IdentifyStageRunner:
         run_id: UUID,
         source_document_id: UUID,
     ) -> tuple[bool, int, StageOutcome]:
+        source_repo = SourceRepository(self._session)
+        source_doc = await source_repo.get_source_document(source_document_id)
+        ingestion_instructions_present = bool(source_doc and source_doc.ingestion_instructions)
         step = await self._run_state.start_step(
             run_id=run_id,
             stage=STAGE_MODULE_IDENTIFY,
-            input_summary={"source_document_ids": [str(source_document_id)]},
+            input_summary={
+                "source_document_ids": [str(source_document_id)],
+                "ingestion_instructions_present": ingestion_instructions_present,
+            },
         )
         step_id = step.id  # capture before commit (see Stage A comment)
         await self._session.commit()  # mark stage as 'running' for observers

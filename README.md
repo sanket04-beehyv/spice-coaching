@@ -123,14 +123,16 @@ v3.3 is **module-centric** (not scenario-centric). Device sync uses `/sync/*`; a
 
 `POST /coaching/rag-query`
 - Embeds the question, runs pgvector similarity over published `module.embedding` rows, builds context from module cards, calls `ai-runtime` for a grounded JSON answer, and returns `source_document` rows with optional MinIO presigned URLs for PDF/source attribution
+- Response includes `suggested_questions`: follow-up questions (in `response_language`) grounded in the retrieved module content
 
 `POST /telemetry/events`
 - Accepts telemetry batches from the SDK
 - Writes analytics rows to ClickHouse
 - Queues module-completion and gap-update jobs to Redis for background processing
 
-`GET /sync/modules?since=<ISO-8601>`
+`GET /sync/modules?since=<ISO-8601>&user_id=<int>`
 - Returns published modules (with quiz payloads) updated after `since`
+- When `user_id` is provided, also returns `assigned_module_ids` for that user (individual, po_sk, geographical, and group rules); when omitted or when the user has no assignments, `assigned_module_ids` is empty
 
 `GET /sync/triggers?since=<ISO-8601>`
 - Returns trigger definitions updated after `since`
@@ -138,14 +140,20 @@ v3.3 is **module-centric** (not scenario-centric). Device sync uses `/sync/*`; a
 `GET /sync/gaps?chw_id=<int>&since=<ISO-8601>`
 - Returns behavioural gaps, CHW gap states, module completions, and partial quiz progress for offline device use
 
+`GET /sync/chat-faqs?since=<ISO-8601>`
+- Returns 5–6 ranked FAQ suggestion chips as locale-keyed maps (`question: {"bn": "...", "en": "..."}`) synthesized nightly from clustered `digital_help_used` telemetry for the resolved tenant
+
 `GET /sync/config`
-- Returns current config thresholds for device sync
+- Returns current config thresholds and deployment `locales` (`primary`, `supported`) for device sync
 
 `POST /sync/source-documents/presigned-urls`
 - Batch presigned GET URLs for source documents (max 50 IDs per request)
 
 `POST /sync/source-documents/presigned-thumbnails`
 - Batch presigned GET URLs for source document thumbnails (max 50 IDs per request)
+
+`GET /sync/source-documents/published`
+- Return presigned GET URLs (and thumbnail URLs) for source documents linked to published modules where `sync_published_visible=true`; module payloads come from `GET /sync/modules`
 
 `POST /sync/modules/presigned-thumbnails`
 - Batch presigned GET URLs for module thumbnails (max 50 IDs per request)
@@ -158,12 +166,12 @@ v3.3 is **module-centric** (not scenario-centric). Device sync uses `/sync/*`; a
 
 `POST /admin/ingest`
 - Uploads one or more source files (multipart field `files`, max 10) to MinIO synchronously, then enqueues the v3.3 pipeline (A→B→C→D) per file on `platform-celery-worker`
-- Form fields: optional `titles` (JSON array, one title per file in order; if omitted, each title is the file’s basename stem), optional `override_duplicates` (JSON array of booleans, one per file — when `true`, re-ingest even if the file’s `content_sha256` matches an already-`ingested` `source_document`), `fuse_sources` (default `false` — when `true`, runs cross-source fusion after all pipelines finish; requires ≥2 successfully ingested files), `skip_merge` (default `false` — when `true`, Stage D always creates new modules and does not merge into existing ones), plus `content_domain`, `assessment_mode`, `authority_label`, `primary_language`, `mode` (`append` | `new`)
+- Form fields: optional `titles` (JSON array, one title per file in order; if omitted, each title is the file’s basename stem), optional `override_duplicates` (JSON array of booleans, one per file — when `true`, re-ingest even if the file’s `content_sha256` matches an already-`ingested` `source_document`), optional `sync_published_visible` (JSON array of booleans, one per file — when `true`, the source document may appear in `GET /sync/source-documents/published`; default all `false`), optional `ingestion_instructions` (batch-wide steering text for Stage C module identification; sanitized at ingest), `fuse_sources` (default `false` — when `true`, runs cross-source fusion after all pipelines finish; requires ≥2 successfully ingested files), `skip_merge` (default `false` — when `true`, Stage D always creates new modules and does not merge into existing ones), plus `content_domain`, `assessment_mode`, `authority_label`, `primary_language`, `mode` (`append` | `new`)
 - Duplicate detection uses SHA256 of file bytes against `source_document` rows with `status='ingested'` only (`failed` / `ingesting` do not block)
 - Returns `202` with `status: batch_queued`, `sources[]` (each with `source_document_id`, `poll_url`, etc.), and optionally `skipped_duplicates[]` when some files were blocked; returns `409` with `detail.code=duplicate_content` when every file is blocked; poll `GET /admin/ingest/by-document/{id}` for progress
 
 `POST /admin/ingest/stream`
-- Same upload/pipeline as batch ingest but streams SSE progress events for a single file (supports the same form fields, including `skip_merge` and `override_duplicate` — boolean, default `false`)
+- Same upload/pipeline as batch ingest but streams SSE progress events for a single file (supports the same form fields, including `skip_merge`, `override_duplicate` — boolean, default `false` — `sync_published_visible` — boolean, default `false` — and optional `ingestion_instructions`)
 - Returns `409` with `detail.code=duplicate_content` when the file matches an already-ingested `source_document` and `override_duplicate` is not set
 
 `GET /admin/ingest/by-document/{source_document_id}`
@@ -207,10 +215,13 @@ v3.3 is **module-centric** (not scenario-centric). Device sync uses `/sync/*`; a
 
 `GET /dashboard/llm-quality`
 
+`GET /dashboard/digital-help-modules`
+
 Current state:
 - these routes are part of the canonical API surface
 - `GET /dashboard/supervisor/{chw_id}` reads from the ClickHouse `chw_daily_summary` materialized view (see `infra/clickhouse/init.sql`)
 - `GET /dashboard/llm-quality` queries ClickHouse when `llm_daily_summary` exists in the deployment
+- `GET /dashboard/digital-help-modules` ranks modules by `digital_help_used` event volume over `period_days` (default 30), enriched with module titles from PostgreSQL; supports `limit` (default 20) and `offset` (default 0) pagination with `total_modules` in the response
 - `GET /dashboard/district/{upazila_id}` still returns `501 Not Implemented` until implemented
 
 #### Operational
@@ -256,10 +267,11 @@ Current state:
 
 ### Sync
 
-1. SDK calls `GET /sync/modules?since=...` for published modules and quizzes
+1. SDK calls `GET /sync/modules?since=...` for published modules and quizzes (optional `user_id` for `assigned_module_ids`)
 2. SDK calls `GET /sync/triggers?since=...` and `GET /sync/gaps?chw_id=...&since=...` as needed
-3. SDK calls `GET /sync/config` for threshold/config values
-4. SDK uses presign endpoints for offline PDF/thumbnail access
+3. SDK calls `GET /sync/chat-faqs?since=...` for bilingual FAQ suggestion chips (clustered + LLM-synthesized nightly)
+4. SDK calls `GET /sync/config` for threshold/config values
+5. SDK uses presign endpoints for offline PDF/thumbnail access
 
 ## Current Implementation Status
 
@@ -267,7 +279,7 @@ Current state:
 
 - monorepo layout with `platform`, `ai-runtime`, `contracts`, and `foundation`
 - single Alembic chain under `infra/alembic`
-- v3.3 module-centric sync (`/sync/modules`, `/sync/triggers`, `/sync/gaps`, presign batches)
+- v3.3 module-centric sync (`/sync/modules`, `/sync/triggers`, `/sync/gaps`, `/sync/chat-faqs`, presign batches)
 - coaching RAG via platform → internal AI runtime
 - telemetry ingest with ClickHouse writes
 - Redis-backed Celery workers for:
@@ -295,7 +307,7 @@ Current state:
 
 ## Standards Decisions
 
-- No public generic chatbot or unrestricted RAG endpoints are exposed
+- No public generic chat or unrestricted RAG endpoints are exposed
 - The SDK talks only to `platform-api`
 - `ai-runtime` is private and token-protected
 - Platform is the system of record
@@ -312,6 +324,20 @@ uv sync --locked --all-packages --group dev
 ```
 
 Without `.env`, `docker compose` fails at parse time because `GOOGLE_API_KEY` is declared required. See `docs/SETUP_TROUBLESHOOTING.md` for other known failures.
+
+### Pre-commit
+
+After syncing dev dependencies, install git hooks once:
+
+```bash
+uv run pre-commit install
+```
+
+Hooks run ruff (lint + format), Pyright type checking (on Python changes), and basic file hygiene on each commit. To check the whole repo without committing:
+
+```bash
+uv run pre-commit run --all-files
+```
 
 ### Environment
 

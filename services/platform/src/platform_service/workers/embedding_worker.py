@@ -25,42 +25,15 @@ from platform_service.db.models.module import Module
 from platform_service.deps import get_ai_client
 from platform_service.exceptions import EmbeddingDimensionError
 from platform_service.services.embedding_vector import assert_embedding_dimension
+from platform_service.services.module_search_text import module_text_for_search
 from platform_service.services.post_publish_step import finish_post_publish_step
 
 logger = logging.getLogger(__name__)
 
 
 def _module_text_for_embedding(module: Module) -> str:
-    """Concatenate the module's title and card text into a single embedding
-    input. Order: title → each card's title + body + practice fields, in
-    card order. Bangla canonical with English mirror folded in for cross-
-    language search.
-    """
-    parts: list[str] = []
-    if module.title_bn:
-        parts.append(module.title_bn)
-    if module.title_en:
-        parts.append(module.title_en)
-    if module.description_bn:
-        parts.append(module.description_bn)
-    cards = (module.module_json or {}).get("cards", [])
-    for card in cards:
-        if not isinstance(card, dict):
-            continue
-        for key in (
-            "title_bn",
-            "title_en",
-            "body_bn",
-            "body_en",
-            "previous_practice_bn",
-            "current_practice_bn",
-            "rationale_for_change_bn",
-            "next_action_bn",
-        ):
-            value = card.get(key)
-            if value:
-                parts.append(str(value))
-    return "\n".join(parts)
+    """Backward-compatible alias for :func:`module_text_for_search`."""
+    return module_text_for_search(module)
 
 
 async def generate_embedding_for_module(module_id: UUID, *, step_id: UUID | None = None) -> bool:

@@ -36,8 +36,7 @@ class ModuleCandidateDraft(Base):
     # authored bindings carry the gap mapping post-publish.
     behavioural_gap_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     scope_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    description_en: Mapped[str | None] = mapped_column(Text, nullable=True)
-    description_bn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description_localized: Mapped[dict[str, str] | None] = mapped_column(JSONB, nullable=True)
     # Array of {source_document_id, source_page_id, content_block_ids[]}.
     source_provenance_jsonb: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     estimated_card_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -49,6 +48,9 @@ class ModuleCandidateDraft(Base):
     previous_practice_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     current_practice_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     rationale_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # When admin ingestion instructions steered Stage C: why this candidate
+    # was emitted relative to those instructions.
+    ingestion_instruction_rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Advisory quality flags from the insufficient-source heuristic.
     # Stage 2-draft propagates these onto `module.quality_flags_jsonb`
     # when the candidate is drafted; they never gate publish.

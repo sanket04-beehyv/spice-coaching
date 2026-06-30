@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -62,7 +63,6 @@ def test_render_audio_waveform_writes_png(tmp_path: Path, monkeypatch: pytest.Mo
 
 def test_render_video_frame_raises_on_ffmpeg_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_binaries(monkeypatch)
-    import subprocess
 
     def runner(cmd: list[str], **kwargs):
         raise subprocess.CalledProcessError(1, cmd, stderr="boom")

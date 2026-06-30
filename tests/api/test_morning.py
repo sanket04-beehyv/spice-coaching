@@ -90,13 +90,13 @@ async def _make_published_module(
     mod = Module(
         module_family_id=family.id,
         version=1,
-        title_bn="t",
+        title_localized={"bn": "t"},
         domain="rmnch",
         module_type="refresher",
         lifecycle_status="published",
         tenant_id=tenant_id,
         primary_gap_id=primary_gap_id,
-        module_json={"cards": [{"title_bn": "c"}]},
+        module_json={"cards": [{"title": {"bn": "c"}}]},
         published_at=now,
         created_at=created_at or now,
     )
@@ -159,8 +159,13 @@ class TestMorningCardsEndpoint:
         assert {x["module_id"] for x in items} == expected_ids
 
     async def test_with_chw_id_uses_gap_suggestions_when_available(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setattr(
+            get_settings(),
+            "telemetry_behavioural_gap_state_enabled",
+            True,
+        )
         tenant = UUID(int=0)
         chw_id = _test_chw_id()
         gap = await _make_gap(db_session)
@@ -193,3 +198,51 @@ class TestMorningCardsEndpoint:
         assert items[0]["module_family_id"] == str(fam.id)
         assert items[0]["source"] == "gap"
         assert items[0]["behavioural_gap_id"] == str(gap.id)
+
+    async def test_with_chw_id_uses_quiz_suggestions_when_quiz_state_active(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        from platform_service.db.models.chw_quiz_question_state import CHWQuizQuestionState
+        from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
+
+        tenant = UUID(int=0)
+        chw_id = _test_chw_id()
+        fam = await _make_family(db_session)
+        mod = await _make_published_module(
+            db_session,
+            family=fam,
+            tenant_id=tenant,
+            primary_gap_id=None,
+        )
+        quiz = ModuleQuizQuestion(
+            module_id=mod.id,
+            question_order=1,
+            question_family_id=uuid4(),
+            question_version=1,
+            question_localized={"bn": "q"},
+            question_type="single_select",
+            options_localized={"bn": ["a", "b"]},
+            correct_indices=[0],
+        )
+        db_session.add(quiz)
+        await db_session.flush()
+        db_session.add(
+            CHWQuizQuestionState(
+                chw_id=chw_id,
+                quiz_id=quiz.id,
+                module_id=mod.id,
+                tenant_id=tenant,
+                failed_attempts_count=1,
+                status="active",
+                last_failed_attempt_at=datetime.now(UTC),
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get(platform_path("/morning/cards"), params={"chw_id": chw_id})
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) == 1
+        assert items[0]["module_id"] == str(mod.id)
+        assert items[0]["source"] == "quiz"
+        assert items[0]["quiz_id"] == str(quiz.id)

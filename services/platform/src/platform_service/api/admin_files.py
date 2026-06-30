@@ -94,7 +94,7 @@ class PresignedUrlResponse(BaseModel):
     expires_seconds: int
 
 
-def _append_bytes_to_path(dest: Path, chunk: bytes, *, first: bool) -> None:
+def _append_bytes_to_path(dest: Path, chunk: bytes, first: bool) -> None:
     mode = "wb" if first else "ab"
     with dest.open(mode) as fh:
         fh.write(chunk)
@@ -126,7 +126,7 @@ async def _stream_uploadfile_to_path_capped(
             total += len(chunk)
             if total > max_bytes:
                 raise HTTPException(status_code=413, detail="file exceeds maximum allowed size")
-            await anyio.to_thread.run_sync(_append_bytes_to_path, dest, chunk, first=first)
+            await anyio.to_thread.run_sync(lambda c=chunk, f=first: _append_bytes_to_path(dest, c, first=f))
             first = False
     except HTTPException:
         dest.unlink(missing_ok=True)

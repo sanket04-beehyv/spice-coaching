@@ -244,6 +244,60 @@ class TestQualityFlagsAreAdvisory:
         assert rows[0].quality_flags_jsonb is None
 
 
+# ─── Ingestion instructions ────────────────────────────────────────────────
+
+
+class TestIngestionInstructionsPassedToIdentifier:
+    async def test_passes_instructions_from_source_document(self, db_session: AsyncSession) -> None:
+        sd, blocks = await _seed_source_doc_with_outline(db_session, page_count=1)
+        sd.ingestion_instructions = "Prioritize ANC referral modules."
+        await db_session.commit()
+
+        run = await _seed_run(db_session, sd.id)
+        ident = _identifier_mock([_llm_candidate([blocks[0].id])])
+        orch = StageCOrchestrator(db_session, identifier=ident)
+        result = await orch.run(ingestion_run_id=run.id, source_document_ids=[sd.id])
+
+        assert result.candidates_emitted == 1
+        assert result.ingestion_instructions_present is True
+        ident.identify.assert_awaited()
+        call_kwargs = ident.identify.await_args.kwargs
+        assert call_kwargs["ingestion_instructions"] == "Prioritize ANC referral modules."
+
+    async def test_persists_ingestion_instruction_rationale(self, db_session: AsyncSession) -> None:
+        sd, blocks = await _seed_source_doc_with_outline(db_session, page_count=1)
+        sd.ingestion_instructions = "Prioritize ANC referral modules."
+        await db_session.commit()
+
+        run = await _seed_run(db_session, sd.id)
+        cand = _llm_candidate([blocks[0].id])
+        cand["ingestion_instruction_rationale"] = "Chapter 2 covers ANC referral workflows."
+        ident = _identifier_mock([cand])
+        orch = StageCOrchestrator(db_session, identifier=ident)
+        await orch.run(ingestion_run_id=run.id, source_document_ids=[sd.id])
+
+        rows = (
+            await db_session.execute(
+                select(ModuleCandidateDraft).where(ModuleCandidateDraft.ingestion_run_id == run.id)
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].ingestion_instruction_rationale == "Chapter 2 covers ANC referral workflows."
+
+    async def test_no_instructions_when_absent(self, db_session: AsyncSession) -> None:
+        sd, blocks = await _seed_source_doc_with_outline(db_session, page_count=1)
+        run = await _seed_run(db_session, sd.id)
+        ident = _identifier_mock([_llm_candidate([blocks[0].id])])
+        orch = StageCOrchestrator(db_session, identifier=ident)
+        result = await orch.run(ingestion_run_id=run.id, source_document_ids=[sd.id])
+
+        assert result.ingestion_instructions_present is False
+        call_kwargs = ident.identify.await_args.kwargs
+        assert call_kwargs["ingestion_instructions"] is None
+
+
 # ─── Architecture-reset: gap context not loaded ────────────────────────────
 
 

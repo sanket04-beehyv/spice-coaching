@@ -2,7 +2,11 @@
 -- services/platform/src/platform_service/db/models/
 --
 -- Target DB: PostgreSQL (uses UUID/JSONB/arrays/range + pgvector).
--- Safe to run on an empty database. Does not include migrations or triggers.
+-- Safe to run on an empty database. Squashed snapshot of alembic head (0030).
+-- Locale-keyed JSONB maps (*_localized) replace legacy *_bn/*_en columns (0030).
+-- Includes chw_module_assignment (0022) and module_trigger_binding keyed by module_id.
+-- Seed sections: config_threshold learning-points (0005), referral behavioural_gap
+-- (0014), assessment-due trigger_definition (0026).
 
 BEGIN;
 
@@ -21,7 +25,7 @@ CREATE TABLE IF NOT EXISTS source_document (
   source_document_family_id uuid NOT NULL DEFAULT gen_random_uuid(),
   title text NOT NULL,
   source_type text NOT NULL,
-  primary_language text NOT NULL DEFAULT 'bn',
+  primary_language text NOT NULL,
   content_domain text NOT NULL DEFAULT 'clinical',
   assessment_mode text NOT NULL DEFAULT 'with_quiz',
   authority_label text NOT NULL,
@@ -35,11 +39,17 @@ CREATE TABLE IF NOT EXISTS source_document (
   outline_method text NULL,
   outline_jsonb jsonb NULL,
   extraction_calibration_jsonb jsonb NULL,
+  ingestion_instructions text NULL,
+  sync_published_visible boolean NOT NULL,
   status text NOT NULL DEFAULT 'ingesting',
   ingested_at timestamptz NOT NULL DEFAULT now(),
   ingested_by uuid NULL,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS ix_source_document_content_sha256_ingested
+  ON source_document (content_sha256)
+  WHERE status = 'ingested' AND content_sha256 IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS source_page (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -78,6 +88,11 @@ CREATE TABLE IF NOT EXISTS ingestion_run (
   error_jsonb jsonb NULL,
   triggered_by uuid NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ingestion_run_active_per_source
+  ON ingestion_run (source_document_id)
+  WHERE status = 'running'
+    AND COALESCE(error_jsonb->>'type', '') != 'cross_source_fusion';
 
 CREATE TABLE IF NOT EXISTS ingestion_run_step (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -121,6 +136,8 @@ CREATE TABLE IF NOT EXISTS file_upload (
 );
 
 CREATE INDEX IF NOT EXISTS ix_file_upload_storage_path ON file_upload (storage_path);
+CREATE INDEX IF NOT EXISTS ix_file_upload_bucket_content_sha256
+  ON file_upload (bucket_name, content_sha256);
 
 CREATE TABLE IF NOT EXISTS attribution_event (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -143,8 +160,7 @@ CREATE TABLE IF NOT EXISTS module_candidate_draft (
   proposed_title text NOT NULL,
   behavioural_gap_code text NULL,
   scope_summary text NOT NULL DEFAULT '',
-  description_en text NULL,
-  description_bn text NULL,
+  description_localized jsonb NULL,
   source_provenance_jsonb jsonb NOT NULL DEFAULT '[]'::jsonb,
   estimated_card_count integer NOT NULL DEFAULT 0,
   estimated_quiz_count integer NOT NULL DEFAULT 0,
@@ -153,6 +169,7 @@ CREATE TABLE IF NOT EXISTS module_candidate_draft (
   previous_practice_summary text NULL,
   current_practice_summary text NULL,
   rationale_summary text NULL,
+  ingestion_instruction_rationale text NULL,
   quality_flags_jsonb jsonb NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
@@ -176,10 +193,8 @@ CREATE TABLE IF NOT EXISTS module (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   module_family_id uuid NOT NULL,
   version integer NOT NULL DEFAULT 1,
-  title_en text NULL,
-  title_bn text NOT NULL,
-  description_en text NULL,
-  description_bn text NULL,
+  title_localized jsonb NOT NULL,
+  description_localized jsonb NULL,
   domain text NOT NULL,
   sub_domain text NULL,
   module_type text NOT NULL DEFAULT 'refresher',
@@ -195,6 +210,7 @@ CREATE TABLE IF NOT EXISTS module (
   visibility_window tstzrange NULL,
   pass_threshold_override double precision NULL,
   quality_flags_jsonb jsonb NULL,
+  search_metadata_jsonb jsonb NULL,
   clinically_reviewed boolean NOT NULL DEFAULT false,
   clinically_reviewed_at timestamptz NULL,
   clinically_reviewed_by uuid NULL,
@@ -213,16 +229,12 @@ CREATE TABLE IF NOT EXISTS module_quiz_question (
   question_order integer NULL,
   question_family_id uuid NOT NULL DEFAULT gen_random_uuid(),
   question_version integer NOT NULL DEFAULT 1,
-  case_setup_en text NULL,
-  case_setup_bn text NULL,
-  question_en text NULL,
-  question_bn text NOT NULL,
+  case_setup_localized jsonb NULL,
+  question_localized jsonb NOT NULL,
   question_type text NOT NULL DEFAULT 'single_select',
-  options_en jsonb NULL,
-  options_bn jsonb NOT NULL DEFAULT '[]'::jsonb,
+  options_localized jsonb NOT NULL,
   correct_indices integer[] NOT NULL,
-  explanation_en text NULL,
-  explanation_bn text NULL,
+  explanation_localized jsonb NULL,
   primary_card_family_id uuid NULL,
   source_block_ids uuid[] NULL,
   difficulty text NOT NULL DEFAULT 'moderate',
@@ -301,6 +313,29 @@ CREATE TABLE IF NOT EXISTS chw_module_completion (
   CONSTRAINT pk_chw_module_completion PRIMARY KEY (chw_id, module_family_id)
 );
 
+CREATE TABLE IF NOT EXISTS chw_module_assignment (
+  id uuid PRIMARY KEY,
+  module_id uuid NOT NULL REFERENCES module(id) ON DELETE CASCADE,
+  assignment_type varchar(50) NOT NULL,
+  tenant_id bigint NULL,
+  user_id bigint NULL,
+  upazila varchar(100) NULL,
+  assigned_by bigint NOT NULL,
+  assigned_at timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_module_assignment_tenant UNIQUE (module_id, tenant_id),
+  CONSTRAINT uq_module_assignment_user UNIQUE (module_id, user_id),
+  CONSTRAINT uq_module_assignment_upazila UNIQUE (module_id, upazila)
+);
+
+CREATE INDEX IF NOT EXISTS ix_chw_module_assignment_tenant_id
+  ON chw_module_assignment (tenant_id);
+CREATE INDEX IF NOT EXISTS ix_chw_module_assignment_user_id
+  ON chw_module_assignment (user_id);
+CREATE INDEX IF NOT EXISTS ix_chw_module_assignment_upazila
+  ON chw_module_assignment (upazila);
+
 CREATE TABLE IF NOT EXISTS chw_module_quiz_progress (
   chw_id bigint NOT NULL,
   module_id uuid NOT NULL REFERENCES module(id) ON DELETE CASCADE,
@@ -313,6 +348,24 @@ CREATE TABLE IF NOT EXISTS chw_module_quiz_progress (
 CREATE INDEX IF NOT EXISTS ix_chw_module_quiz_progress_chw_module
   ON chw_module_quiz_progress (chw_id, module_id);
 
+CREATE TABLE IF NOT EXISTS chw_quiz_question_state (
+  chw_id bigint NOT NULL,
+  quiz_id uuid NOT NULL REFERENCES module_quiz_question(id) ON DELETE CASCADE,
+  module_id uuid NOT NULL REFERENCES module(id) ON DELETE CASCADE,
+  tenant_id uuid NULL,
+  failed_attempts_count integer NOT NULL DEFAULT 0,
+  last_failed_attempt_at timestamptz NULL,
+  first_attempt_at timestamptz NULL,
+  last_attempt_at timestamptz NULL,
+  escalated_to_supervisor boolean NOT NULL DEFAULT false,
+  status text NOT NULL DEFAULT 'active',
+  updated_at timestamptz NULL,
+  CONSTRAINT pk_chw_quiz_question_state PRIMARY KEY (chw_id, quiz_id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_chw_quiz_question_state_chw_module
+  ON chw_quiz_question_state (chw_id, module_id);
+
 CREATE TABLE IF NOT EXISTS chw_learning_point_event (
   event_id uuid NOT NULL,
   chw_id bigint NOT NULL,
@@ -323,6 +376,14 @@ CREATE TABLE IF NOT EXISTS chw_learning_point_event (
 );
 
 CREATE INDEX IF NOT EXISTS ix_chw_learning_point_event_chw_id ON chw_learning_point_event (chw_id);
+
+CREATE TABLE IF NOT EXISTS chw_gap_telemetry_event (
+  event_id uuid PRIMARY KEY,
+  chw_id bigint NOT NULL,
+  event_type text NOT NULL,
+  processed_at timestamptz NOT NULL,
+  tenant_id uuid NULL
+);
 
 CREATE TABLE IF NOT EXISTS trigger_definition (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -339,13 +400,36 @@ CREATE TABLE IF NOT EXISTS trigger_definition (
 
 CREATE TABLE IF NOT EXISTS module_trigger_binding (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  module_family_id uuid NOT NULL REFERENCES module_family(id) ON DELETE CASCADE,
+  module_id uuid NOT NULL REFERENCES module(id) ON DELETE CASCADE,
   trigger_definition_id uuid NOT NULL REFERENCES trigger_definition(id) ON DELETE CASCADE,
   relationship text NOT NULL DEFAULT 'primary',
   priority_weight integer NOT NULL DEFAULT 10,
   notes text NULL,
-  CONSTRAINT uq_module_trigger_binding_pair UNIQUE (module_family_id, trigger_definition_id)
+  CONSTRAINT uq_module_trigger_binding_pair UNIQUE (module_id, trigger_definition_id)
 );
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Chatbot FAQ layer
+-- ──────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS chat_frequent_question (
+  id uuid PRIMARY KEY,
+  tenant_id uuid NOT NULL,
+  question_localized jsonb NOT NULL,
+  normalized_question text NOT NULL,
+  occurrence_count integer NOT NULL,
+  rank integer NOT NULL,
+  last_seen_at timestamptz NULL,
+  computed_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_chat_faq_tenant_question UNIQUE (tenant_id, normalized_question)
+);
+
+CREATE INDEX IF NOT EXISTS ix_chat_faq_tenant_rank
+  ON chat_frequent_question (tenant_id, rank);
+CREATE INDEX IF NOT EXISTS ix_chat_faq_tenant_updated
+  ON chat_frequent_question (tenant_id, updated_at);
 
 -- ──────────────────────────────────────────────────────────────────────────────
 -- Config
@@ -360,6 +444,25 @@ CREATE TABLE IF NOT EXISTS config_threshold (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Learning-points config_threshold seed (migration 0005)
+-- ──────────────────────────────────────────────────────────────────────────────
+
+INSERT INTO config_threshold (version, key, value_json, description) VALUES
+  (1, 'learning_points_module_delivered', '5'::jsonb,
+   'CHW learning points awarded per module_delivered telemetry event'),
+  (1, 'learning_points_module_card_viewed', '10'::jsonb,
+   'CHW learning points awarded per module_card_viewed telemetry event'),
+  (1, 'learning_points_module_quiz_attempted_base', '15'::jsonb,
+   'Base CHW learning points for module_quiz_attempted (correct outcome)'),
+  (1, 'learning_points_module_quiz_score_multiplier', '15'::jsonb,
+   'Quiz score bonus multiplier: floor(quiz_score_pct [0–1] * this) added to base'),
+  (1, 'learning_points_module_completed', '20'::jsonb,
+   'CHW learning points awarded per module_completed telemetry event'),
+  (1, 'learning_points_spice_action_observed', '3'::jsonb,
+   'CHW learning points awarded per spice_action_observed telemetry event')
+ON CONFLICT (key) DO NOTHING;
 
 -- ──────────────────────────────────────────────────────────────────────────────
 -- Referral behavioural_gap seed (seed/behavioural_gaps_referral.json; migration 0014)
@@ -419,5 +522,53 @@ ON CONFLICT (gap_code) DO UPDATE SET
   detection_rule_jsonb = EXCLUDED.detection_rule_jsonb,
   status = 'active',
   updated_at = now();
-COMMIT;
 
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Assessment-due trigger_definition seed (seed/assessment_due_triggers.json; migration 0026)
+-- ──────────────────────────────────────────────────────────────────────────────
+
+INSERT INTO trigger_definition (trigger_kind, trigger_code, description, predicate_jsonb, predicate_schema_version, status)
+VALUES
+  ('workflow_event', 'wf:assessment_due:anc', 'Patients due for antenatal care visit', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"anc","match":{"encounter_type_any":["ANC"],"reason_any":[],"diagnosis_any":["ANC"],"patient_status_any":["anc"],"reason_display_any":["ANC Signs"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":["ANC"],"encounter_program_any":["RMNCH"],"is_pregnant":true,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:anemia', 'Anemia follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"anemia","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":["ANEMIA"],"patient_status_any":["anemia"],"reason_display_any":["Anemia"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:cbs', 'CBS escalation follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"cbs","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":[],"patient_status_any":["cbs"],"reason_display_any":["CBS"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:child_health', 'Under-five child health visit due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"child_health","match":{"encounter_type_any":["CHILDHOOD_VISIT","PNC_CHILD","PNC_NEONATE","UNDER_FIVE_YEARS","UNDER_TWO_MONTHS"],"reason_any":[],"diagnosis_any":["PNC_NEONATE","UNDER_FIVE_YEARS","UNDER_TWO_MONTHS"],"patient_status_any":["child_health"],"reason_display_any":["Childhood Visit Signs","PNC Neonate Signs"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":["CHILDHOOD_VISIT","PNC_CHILD","PNC_NEONATE"],"encounter_program_any":["CHILDHOOD_VISIT"],"is_pregnant":null,"max_age":5,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:childhood_visit', 'Childhood wellness visit due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"childhood_visit","match":{"encounter_type_any":["CHILDHOOD_VISIT"],"reason_any":[],"diagnosis_any":[],"patient_status_any":["childhood_visit"],"reason_display_any":["Childhood Visit Signs"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":["CHILDHOOD_VISIT"],"encounter_program_any":["CHILDHOOD_VISIT","RMNCH"],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:cough', 'Cough follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"cough","match":{"encounter_type_any":[],"reason_any":["COUGH"],"diagnosis_any":[],"patient_status_any":["cough"],"reason_display_any":["Cough"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:diarrhea', 'Diarrhoea follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"diarrhea","match":{"encounter_type_any":["DIARRHEA"],"reason_any":["DIARRHEA","DIARRHOEA"],"diagnosis_any":["DIARRHEA","DIARRHOEA"],"patient_status_any":["diarrhea"],"reason_display_any":["Diarrhoea","Dysentry (Bloody Diarrhoea)","Watery diarrhoea / Dysentery"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":["ICCM"],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:ear_problem', 'Ear problem follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"ear_problem","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":["EARPROBLEM","EAR_PROBLEM"],"patient_status_any":["ear_problem"],"reason_display_any":["Ear Problem"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:fever', 'Fever follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"fever","match":{"encounter_type_any":[],"reason_any":["FEVER"],"diagnosis_any":[],"patient_status_any":["fever"],"reason_display_any":["Fever"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":["ICCM"],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:general_danger_signs', 'General danger signs follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"general_danger_signs","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":[],"patient_status_any":["general_danger_signs"],"reason_display_any":["General Danger Signs"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:hiv_aids', 'HIV/AIDS follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"hiv_aids","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":["HIVAIDS","HIVINFECTION","HIV_AIDS"],"patient_status_any":["hiv_aids"],"reason_display_any":["HIV Infection","HIV/AIDS"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:iccm', 'ICCM community follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"iccm","match":{"encounter_type_any":["DIARRHEA","ICCM","MALARIA","OTHER_SYMPTOMS","PNEUMONIA","UNDER_FIVE_YEARS","UNDER_TWO_MONTHS"],"reason_any":["COUGH","DIARRHEA","DIARRHOEA","FEVER","MALARIA","MUAC","PNEUMONIA","SYMPTOMS"],"diagnosis_any":["ANEMIA","EARPROBLEM","EAR_PROBLEM","HIVAIDS","HIVINFECTION","HIV_AIDS","JAUNDICE","MODERATEMALNUTRITION","MODERATE_MALNUTRITION","MUAC","OTHER_SYMPTOMS","SEVEREMALARIA","SEVEREMALNUTRITION","SEVERE_MALARIA","SEVERE_MALNUTRITION","UNCOMPLICATEDMALARIA","UNCOMPLICATED_MALARIA","UNDER_FIVE_YEARS","UNDER_TWO_MONTHS"],"patient_status_any":["iccm"],"reason_display_any":[],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":["ICCM"],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:jaundice', 'Jaundice follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"jaundice","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":["JAUNDICE"],"patient_status_any":["jaundice"],"reason_display_any":["Jaundice"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:malaria', 'Malaria follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"malaria","match":{"encounter_type_any":["MALARIA"],"reason_any":["MALARIA"],"diagnosis_any":["MALARIA","SEVEREMALARIA","SEVERE_MALARIA","UNCOMPLICATEDMALARIA","UNCOMPLICATED_MALARIA"],"patient_status_any":["malaria"],"reason_display_any":["Malaria","Uncomplicated Malaria"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":["ICCM"],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:maternal_health', 'Maternal health follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"maternal_health","match":{"encounter_type_any":["ANC","PNC_MOTHER"],"reason_any":[],"diagnosis_any":["ANC","PNC"],"patient_status_any":["maternal_health"],"reason_display_any":["ANC Signs","Gaps in PNC","High Risk Mother","PNC Mother Signs"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":["ANC","PNC_MOTHER"],"encounter_program_any":["RMNCH"],"is_pregnant":true,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:miscarriage', 'Miscarriage follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"miscarriage","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":[],"patient_status_any":["miscarriage"],"reason_display_any":["Miscarriage"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:moderate_malnutrition', 'Moderate malnutrition follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"moderate_malnutrition","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":["MODERATEMALNUTRITION","MODERATE_MALNUTRITION"],"patient_status_any":["moderate_malnutrition"],"reason_display_any":["Moderate Malnutrition"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:muac', 'MUAC malnutrition follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"muac","match":{"encounter_type_any":[],"reason_any":["MUAC"],"diagnosis_any":["MUAC"],"patient_status_any":["muac"],"reason_display_any":["MUAC"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:ncd', 'NCD follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"ncd","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":[],"patient_status_any":["ncd"],"reason_display_any":["NCD","NCDSymptoms"],"appointment_type_any":[],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:neonatal', 'Neonatal follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"neonatal","match":{"encounter_type_any":["PNC_NEONATE","UNDER_TWO_MONTHS"],"reason_any":[],"diagnosis_any":["PNC_NEONATE","UNDER_TWO_MONTHS"],"patient_status_any":["neonatal"],"reason_display_any":[],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":["PNC_NEONATE"],"encounter_program_any":[],"is_pregnant":null,"max_age":0,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:on_treatment', 'On-treatment household visit due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"on_treatment","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":[],"patient_status_any":["on_treatment"],"reason_display_any":["On Treatment","OnTreatment"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:other_symptoms', 'Other symptoms ICCM follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"other_symptoms","match":{"encounter_type_any":["OTHER_SYMPTOMS"],"reason_any":["SYMPTOMS"],"diagnosis_any":["OTHER_SYMPTOMS"],"patient_status_any":["other_symptoms"],"reason_display_any":["Symptoms","TB Symptoms"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":["ICCM"],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:pnc_child', 'Postnatal child visit due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"pnc_child","match":{"encounter_type_any":["PNC_CHILD"],"reason_any":[],"diagnosis_any":[],"patient_status_any":["pnc_child"],"reason_display_any":["Childhood Visit Signs"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":["PNC_CHILD"],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:pnc_mother', 'Postnatal mother visit due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"pnc_mother","match":{"encounter_type_any":["PNC_MOTHER"],"reason_any":[],"diagnosis_any":["PNC"],"patient_status_any":["pnc_mother"],"reason_display_any":["Gaps in PNC","PNC Mother Signs","PNC Visit"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":["PNC_MOTHER"],"encounter_program_any":["RMNCH"],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:pnc_neonate', 'Neonatal postnatal visit due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"pnc_neonate","match":{"encounter_type_any":["PNC_NEONATE"],"reason_any":[],"diagnosis_any":["PNC_NEONATE"],"patient_status_any":["pnc_neonate"],"reason_display_any":["PNC Neonate Signs"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":["PNC_NEONATE"],"encounter_program_any":["RMNCH"],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:pneumonia', 'Pneumonia follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"pneumonia","match":{"encounter_type_any":["PNEUMONIA"],"reason_any":["COUGH","PNEUMONIA"],"diagnosis_any":["PNEUMONIA"],"patient_status_any":["pneumonia"],"reason_display_any":["Cough or Difficult Breathing","Pneumonia","Pneumonia / Fever"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":["ICCM"],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:recovered', 'Recovered patient follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"recovered","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":[],"patient_status_any":["recovered"],"reason_display_any":["Recovered"],"appointment_type_any":[],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:referred', 'Referred patient follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"referred","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":[],"patient_status_any":["referred"],"reason_display_any":["Referred"],"appointment_type_any":["REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:respiratory', 'Respiratory illness follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"respiratory","match":{"encounter_type_any":["PNEUMONIA"],"reason_any":["COUGH","PNEUMONIA"],"diagnosis_any":["PNEUMONIA"],"patient_status_any":["respiratory"],"reason_display_any":[],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:severe_malaria', 'Severe malaria follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"severe_malaria","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":["SEVEREMALARIA","SEVERE_MALARIA"],"patient_status_any":["severe_malaria"],"reason_display_any":["Severe Malaria"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:severe_malnutrition', 'Severe malnutrition follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"severe_malnutrition","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":["SEVEREMALNUTRITION","SEVERE_MALNUTRITION"],"patient_status_any":["severe_malnutrition"],"reason_display_any":["Severe Malnutrition"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:symptoms', 'Unspecified symptoms follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"symptoms","match":{"encounter_type_any":[],"reason_any":["SYMPTOMS"],"diagnosis_any":[],"patient_status_any":["symptoms"],"reason_display_any":["Symptoms"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:tb_symptoms', 'TB symptoms follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"tb_symptoms","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":[],"patient_status_any":["tb_symptoms"],"reason_display_any":["TB Symptoms"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:under_five_years', 'Under-five-years ICCM visit due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"under_five_years","match":{"encounter_type_any":["UNDER_FIVE_YEARS"],"reason_any":[],"diagnosis_any":["UNDER_FIVE_YEARS"],"patient_status_any":["under_five_years"],"reason_display_any":[],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:under_two_months', 'Under-two-months ICCM visit due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"under_two_months","match":{"encounter_type_any":["UNDER_TWO_MONTHS"],"reason_any":[],"diagnosis_any":["UNDER_TWO_MONTHS"],"patient_status_any":["under_two_months"],"reason_display_any":[],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active'),
+  ('workflow_event', 'wf:assessment_due:worsened', 'Worsened condition follow-up due today', '{"spice_event_code":"assessment_due","filter_predicate":{"assessment_topic":"worsened","match":{"encounter_type_any":[],"reason_any":[],"diagnosis_any":["WORSENED"],"patient_status_any":["worsened"],"reason_display_any":["Worsened"],"appointment_type_any":["HH_VISIT","MEDICAL_REVIEW","REFERRED"],"encounter_name_any":[],"encounter_program_any":[],"is_pregnant":null,"max_age":null,"min_age":null}}}'::jsonb, 1, 'active')
+ON CONFLICT (trigger_code) DO UPDATE SET
+  description = EXCLUDED.description,
+  predicate_jsonb = EXCLUDED.predicate_jsonb,
+  status = 'active',
+  updated_at = now();
+
+COMMIT;

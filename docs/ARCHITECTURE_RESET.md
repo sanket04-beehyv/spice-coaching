@@ -77,7 +77,7 @@ Stage failure conditions (all hard-fail; pipeline stops):
 ### Stage 2 — Identify + Draft
 Two LLM calls per ingestion run (effectively):
 1. Corpus-level LLM call: given outline + content blocks, propose N modules with their scope and cited blocks. Output goes into `module_candidate_draft` rows as ephemeral pipeline state.
-2. Per-module LLM call: for each candidate, draft Bangla cards (canonical) + English mirror, plus card source provenance. Output writes directly to `module` rows as **`lifecycle_status='draft'`**. When a newly drafted candidate semantically matches an existing **active** module (any non-retired row; latest version per family), a second LLM call merges the old and new card sets (new content wins on conflict), **retires** the matched row, and creates a new draft version in the same `module_family` (reusing all `module_behavioural_gap` links). Quiz + embedding workers run on the merged draft.
+2. Per-module LLM call: for each candidate, draft cards in the deployment primary locale (canonical) plus mirror locale when configured, plus card source provenance. Output writes directly to `module` rows as **`lifecycle_status='draft'`**. When a newly drafted candidate semantically matches an existing **active** module (any non-retired row; latest version per family), a second LLM call merges the old and new card sets (new content wins on conflict), **retires** the matched row, and creates a new draft version in the same `module_family` (reusing all `module_behavioural_gap` links). Quiz + embedding workers run on the merged draft.
 
 Failure handling: if a candidate fails to draft, **skip it**. Log the failure to `ingestion_run_step.output_summary_jsonb` with the cited blocks. Auto-publish principle: only renderable modules ship. Half-modules to CHWs is worse than missing modules.
 
@@ -222,7 +222,7 @@ These were called explicitly:
 For the record, so we don't accidentally throw it out:
 
 - Page-based extraction with section overlay via `heading_path_jsonb` on `content_block`. Section-only extraction would lose the deterministic page-citation provenance reviewers need.
-- Bangla as canonical for CHW-facing content (English mirror generated, not vice versa).
+- Deployment primary locale as canonical for CHW-facing content (mirror locale generated when configured, not vice versa). See `docs/LANGUAGE_DEPLOYMENT.md`.
 - `mc_contracts` package as the typed boundary between platform and ai-runtime.
 - ai-runtime as stateless service. No DB, no Redis, no ClickHouse.
 - AIRuntimeClient as the only LLM-call path from platform.

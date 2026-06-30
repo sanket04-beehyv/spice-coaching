@@ -26,6 +26,7 @@ from collections.abc import Iterator
 import pytest
 from platform_service.config import Settings, get_settings
 from pydantic import ValidationError
+from pydantic_settings import SettingsConfigDict
 
 
 @pytest.fixture(autouse=True)
@@ -37,8 +38,6 @@ def _isolate_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     Tests that want a specific env override call `monkeypatch.setenv`
     after this fixture runs.
     """
-    from pydantic_settings import SettingsConfigDict
-
     get_settings.cache_clear()
     # Override the class's SettingsConfigDict to NOT load any .env file.
     monkeypatch.setattr(
@@ -211,8 +210,8 @@ def test_minio_defaults() -> None:
     s = Settings()
     assert s.minio_endpoint == "localhost:9100"
     assert s.minio_presigned_endpoint is None
-    assert s.minio_access_key.get_secret_value() == "minioadmin"
-    assert s.minio_secret_key.get_secret_value() == "minioadmin"
+    assert s.minio_access_key.get_secret_value() == ""
+    assert s.minio_secret_key.get_secret_value() == ""
     assert s.minio_bucket_name == "medtronics-storage"
     assert s.minio_secure is False
     assert s.minio_region == "us-east-1"
@@ -220,6 +219,23 @@ def test_minio_defaults() -> None:
         {"uploads", "source-documents", "media", "ingest", "module-thumbnails"}
     )
     assert s.admin_file_presigned_max_seconds == 24 * 60 * 60
+
+
+def test_coaching_rag_defaults() -> None:
+    s = Settings()
+    assert s.coaching_rag_module_limit == 5
+    assert s.coaching_rag_presigned_url_ttl_seconds == 3600
+    assert s.coaching_rag_context_max_chars == 28_000
+
+
+def test_coaching_rag_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COACHING_RAG_MODULE_LIMIT", "10")
+    monkeypatch.setenv("COACHING_RAG_PRESIGNED_URL_TTL_SECONDS", "7200")
+    monkeypatch.setenv("COACHING_RAG_CONTEXT_MAX_CHARS", "50000")
+    s = Settings()
+    assert s.coaching_rag_module_limit == 10
+    assert s.coaching_rag_presigned_url_ttl_seconds == 7200
+    assert s.coaching_rag_context_max_chars == 50_000
 
 
 # ─── Model selection (post-P3 defaults) ────────────────────────────────────
@@ -304,8 +320,12 @@ def test_spice_referral_set_parses_default_destinations() -> None:
 # ─── Architecture-reset removals: removed attrs must NOT be present ────────
 
 
-def test_production_rejects_insecure_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("APP_ENV", "production")
+@pytest.mark.parametrize("app_env", ["production"])
+def test_deployed_env_rejects_insecure_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    app_env: str,
+) -> None:
+    monkeypatch.setenv("APP_ENV", app_env)
     monkeypatch.setenv("SPICE_AUTH_ENABLED", "true")
     monkeypatch.setenv("CORS_ALLOW_ORIGINS", "https://app.example.com")
     with pytest.raises(ValidationError):
@@ -315,8 +335,12 @@ def test_production_rejects_insecure_defaults(monkeypatch: pytest.MonkeyPatch) -
         )
 
 
-def test_production_requires_spice_tenant_id_map(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("APP_ENV", "production")
+@pytest.mark.parametrize("app_env", ["production"])
+def test_deployed_env_requires_spice_tenant_id_map(
+    monkeypatch: pytest.MonkeyPatch,
+    app_env: str,
+) -> None:
+    monkeypatch.setenv("APP_ENV", app_env)
     monkeypatch.setenv("SPICE_AUTH_ENABLED", "true")
     monkeypatch.setenv("CORS_ALLOW_ORIGINS", "https://app.example.com")
     with pytest.raises(ValidationError, match="SPICE_TENANT_ID_MAP"):

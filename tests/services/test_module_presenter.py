@@ -188,7 +188,7 @@ class TestCardsWithSourcePages:
         assert await cards_with_source_pages(db_session, []) == []
 
     async def test_card_without_block_ids_gets_empty_source_pages(self, db_session: AsyncSession) -> None:
-        cards = [{"id": "card-0", "title_bn": "T"}]
+        cards = [{"id": "card-0", "title": {"bn": "T"}}]
         out = await cards_with_source_pages(db_session, cards)
         assert out[0]["source_pages"] == []
 

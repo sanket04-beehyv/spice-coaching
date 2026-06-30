@@ -31,9 +31,7 @@ def parse_spice_tenant_id_map(raw: str) -> dict[int, UUID]:
         if not chunk:
             continue
         if "=" not in chunk:
-            raise ValueError(
-                "SPICE_TENANT_ID_MAP entries must be JSON or comma-separated id=uuid pairs"
-            )
+            raise ValueError("SPICE_TENANT_ID_MAP entries must be JSON or comma-separated id=uuid pairs")
         spice_raw, uuid_raw = chunk.split("=", 1)
         out[int(spice_raw.strip())] = UUID(uuid_raw.strip())
     return out

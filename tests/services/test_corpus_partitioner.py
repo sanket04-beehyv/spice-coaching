@@ -1,5 +1,6 @@
 """Stage 2 corpus chunker + cross-chunk dedup tests."""
 
+from platform_service.config import get_settings
 from platform_service.services.corpus_partitioner import (
     chunk_by_token_budget,
     dedup_and_flag_cross_chunk,
@@ -65,8 +66,6 @@ class TestChunkByTokenBudget:
     def test_large_corpus_multiple_chunks(self, monkeypatch) -> None:
         # Each page ~80K tokens (320K chars). Target 60K. With no outline
         # boundaries, chunker breaks once current_tokens >= target.
-        from platform_service.config import get_settings
-
         s = get_settings()
         monkeypatch.setattr(s, "stage_c_chunk_target_tokens", 60_000)
         monkeypatch.setattr(s, "stage_c_chunk_window_pct", 0.10)
@@ -84,8 +83,6 @@ class TestChunkByTokenBudget:
         assert sorted(all_pages) == [1, 2, 3, 4]
 
     def test_snaps_to_outline_boundary(self, monkeypatch) -> None:
-        from platform_service.config import get_settings
-
         s = get_settings()
         monkeypatch.setattr(s, "stage_c_chunk_target_tokens", 100)
         monkeypatch.setattr(s, "stage_c_chunk_window_pct", 0.50)
@@ -167,8 +164,6 @@ class TestDedupAndFlagCrossChunk:
         assert len(out) == 2
 
     def test_near_duplicate_flagged_for_review(self, monkeypatch) -> None:
-        from platform_service.config import get_settings
-
         s = get_settings()
         monkeypatch.setattr(s, "stage_c_cross_chunk_similarity_threshold", 0.5)
 
@@ -181,8 +176,6 @@ class TestDedupAndFlagCrossChunk:
         assert all(c.get("_cross_chunk_review") for c in out)
 
     def test_within_chunk_pairs_not_flagged(self, monkeypatch) -> None:
-        from platform_service.config import get_settings
-
         s = get_settings()
         monkeypatch.setattr(s, "stage_c_cross_chunk_similarity_threshold", 0.5)
 

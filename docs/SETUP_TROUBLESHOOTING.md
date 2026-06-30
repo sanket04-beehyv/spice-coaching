@@ -12,6 +12,33 @@ uv sync --all-packages --group dev
 If you skip the `.env` copy, `docker compose up` fails at parse time with:
 `required variable GOOGLE_API_KEY is missing a value`.
 
+## Staging and production environment variables
+
+Local development uses permissive defaults (`APP_ENV=development`, `SPICE_AUTH_ENABLED=false`, dev MinIO/AI tokens). **Staging and production** (`APP_ENV=staging` or `APP_ENV=production`) enforce the same safety checks at startup — the service will fail fast if insecure defaults remain.
+
+### Platform (`platform-api` / `platform-worker`)
+
+| Variable | Requirement |
+|---|---|
+| `APP_ENV` | `staging` or `production` |
+| `DATABASE_PASSWORD` | Non-empty; must not be `postgres` |
+| `AI_RUNTIME_TOKEN` | Must not be `dev-internal-token` |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | Must not be dev defaults (`minioadmin`) |
+| `SPICE_AUTH_ENABLED` | Must be `true` |
+| `SPICE_TENANT_ID_MAP` | Required JSON or `id=uuid` map |
+| `CORS_ALLOW_ORIGINS` | Must not include `*` |
+
+### AI runtime
+
+| Variable | Requirement |
+|---|---|
+| `APP_ENV` | `staging` or `production` |
+| `INTERNAL_TOKEN` | Must not be `dev-internal-token` |
+| `OPENAI_API_KEY` | Required when `AI_PROVIDER=openai` |
+| `GOOGLE_API_KEY` or Vertex credentials | Required when `AI_PROVIDER=google` without Vertex |
+
+Set `APP_ENV=development` only on trusted local machines. Never deploy with `APP_ENV=development` to a shared or internet-facing host.
+
 ## Known Issues and Fixes
 
 ### 1) Docker Compose warning: `version` is obsolete
@@ -157,6 +184,35 @@ alembic -c infra/alembic.ini upgrade head
   docker compose down -v
   docker compose up -d
   ```
+
+---
+
+### 8) `uvicorn` (or `celery` / `alembic`) not found in PATH
+
+**Symptom**
+- Container fails at startup with:
+  `exec: "uvicorn": executable file not found in $PATH`
+- Same error can appear for `celery` or `alembic` on worker/migrate services.
+
+**Root Cause**
+- `uv sync` installs console scripts into `/app/.venv/bin/`, not `/usr/local/bin`.
+- `UV_SYSTEM_PYTHON=1` only affects the `uv pip` interface; it does not change where `uv sync` places executables.
+- Dockerfiles and compose commands invoked bare `uvicorn` / `celery` / `alembic` without adding `.venv/bin` to `PATH`.
+
+**Fix Applied**
+- Both service Dockerfiles now set `ENV PATH="/app/.venv/bin:$PATH"` after `uv sync`.
+- Root `.dockerignore` excludes host `.venv/` directories so local virtualenvs are never copied into images.
+
+**How to Verify**
+```bash
+docker compose build --no-cache platform-api ai-runtime migrate
+docker compose up
+docker compose ps
+curl -fsS http://localhost:18000/medtronics-api/health
+curl -fsS http://localhost:18001/health
+```
+- `platform-api` and `ai-runtime` should report `(healthy)` within ~30 seconds.
+- `migrate` should exit with code `0`.
 
 ## Recommended Startup Sequence
 

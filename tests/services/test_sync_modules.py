@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
 import pytest
+from platform_service.db.models.behavioural_gap import BehaviouralGap
+from platform_service.db.models.chw_module_assignment import CHWModuleAssignment
+from platform_service.db.models.content_block import ContentBlock
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.source_document import SourceDocument
+from platform_service.db.models.source_page import SourcePage
+from platform_service.db.repositories.module_gap_repository import ModuleGapRepository
 from platform_service.services.sync_service import SyncService
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,12 +25,25 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 _STORAGE_PATH = "medtronics-storage/source-documents/manual.pdf"
 _THUMB_PATH = "medtronics-storage/ingest/thumbnails/doc.png"
 
+_SAMPLE_SEARCH_METADATA = {
+    "schema_version": 1,
+    "keywords": {"en": ["cough"], "bn": []},
+    "search_phrases": {"en": ["child cough"], "bn": []},
+    "synonyms": {"en": {}},
+    "topic_tags": ["respiratory"],
+    "clinical_conditions": [],
+    "audience": "chw",
+    "rationale": "",
+}
+
 
 async def _make_published_module(
     session: AsyncSession,
     *,
     source_document_ids: list | None,
     thumbnail_storage_path: str | None = None,
+    module_json: dict[str, Any] | None = None,
+    search_metadata_jsonb: dict[str, Any] | None = None,
 ) -> Module:
     family = ModuleFamily(module_code=f"SYNC-MOD-{uuid4().hex[:8]}")
     session.add(family)
@@ -34,12 +53,14 @@ async def _make_published_module(
         version=1,
         lifecycle_status="published",
         module_type="refresher",
-        title_bn="মডিউল",
+        title_localized={"bn": "মডিউল"},
         domain="hypertension",
         estimated_minutes=5,
         difficulty_level="basic",
         source_document_ids=source_document_ids,
         thumbnail_storage_path=thumbnail_storage_path,
+        module_json=module_json,
+        search_metadata_jsonb=search_metadata_jsonb,
     )
     session.add(module)
     await session.flush()
@@ -147,3 +168,144 @@ async def test_modules_bundle_includes_has_thumbnail(db_session: AsyncSession) -
     by_id = {m.id: m for m in bundle.modules}
     assert by_id[with_thumb.id].has_thumbnail is True
     assert by_id[without_thumb.id].has_thumbnail is False
+
+
+@pytest.mark.asyncio
+@requires_db
+async def test_modules_bundle_cards_include_source_pages_from_block_ids(
+    db_session: AsyncSession,
+) -> None:
+    doc = await _make_source_document(db_session)
+    page = SourcePage(
+        source_document_id=doc.id,
+        page_number=12,
+        markdown_content="# Page 12",
+        extraction_method="text",
+        extraction_quality_score=0.9,
+    )
+    db_session.add(page)
+    await db_session.flush()
+    block = ContentBlock(
+        source_page_id=page.id,
+        block_order=0,
+        block_type="paragraph",
+        content_text="ARI guidance",
+    )
+    db_session.add(block)
+    await db_session.flush()
+
+    module = await _make_published_module(
+        db_session,
+        source_document_ids=[doc.id],
+        module_json={
+            "cards": [
+                {
+                    "id": "card-0",
+                    "title": {"bn": "C1"},
+                    "body": {"bn": "B1"},
+                    "source_block_ids": [str(block.id)],
+                }
+            ]
+        },
+    )
+
+    since = datetime.now(UTC) - timedelta(days=1)
+    bundle = await SyncService(db_session).get_modules_bundle(since=since)
+
+    by_id = {m.id: m for m in bundle.modules}
+    card = by_id[module.id].cards[0]
+    page_ref = card["source_pages"][0]
+    assert page_ref["source_document_id"] == str(doc.id)
+    assert page_ref["page_number"] == 12
+    assert page_ref["start_ms"] is None
+    assert page_ref["end_ms"] is None
+    assert page_ref["presigned_url"] is None
+    assert page_ref["presigned_expires_seconds"] is None
+
+
+@pytest.mark.asyncio
+@requires_db
+async def test_modules_bundle_includes_search_metadata(db_session: AsyncSession) -> None:
+    with_metadata = await _make_published_module(
+        db_session,
+        source_document_ids=None,
+        search_metadata_jsonb=_SAMPLE_SEARCH_METADATA,
+    )
+    without_metadata = await _make_published_module(
+        db_session,
+        source_document_ids=None,
+        search_metadata_jsonb=None,
+    )
+
+    since = datetime.now(UTC) - timedelta(days=1)
+    bundle = await SyncService(db_session).get_modules_bundle(since=since)
+
+    by_id = {m.id: m for m in bundle.modules}
+    assert by_id[with_metadata.id].search_metadata == _SAMPLE_SEARCH_METADATA
+    assert by_id[without_metadata.id].search_metadata is None
+
+
+async def _make_gap(session: AsyncSession) -> BehaviouralGap:
+    code = f"gap_{uuid4().hex[:8]}"
+    gap = BehaviouralGap(
+        gap_code=code,
+        description=code,
+        domain="rmnch",
+        detection_rule_jsonb={},
+    )
+    session.add(gap)
+    await session.flush()
+    return gap
+
+
+@pytest.mark.asyncio
+@requires_db
+async def test_modules_bundle_includes_behavioural_gap_associations(
+    db_session: AsyncSession,
+) -> None:
+    primary_gap = await _make_gap(db_session)
+    secondary_gap = await _make_gap(db_session)
+    with_gaps = await _make_published_module(db_session, source_document_ids=None)
+    without_gaps = await _make_published_module(db_session, source_document_ids=None)
+
+    await ModuleGapRepository(db_session).replace_links(
+        with_gaps.id,
+        gap_ids=[primary_gap.id, secondary_gap.id],
+        primary_gap_id=primary_gap.id,
+    )
+    await db_session.refresh(with_gaps)
+
+    since = datetime.now(UTC) - timedelta(days=1)
+    bundle = await SyncService(db_session).get_modules_bundle(since=since)
+
+    by_id = {m.id: m for m in bundle.modules}
+    linked = by_id[with_gaps.id]
+    assert linked.primary_gap_id == primary_gap.id
+    assert linked.behavioural_gap_ids == [primary_gap.id, secondary_gap.id]
+
+    unlinked = by_id[without_gaps.id]
+    assert unlinked.primary_gap_id is None
+    assert unlinked.behavioural_gap_ids == []
+
+
+@pytest.mark.asyncio
+@requires_db
+async def test_modules_bundle_assigned_module_ids(db_session: AsyncSession) -> None:
+    module = await _make_published_module(db_session, source_document_ids=None)
+    db_session.add(
+        CHWModuleAssignment(
+            module_id=module.id,
+            assignment_type="individual",
+            user_id=1313053891,
+            assigned_by=1,
+        )
+    )
+    await db_session.commit()
+
+    since = datetime.now(UTC) - timedelta(days=1)
+
+    without_user = await SyncService(db_session).get_modules_bundle(since=since)
+    assert without_user.assigned_module_ids == []
+
+    with_user = await SyncService(db_session).get_modules_bundle(since=since, user_id=1313053891)
+    assert with_user.assigned_module_ids == [module.id]

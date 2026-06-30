@@ -45,7 +45,7 @@ class TriggersBundleBuilder:
                 ModuleTriggerBindingSyncPayload(
                     id=binding.id,
                     trigger_definition_id=binding.trigger_definition_id,
-                    module_family_id=binding.module_family_id,
+                    module_id=binding.module_id,
                     relationship=binding.relationship,
                     priority_weight=binding.priority_weight,
                     notes=binding.notes,

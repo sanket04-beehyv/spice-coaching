@@ -11,8 +11,10 @@ from functools import lru_cache
 from typing import Literal, Self
 from uuid import UUID
 
+from mc_contracts.localized import LocaleConfig
 from mc_foundation.config import BaseAppSettings
-from pydantic import SecretStr, field_validator, model_validator
+from mc_foundation.locale import get_supported_locales
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import SettingsConfigDict
 
 from platform_service.tenant_mapping import parse_spice_tenant_id_map
@@ -39,7 +41,7 @@ class Settings(BaseAppSettings):
 
     app_name: str = "platform-api"
     # Public URL prefix for all platform-api routes (e.g. /medtronics-api).
-    api_root_path: str = "/medtronics-api/"
+    api_root_path: str = "/medtronics-api"
 
     # ── Database ──────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/microcoaching"
@@ -94,6 +96,12 @@ class Settings(BaseAppSettings):
     rate_limit_telemetry_per_minute: int = 120
     rate_limit_rag_per_minute: int = 30
     rate_limit_admin_ingest_per_minute: int = 10
+
+    # ── Deployment language ───────────────────────────────────
+    # Per-deployment CHW-facing locale.
+    # Override via DEPLOYMENT_PRIMARY_LOCALE, DEPLOYMENT_REGION_CONTEXT env vars.
+    deployment_primary_locale: str = "bn"
+    deployment_region_context: str = "rural Bangladesh"
 
     # ── Embedding ─────────────────────────────────────────────
     embedding_dimension: int = 768
@@ -247,6 +255,8 @@ class Settings(BaseAppSettings):
     # How many per-chunk identification calls run in parallel. 2 is
     # conservative against Vertex per-project quota.
     stage_c_section_concurrency: int = 2
+    # Max characters for optional admin ingestion steering text (Stage C).
+    ingestion_instructions_max_length: int = 2000
 
     # ── Stage 2-draft — bilingual card drafting ─────────────────
     # Cardinality bounds. Quiz bounds also apply to the post-publish quiz
@@ -257,8 +267,36 @@ class Settings(BaseAppSettings):
     card_max_count: int = 7
 
     # ── Post-publish — behavioural gap classification ───────────
-    post_publish_gap_classification_enabled: bool = True
+    post_publish_gap_classification_enabled: bool = False
     gap_classification_max_associations: int = 5
+
+    # ── Post-publish — assessment-due trigger binding ───────────
+    post_publish_trigger_binding_enabled: bool = False
+    trigger_binding_max_topics: int = 5
+    trigger_binding_primary_weight: int = 20
+    trigger_binding_secondary_weight: int = 10
+
+    # ── Post-publish — search metadata for lexical retrieval ──────
+    post_publish_search_metadata_enabled: bool = True
+    post_publish_card_search_metadata_enabled: bool = True
+    search_metadata_max_keywords: int = 15
+    search_metadata_max_search_phrases: int = 10
+    search_metadata_max_synonyms: int = 10
+    search_metadata_max_tags: int = 10
+    card_search_metadata_max_retrieval_hints: int = 8
+    card_search_metadata_max_keywords: int = 10
+    card_search_metadata_max_questions: int = 5
+    card_search_metadata_max_synonyms: int = 8
+
+    # ── Chat FAQ mining (weekly Celery beat) ─────────────────────
+    chat_faq_lookback_days: int = 90
+    chat_faq_min_occurrence_count: int = 3
+    chat_faq_min_question_length: int = 5
+    chat_faq_target_count: int = 6
+    chat_faq_min_output_count: int = 5
+    chat_faq_cluster_candidate_limit: int = 100
+    chat_faq_weekly_hour_utc: int = 2
+    chat_faq_weekly_day_of_week: int = 0  # 0=Sunday (Celery crontab convention)
 
     # ── Stage 2-draft — optional published-module merge ─────────
     # When enabled, Stage D may merge newly drafted cards into a similar
@@ -275,6 +313,11 @@ class Settings(BaseAppSettings):
     stage_d_published_merge_card_similarity_threshold: float = 0.0
     # Whole-module fingerprint similarity floor (both card sets concatenated).
     stage_d_published_merge_module_similarity_threshold: float = 0.0
+
+    # ── Telemetry coaching state mode ───────────────────────────
+    # When true, telemetry updates chw_behavioural_gap_state (gap + SPICE path).
+    # When false (default), only module_quiz_attempted updates chw_quiz_question_state.
+    telemetry_behavioural_gap_state_enabled: bool = False
 
     # ── Quiz pass / retrigger ───────────────────────────────────
     quiz_pass_threshold_default: float = 0.70
@@ -308,6 +351,11 @@ class Settings(BaseAppSettings):
     admin_file_allowed_prefixes: str = "uploads,source-documents,media,ingest,module-thumbnails"
     admin_file_max_upload_bytes: int = 100 * 1024 * 1024
     admin_file_presigned_max_seconds: int = 24 * 60 * 60
+
+    # ── Coaching RAG ────────────────────────────────────────────
+    coaching_rag_module_limit: int = Field(5, ge=1, le=20)
+    coaching_rag_presigned_url_ttl_seconds: int = Field(3600, ge=60, le=86400)
+    coaching_rag_context_max_chars: int = Field(28_000, ge=1_000, le=100_000)
 
     # ── Module editor attachments (module_json inline refs) ───
     module_attachment_allowed_prefix: str = "media"
@@ -362,6 +410,14 @@ class Settings(BaseAppSettings):
         return self.openai_vision_model if self.ai_cloud_provider == "openai" else self.google_vision_model
 
     @property
+    def deployment_locale_config(self) -> LocaleConfig:
+        supported = sorted(get_supported_locales(self.deployment_primary_locale))
+        return LocaleConfig(
+            primary=self.deployment_primary_locale,
+            supported=supported,
+        )
+
+    @property
     def cors_allow_origins_list(self) -> list[str]:
         raw = (self.cors_allow_origins or "").strip()
         if raw == "*":
@@ -378,7 +434,9 @@ class Settings(BaseAppSettings):
         if self.app_env != "production":
             return self
         errors: list[str] = []
-        database_password = (self.database_password.get_secret_value().strip() if self.database_password else "")
+        database_password = (
+            self.database_password.get_secret_value().strip() if self.database_password else ""
+        )
         if not database_password or database_password in _INSECURE_DB_PASSWORDS:
             errors.append("DATABASE_PASSWORD must be set to a non-default value in production")
         if database_password in _PLACEHOLDER_VALUES:
@@ -411,4 +469,4 @@ class Settings(BaseAppSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return Settings()  # type: ignore[call-arg]
