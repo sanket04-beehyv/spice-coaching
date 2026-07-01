@@ -37,7 +37,9 @@ async def _wipe_data(db_session: AsyncSession) -> AsyncIterator[None]:
 def _mock_storage() -> MagicMock:
     storage = MagicMock()
 
-    async def _presign(*, object_name: str, expires_seconds: int, download_filename=None):
+    async def _presign(
+        *, object_name: str, expires_seconds: int, download_filename=None, disposition="auto", **kwargs
+    ):
         if "thumbnails" in object_name:
             return PresignedObjectUrl(
                 url=_THUMB_URL,

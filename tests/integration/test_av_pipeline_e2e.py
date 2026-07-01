@@ -258,11 +258,18 @@ class TestAvHappyPath:
         # source_block_ids on each card so /coaching/rag-query can join
         # through to source_page (timecodes) and source_document.
         modules = (
-            (await db_session.execute(select(Module).where(Module.lifecycle_status == "draft")))
+            (
+                await db_session.execute(
+                    select(Module).where(
+                        Module.lifecycle_status == "draft",
+                        Module.source_document_ids.contains([sd_id]),
+                    )
+                )
+            )
             .scalars()
             .all()
         )
-        assert len(modules) >= 1
+        assert len(modules) == 1
         m = modules[0]
         assert m.module_json is not None
         cards = m.module_json.get("cards", [])

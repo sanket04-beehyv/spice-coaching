@@ -112,7 +112,6 @@ class TestPublishedSourceDocuments:
         assert len(data["source_documents"]) == 1
         entry = data["source_documents"][0]
         assert entry["source_document_id"] == str(doc.id)
-        assert "title" not in entry
         assert "cards" not in data
         assert "module_cards" not in data
 

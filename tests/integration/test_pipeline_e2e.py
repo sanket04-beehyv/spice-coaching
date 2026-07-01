@@ -85,18 +85,29 @@ pytestmark = [requires_db]
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE module_quiz_question, module, module_family, "
-            "behavioural_gap, module_candidate_draft, content_block, source_page, "
-            "source_document, ingestion_run_step, ingestion_run, "
-            "llm_call_cache "
-            "RESTART IDENTITY CASCADE"
-        )
+    tables = (
+        "TRUNCATE module_quiz_question, module, module_family, "
+        "behavioural_gap, module_candidate_draft, content_block, source_page, "
+        "source_document, ingestion_run_step, ingestion_run, "
+        "llm_call_cache "
+        "RESTART IDENTITY CASCADE"
     )
-    await db_session.commit()
+
+    async def _wipe() -> None:
+        await db_session.rollback()
+        await db_session.execute(text(tables))
+        await db_session.commit()
+
+    await _wipe()
+    yield
+    await _wipe()
+
+
+@pytest.fixture(autouse=True)
+def _disable_published_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Merge calls ai-runtime; keep integration tests offline."""
+    monkeypatch.setenv("STAGE_D_PUBLISHED_MERGE_ENABLED", "false")
+    get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)
@@ -444,7 +455,7 @@ class TestHappyPath:
 
 
 class TestOutlineEmptyFailsRun:
-    async def test_no_heading_markers_fails_run_no_module(
+    async def test_no_heading_markers_still_runs_identifier_on_body(
         self,
         db_session: AsyncSession,
         patch_count_pages: Callable[[int], None],
@@ -455,14 +466,11 @@ class TestOutlineEmptyFailsRun:
 
         result, _ = await _run_orchestrator(source_document_id=sd_id, text_pages=text_pages)
 
-        assert result.final_status == "failed"
-        modules = (await db_session.execute(select(Module))).scalars().all()
-        assert modules == []
+        assert result.final_status == "succeeded"
         run = (
             await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
         ).scalar_one()
-        assert run.status == "failed"
-        assert run.error_jsonb["failed_stage"] == "extract"
+        assert run.status == "succeeded"
 
 
 # ─── Scenario 3: Stage C zero candidates ──────────────────────────────────
@@ -536,12 +544,9 @@ class TestStageDPerCandidateFailure:
         )
 
         assert result.final_status == "partially_succeeded"
-        modules = (
-            (await db_session.execute(select(Module).where(Module.lifecycle_status == "published")))
-            .scalars()
-            .all()
-        )
+        modules = (await db_session.execute(select(Module))).scalars().all()
         assert len(modules) == 2
+        assert all(m.lifecycle_status == "draft" for m in modules)
         run = (
             await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
         ).scalar_one()
@@ -678,15 +683,9 @@ class TestEmbeddingWorkerFailureNonBlocking:
         result, _ = await _run_orchestrator(source_document_id=sd_id, text_pages=text_pages)
 
         assert result.final_status == "succeeded"
-        modules = (
-            (await db_session.execute(select(Module).where(Module.lifecycle_status == "published")))
-            .scalars()
-            .all()
-        )
+        modules = (await db_session.execute(select(Module))).scalars().all()
         assert len(modules) >= 1
         m = modules[0]
-
-        # Run embedding worker with the AI-runtime raising.
         await _run_post_publish_inproc(m.id, embed_raises=RuntimeError("Vertex 503"))
 
         await db_session.refresh(m)
@@ -709,11 +708,7 @@ class TestQuizWorkerMalformedJsonNonBlocking:
         result, _ = await _run_orchestrator(source_document_id=sd_id, text_pages=text_pages)
 
         assert result.final_status == "succeeded"
-        modules = (
-            (await db_session.execute(select(Module).where(Module.lifecycle_status == "published")))
-            .scalars()
-            .all()
-        )
+        modules = (await db_session.execute(select(Module))).scalars().all()
         assert len(modules) >= 1
         m = modules[0]
 

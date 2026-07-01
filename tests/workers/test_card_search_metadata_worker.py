@@ -53,7 +53,8 @@ async def _seed_module(session: AsyncSession, *, cards: list[dict] | None = None
         module_type="refresher",
         module_json={
             "cards": cards
-            or [
+            if cards is not None
+            else [
                 {"title": {"bn": "T1"}, "body": {"bn": "body1"}},
                 {"title": {"bn": "T2"}, "body": {"bn": "body2"}},
             ]

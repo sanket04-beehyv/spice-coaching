@@ -430,10 +430,9 @@ class TestCountModules:
         reviewed = (
             (
                 await db_session.execute(
-                    select(
-                        ModuleRepository.__init__.__globals__["Module"]
-                    ).where(  # use Module from the repo's namespace
-                        Module.description_localized["bn"] == marker, Module.clinically_reviewed.is_(True)
+                    select(Module).where(
+                        Module.description_localized["bn"].astext == marker,
+                        Module.clinically_reviewed.is_(True),
                     )
                 )
             )
@@ -444,7 +443,8 @@ class TestCountModules:
             (
                 await db_session.execute(
                     select(Module).where(
-                        Module.description_localized["bn"] == marker, Module.clinically_reviewed.is_(False)
+                        Module.description_localized["bn"].astext == marker,
+                        Module.clinically_reviewed.is_(False),
                     )
                 )
             )

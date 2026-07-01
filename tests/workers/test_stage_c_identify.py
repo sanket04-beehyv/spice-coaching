@@ -277,8 +277,10 @@ class TestIngestionInstructionsPassedToIdentifier:
         await orch.run(ingestion_run_id=run.id, source_document_ids=[sd.id])
 
         rows = (
-            await db_session.execute(
-                select(ModuleCandidateDraft).where(ModuleCandidateDraft.ingestion_run_id == run.id)
+            (
+                await db_session.execute(
+                    select(ModuleCandidateDraft).where(ModuleCandidateDraft.ingestion_run_id == run.id)
+                )
             )
             .scalars()
             .all()

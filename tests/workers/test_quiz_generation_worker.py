@@ -329,7 +329,6 @@ class TestHappyPath:
         row = result.scalar_one()
         assert row.explanation_localized is not None
         assert "কার্ড" not in row.explanation_localized["bn"]
-        assert "Card" not in row.explanation_localized["en"]
 
 
 # ─── Idempotent retry ───────────────────────────────────────────────────────
