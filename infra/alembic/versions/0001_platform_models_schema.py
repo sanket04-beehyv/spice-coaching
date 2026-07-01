@@ -555,9 +555,9 @@ def upgrade() -> None:
             server_default=sa.text("gen_random_uuid()"),
         ),
         sa.Column(
-            "module_family_id",
+            "module_id",
             postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("module_family.id", ondelete="CASCADE"),
+            sa.ForeignKey("module.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
@@ -570,7 +570,7 @@ def upgrade() -> None:
         sa.Column("priority_weight", sa.Integer(), nullable=False, server_default="10"),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.UniqueConstraint(
-            "module_family_id",
+            "module_id",
             "trigger_definition_id",
             name="uq_module_trigger_binding_pair",
         ),
@@ -621,4 +621,3 @@ def downgrade() -> None:
     op.drop_table("source_document")
     op.execute("DROP EXTENSION IF EXISTS vector")
     op.execute("DROP EXTENSION IF EXISTS pgcrypto")
-

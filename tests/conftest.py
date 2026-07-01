@@ -23,13 +23,18 @@ Loop / engine isolation:
          next test starts with no stale per-loop entries.
 """
 
+import asyncio as _asyncio
 import os
 import subprocess
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
 import pytest_asyncio
+from platform_service.config import get_settings
+from platform_service.db.base import SessionLocal, get_engine, reset_engine_caches
+from sqlalchemy import text as _text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
 
 
 def _has_test_db() -> bool:
@@ -44,8 +49,6 @@ requires_db = pytest.mark.skipif(
 
 def platform_path(path: str) -> str:
     """Full HTTP path including the platform API root prefix."""
-    from platform_service.config import get_settings
-
     root = get_settings().api_root_path_normalized
     if not path.startswith("/"):
         path = f"/{path}"
@@ -69,12 +72,25 @@ def _align_database_url_with_test_url() -> Iterator[None]:
         os.environ.setdefault("DATABASE_PASSWORD", "postgres")
         # Clear any previously-cached settings.
         try:
-            from platform_service.config import get_settings
-
             get_settings.cache_clear()
         except Exception:
             pass
     yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _disable_spice_auth_for_tests(_align_database_url_with_test_url: None) -> Iterator[None]:
+    """Most API/worker tests build minimal apps without SPICE JWT headers."""
+    os.environ["SPICE_AUTH_ENABLED"] = "false"
+    try:
+        get_settings.cache_clear()
+    except Exception:
+        pass
+    yield
+    try:
+        get_settings.cache_clear()
+    except Exception:
+        pass
 
 
 @pytest.fixture(scope="session")
@@ -110,11 +126,6 @@ def _migrate_test_db(_align_database_url_with_test_url: None) -> Iterator[None]:
     # session starts clean. Prior-run data left committed by tests that did
     # `await session.commit()` would otherwise leak across runs and pollute
     # search-result + count-by-default assertions.
-    import asyncio as _asyncio
-
-    from sqlalchemy import text as _text
-    from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
-
     async def _truncate_all() -> None:
         engine = _create_async_engine(url, echo=False)
         try:
@@ -153,12 +164,6 @@ async def db_session(test_db_url: str) -> AsyncIterator[AsyncSession]:
          re-use the same int) doesn't pick up a stale engine bound to
          a now-closed loop.
     """
-    from platform_service.db.base import (
-        SessionLocal,
-        get_engine,
-        reset_engine_caches,
-    )
-
     session = SessionLocal()
     try:
         yield session

@@ -41,14 +41,13 @@ class PromptSpec(BaseModel):
 
 
 class GenerationConstraints(BaseModel):
-    language: str = "bn"
+    language: str = ""
     output_format: str = "json"
     max_tokens: int | None = None
     temperature: float | None = None
 
 
 class TraceContext(BaseModel):
-    scenario_id: str | None = None
     session_id: str | None = None
     event_id: str | None = None
     chw_id: int | None = None
@@ -136,44 +135,11 @@ class TranscribeResponse(BaseModel):
     text: str
 
 
-# ── Typed context payloads per generation_type ───────────────────────────────
+class EmbedRequest(BaseModel):
+    """Platform → ai-runtime embed contract."""
+
+    texts: list[str]
 
 
-class CounsellingContext(BaseModel):
-    """context payload for GenerationType.COUNSELLING."""
-
-    patient_snapshot: dict[str, Any]
-    chw_context: dict[str, Any]
-    matched_sop_excerpt: str
-    matched_key_points: list[str]
-    matched_danger_signs: list[Any]
-    matched_referral_threshold: Any
-    bangla_card_excerpt: str
-    spice_referral_options: list[str]
-    clinical_domain: str | None
-    action_type: str | None
-
-
-class ITHelpContext(BaseModel):
-    """context payload for GenerationType.IT_HELP."""
-
-    question: str
-    chw_id: int | None = None
-
-
-class ExtractionContext(BaseModel):
-    """context payload for GenerationType.EXTRACTION — SOP section → scenario fields."""
-
-    section_text: str
-    source_doc: str
-    source_page: int | None = None
-
-
-class QuizContext(BaseModel):
-    """context payload for GenerationType.QUIZ."""
-
-    scenario_id: str
-    sop_excerpt_en: str
-    key_points: list[str]
-    clinical_domain: str
-    max_questions: int = 3
+class EmbedResponse(BaseModel):
+    embeddings: list[list[float]]

@@ -34,6 +34,11 @@ from mc_contracts.internal_ai import (
 from platform_service.config import get_settings
 from platform_service.deps import get_ai_client
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
+from platform_service.localized import (
+    deployment_locales,
+    migrate_legacy_suffix_field,
+    primary_text,
+)
 from platform_service.services._json_salvage import (
     extract_inner_array,
     salvage_truncated_array,
@@ -107,6 +112,7 @@ class ModuleIdentifier:
         page_corpus: list[dict[str, Any]],
         valid_block_ids: set[uuid.UUID],
         valid_page_ids: set[uuid.UUID],
+        ingestion_instructions: str | None = None,
         trace_context: TraceContext | None = None,
         max_tokens: int | None = None,
     ) -> ModuleIdentifierResult:
@@ -119,7 +125,12 @@ class ModuleIdentifier:
         broader defence and must not be opt-in).
         """
         settings = get_settings()
-        system_prompt = render_system_prompt(content_domains)
+        system_prompt = render_system_prompt(
+            content_domains,
+            ingestion_instructions=ingestion_instructions,
+            deployment_primary_locale=settings.deployment_primary_locale,
+            deployment_region_context=settings.deployment_region_context,
+        )
         codec = PromptIdCodec.from_corpus(page_corpus)
         logger.info(
             "Stage 2 identification codec built: docs=%d pages=%d blocks=%d",
@@ -132,6 +143,7 @@ class ModuleIdentifier:
             document_outlines=document_outlines,
             page_corpus=page_corpus,
             codec=codec,
+            ingestion_instructions=ingestion_instructions,
         )
 
         # Default to the per-stage cap (Gemini 2.5 Pro reserves part of
@@ -228,6 +240,10 @@ class ModuleIdentifier:
                 valid_page_ids=valid_page_ids,
             )
         ]
+        validated = _apply_ingestion_instruction_gate(
+            validated,
+            ingestion_instructions=ingestion_instructions,
+        )
         logger.info(
             "Stage 2 identification produced %d/%d valid candidates (rejected=%d, truncated=%s)",
             len(validated),
@@ -264,6 +280,44 @@ def _extract_candidates(payload: Any) -> list[dict[str, Any]]:
     )
 
 
+def _normalize_ingestion_instruction_rationale(cand: dict[str, Any]) -> None:
+    """Strip and normalize optional ingestion_instruction_rationale in-place."""
+    v = cand.get("ingestion_instruction_rationale")
+    if v is None:
+        cand["ingestion_instruction_rationale"] = None
+        return
+    if isinstance(v, str):
+        cleaned = v.strip()
+        cand["ingestion_instruction_rationale"] = cleaned or None
+    else:
+        cand["ingestion_instruction_rationale"] = None
+
+
+def _apply_ingestion_instruction_gate(
+    candidates: list[dict[str, Any]],
+    *,
+    ingestion_instructions: str | None,
+) -> list[dict[str, Any]]:
+    """When ingestion instructions are present, keep only candidates with rationale."""
+    if not ingestion_instructions:
+        for cand in candidates:
+            _normalize_ingestion_instruction_rationale(cand)
+        return candidates
+
+    kept: list[dict[str, Any]] = []
+    for cand in candidates:
+        _normalize_ingestion_instruction_rationale(cand)
+        if cand.get("ingestion_instruction_rationale"):
+            kept.append(cand)
+        else:
+            logger.warning(
+                "Rejecting candidate: missing ingestion_instruction_rationale "
+                "while ingestion instructions are present (title=%r)",
+                cand.get("proposed_title", ""),
+            )
+    return kept
+
+
 def _validate_candidate(
     cand: dict[str, Any],
     *,
@@ -292,17 +346,24 @@ def _validate_candidate(
             logger.warning("Rejecting candidate: missing required field %r", field)
             return False
 
-    # Optional bilingual descriptions (Stage C emits them; keep non-gating for
+    # Optional localized descriptions (Stage C emits them; keep non-gating for
     # backwards compatibility with older cached/truncated outputs).
-    for k in ("description_en", "description_bn"):
-        v = cand.get(k)
-        if v is None:
-            continue
-        if isinstance(v, str):
-            cleaned = v.strip()
-            cand[k] = cleaned or None
-        else:
-            cand[k] = None
+    description = cand.get("description")
+    if isinstance(description, dict):
+        primary = settings.deployment_primary_locale
+        primary_val = description.get(primary)
+        if isinstance(primary_val, str):
+            description[primary] = primary_val.strip() or None
+        cand["description"] = description
+    else:
+        primary = deployment_locales(settings)
+        migrated = dict(cand)
+        migrate_legacy_suffix_field(migrated, "description", primary=primary)
+        desc = migrated.get("description")
+        if isinstance(desc, dict):
+            primary_val = primary_text(desc, settings=settings)
+            if isinstance(primary_val, str) and primary_val.strip():
+                cand["description"] = {primary: primary_val.strip()}
 
     # Module type
     if cand["proposed_module_type"] not in _VALID_MODULE_TYPES:

@@ -5,12 +5,13 @@ takes a Stage C candidate plus its cited content_blocks and produces N
 bilingual cards (3-7). The branching by module_type controls which fields
 the LLM is asked to populate:
 
-- initial_training → comprehensive instructional content with body_bn + body_en
-  from comprehensive training manuals (detailed, procedural, foundational).
-- refresher / digital_proficiency → body_bn + body_en (verbatim from source
-  where possible; AI gap-fill only when one language is silent).
-- content_update → previous_practice_*, current_practice_*,
-  rationale_for_change_*, next_action_* fields (the delta-specific framing).
+- initial_training → comprehensive instructional content with body/title locale
+  maps from comprehensive training manuals (detailed, procedural, foundational).
+- refresher / digital_proficiency → body/title locale maps (source phrasing where
+  possible; AI gap-fill only when one language is silent; symbol notation
+  follows verbalization rules).
+- content_update → previous_practice, current_practice,
+  rationale_for_change, next_action locale maps (the delta-specific framing).
 
 Snippet plumbing (registered fragments + `snippet_links`) was deleted with
 the W-6 reviewer surface — it has no runtime resolver to back it. We do
@@ -24,6 +25,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from mc_foundation.locale import locale_display_name
+
+from platform_service.config import get_settings
+from platform_service.services.prompts.symbol_verbalization import (
+    render_locale_map_field_schema,
+    render_symbol_verbalization_rules,
+)
+
 CARD_DRAFTER_TEMPLATE_ID = "v33-stage-d-card-drafter"
 # v2: added cross-source coverage rule. When the candidate's cited blocks
 # span multiple source_document_ids (a fused candidate from Stage 2b —
@@ -34,34 +43,38 @@ CARD_DRAFTER_TEMPLATE_ID = "v33-stage-d-card-drafter"
 # titled "X Counselling and Digital Service Delivery" (Family Planning
 # experiment, 2026-05-09: 47 BRAC + 10 UHIS blocks → 5 cards, 0 citing
 # UHIS). Cache entries from v1 will not be reused.
-CARD_DRAFTER_TEMPLATE_VERSION = 2
+# v3: comparator/range verbalization for Bangla TTS. PROMPT_SYMBOL + UHIS
+# fixture ingests (2026-06): age ranges verbalized correctly (`20 to 30`,
+# `18 বছরের কম`), but symbol-style thresholds (`BP≥140/90`) still slipped
+# through — rules target `>=`, `<=`, and `-` ranges. Cache entries from v2
+# will not be reused.
+# v4: reconcile "verbatim" ground rules with symbol verbalization — prose
+# verbatim, digits preserved, symbols verbalized. Cache entries from v3 will
+# not be reused.
+# v6: monolingual deployment — primary locale only; no mirror/AI-translate rules.
+CARD_DRAFTER_TEMPLATE_VERSION = 6
 
 
 _SYSTEM_BASE = """\
-You are drafting bilingual learning cards for community health workers (CHWs)
-in rural Bangladesh.
+You are drafting learning cards for community health workers (CHWs)
+in {deployment_region_context}.
 
 GROUND RULES (apply to every card):
 - Each card covers ONE focused sub-topic. Do NOT cram multiple unrelated points
   into one card.
 - Card content must come from the cited content_blocks below. Do NOT invent
   clinical content. If a sub-topic has no source coverage, drop the card.
-- Bangla content (body_bn / title_bn / etc.) must use the EXACT vocabulary and
-  tone of the cited Bangla blocks where available — these are the BRAC training
-  manual phrasings the CHW already learned. Do NOT colloquialise.
-- English content (body_en / title_en / etc.) must come from cited English blocks
-  where available.
-- If a field has no source coverage in one language but does in the other,
-  AI-translate from the available source — and set field_flags[field_name].ai_translated = true
-  so the reviewer knows to verify.
-- Numerical values (BP 140/90, Hb 8 g/dL, etc.) are preserved verbatim across
-  languages.
+- Content ({primary_locale_label} — keys under title / body / etc.) must use the
+  EXACT vocabulary and tone of the cited blocks in that language where available
+  — these are the training-manual phrasings the CHW already learned. Do NOT
+  colloquialise. (Prose and terminology only; symbol/range notation follows the
+  verbalization rules below.)
+{symbol_verbalization_rules}
 - Maximum {card_max_count} cards. If the candidate's scope produces more, pick
   the {card_max_count} most-important sub-topics.
 - Minimum {card_min_count} cards. If you cannot draft that many from the cited
   blocks, return {{"insufficient_for_drafting": "<reason_code>"}} where reason_code
-  is one of: no_actionable_content | single_concept_only | no_quiz_anchors |
-  language_imbalance_severe.
+  is one of: no_actionable_content | single_concept_only | no_quiz_anchors.
 
 CROSS-SOURCE COVERAGE (only when blocks span multiple sources):
 Each cited block is tagged with its `source` label (e.g. `source=d1`,
@@ -90,19 +103,14 @@ OUTPUT SHAPE (strict JSON, no markdown fences, no commentary):
   "cards": [
     {{
       "card_order": int (1-indexed),
-      "title_en": "string or null",
-      "title_bn": "string",
-      {body_field_schema}
+{title_field_schema}
+{body_field_schema}
       "thresholds": [
         {{"label": "BP threshold", "value": "140/90 mmHg"}},
         ...
-      ] (optional, for clinical thresholds; preserve numerical values verbatim),
+      ] (optional, for clinical thresholds; preserve digits verbatim, verbalize symbols),
       "figure_ref_block_id": "uuid string or null (cite a content_block of block_type=figure)",
-      "source_block_ids": ["uuid string", ...] (every block that informed this card),
-      "field_flags": {{
-        "body_bn": {{"ai_translated": true}},
-        ...
-      }} (optional; only when AI gap-fill happened)
+      "source_block_ids": ["uuid string", ...] (every block that informed this card)
     }},
     ...
   ]
@@ -160,57 +168,86 @@ How to structure initial_training cards:
 - COMPLETE: Each card should be complete and understandable on its own, but together
   they form a comprehensive learning sequence on the topic.
 
-The previous_practice_*, current_practice_*, rationale_for_change_*, next_action_*
-fields are NOT used for initial_training cards (leave them out)."""
+The previous_practice, current_practice, rationale_for_change, next_action
+locale maps are NOT used for initial_training cards (leave them out)."""
 
 _REFRESHER_RULES = """\
 This is a `refresher` module — current correct protocol. Cards present
-present-tense protocol guidance from the cited blocks. The previous_practice_*,
-current_practice_*, rationale_for_change_*, next_action_* fields are NOT used
+present-tense protocol guidance from the cited blocks. The previous_practice,
+current_practice, rationale_for_change, next_action locale maps are NOT used
 for refresher cards (leave them out)."""
 
 _DIGITAL_PROFICIENCY_RULES = """\
 This is a `digital_proficiency` module — SPICE app workflow guidance. Cards
 are procedural (steps, screen references) not clinical. Cite content_blocks of
 block_type=figure for screenshots when they exist in the cited source. The
-previous_practice_*, current_practice_*, rationale_for_change_*, next_action_*
-fields are NOT used (leave them out)."""
+previous_practice, current_practice, rationale_for_change, next_action locale
+maps are NOT used (leave them out)."""
 
 _CONTENT_UPDATE_RULES = """\
 This is a `content_update` module — a recent change in protocol. EVERY card MUST
-populate the four delta fields:
-- previous_practice_bn / previous_practice_en: what was done before the change
-- current_practice_bn / current_practice_en: what is done now
-- rationale_for_change_bn / rationale_for_change_en: why the change happened
-- next_action_bn / next_action_en: what the CHW should do at the next visit
+populate the four delta locale maps:
+- previous_practice: what was done before the change
+- current_practice: what is done now
+- rationale_for_change: why the change happened
+- next_action: what the CHW should do at the next visit
 
-For content_update modules, body_bn / body_en MAY be empty — the four delta
-fields carry the structured framing. Reviewer schema validation requires
-previous_practice_bn AND current_practice_bn AND rationale_for_change_bn to
-be non-empty for content_update cards."""
+For content_update modules, body MAY be empty in the primary locale — the four delta
+locale maps carry the structured framing. Reviewer schema validation requires
+previous_practice, current_practice, and rationale_for_change to be non-empty in
+the primary locale ({primary_locale_label}) for content_update cards."""
 
 
-def _body_field_schema_for(module_type: str) -> str:
+def _body_field_schema_for(
+    module_type: str,
+    *,
+    primary_locale: str,
+) -> str:
     if module_type == "content_update":
-        return (
-            '"body_bn": "string or null (may be empty for content_update; delta fields carry the framing)",\n'
-            '      "body_en": "string or null",\n'
-            '      "previous_practice_bn": "string (REQUIRED for content_update)",\n'
-            '      "previous_practice_en": "string or null",\n'
-            '      "current_practice_bn": "string (REQUIRED for content_update)",\n'
-            '      "current_practice_en": "string or null",\n'
-            '      "rationale_for_change_bn": "string (REQUIRED for content_update)",\n'
-            '      "rationale_for_change_en": "string or null",\n'
-            '      "next_action_bn": "string or null",\n'
-            '      "next_action_en": "string or null",'
-        )
-    return (
-        '"body_bn": "string (REQUIRED for initial_training / refresher / digital_proficiency)",\n'
-        '      "body_en": "string or null",'
+        lines = [
+            render_locale_map_field_schema(
+                "body",
+                primary_locale=primary_locale,
+                description="may be empty for content_update; delta fields carry the framing",
+            ),
+            render_locale_map_field_schema(
+                "previous_practice",
+                primary_locale=primary_locale,
+                primary_required=True,
+                description="REQUIRED for content_update",
+            ),
+            render_locale_map_field_schema(
+                "current_practice",
+                primary_locale=primary_locale,
+                primary_required=True,
+                description="REQUIRED for content_update",
+            ),
+            render_locale_map_field_schema(
+                "rationale_for_change",
+                primary_locale=primary_locale,
+                primary_required=True,
+                description="REQUIRED for content_update",
+            ),
+            render_locale_map_field_schema(
+                "next_action",
+                primary_locale=primary_locale,
+            ),
+        ]
+        return "\n".join(lines)
+    return render_locale_map_field_schema(
+        "body",
+        primary_locale=primary_locale,
+        primary_required=True,
+        description="REQUIRED for initial_training / refresher / digital_proficiency",
     )
 
 
-def _module_type_rules_for(module_type: str) -> str:
+def _module_type_rules_for(
+    module_type: str,
+    *,
+    primary_locale: str,
+) -> str:
+    primary_label = locale_display_name(primary_locale)
     if module_type == "initial_training":
         return _INITIAL_TRAINING_RULES
     if module_type == "refresher":
@@ -218,8 +255,8 @@ def _module_type_rules_for(module_type: str) -> str:
     if module_type == "digital_proficiency":
         return _DIGITAL_PROFICIENCY_RULES
     if module_type == "content_update":
-        return _CONTENT_UPDATE_RULES
-    return _REFRESHER_RULES  # default
+        return _CONTENT_UPDATE_RULES.format(primary_locale_label=primary_label)
+    return _REFRESHER_RULES
 
 
 def render_system_prompt(
@@ -227,13 +264,39 @@ def render_system_prompt(
     module_type: str,
     card_min_count: int,
     card_max_count: int,
+    deployment_primary_locale: str | None = None,
+    deployment_region_context: str | None = None,
 ) -> str:
     """Render the per-module-type system prompt."""
+    settings = get_settings()
+    primary_locale = deployment_primary_locale or settings.deployment_primary_locale
+    region_context = deployment_region_context or settings.deployment_region_context
+    primary_label = locale_display_name(primary_locale)
+
+    title_schema = render_locale_map_field_schema(
+        "title",
+        primary_locale=primary_locale,
+        primary_required=True,
+    )
+
+    module_rules = _module_type_rules_for(module_type, primary_locale=primary_locale)
+    if module_type in ("initial_training", "refresher", "digital_proficiency"):
+        module_rules = module_rules.format(card_min_count=card_min_count, card_max_count=card_max_count)
+
     return _SYSTEM_BASE.format(
+        deployment_region_context=region_context,
+        primary_locale_label=primary_label,
         card_min_count=card_min_count,
         card_max_count=card_max_count,
-        module_type_rules=_module_type_rules_for(module_type),
-        body_field_schema=_body_field_schema_for(module_type),
+        module_type_rules=module_rules,
+        title_field_schema=title_schema,
+        body_field_schema=_body_field_schema_for(
+            module_type,
+            primary_locale=primary_locale,
+        ),
+        symbol_verbalization_rules=render_symbol_verbalization_rules(
+            primary_locale=primary_locale,
+        ),
     )
 
 

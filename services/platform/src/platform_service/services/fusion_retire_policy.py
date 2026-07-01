@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from platform_service.config import get_settings
+from platform_service.localized import deployment_locales
 
 logger = logging.getLogger(__name__)
 
@@ -16,14 +20,13 @@ class FusionRetirePolicy:
     """Find published modules whose source candidate was a constituent
     of a fusion group; mark them retired.
 
-    Heuristic match: title_en == candidate.proposed_title AND
+    Heuristic match: primary-locale title == candidate.proposed_title AND
     candidate's source_document_id is in module.source_document_ids
     AND lifecycle_status = 'published'. No candidate→module FK exists
     in the schema today (modules know their source DOCS, not their
     source CANDIDATE); the heuristic is precise enough because every
-    per-source candidate produces exactly one module with title_en
-    == proposed_title (the drafter's persistence path uses the
-    candidate's English title verbatim).
+    per-source candidate produces exactly one module whose primary title
+    matches proposed_title.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -45,16 +48,18 @@ class FusionRetirePolicy:
             sd_id = c.get("source_document_id")
             if not title or not sd_id:
                 continue
+            title_locale = deployment_locales(get_settings())
+            title_filter = json.dumps({title_locale: title})
             result = await self._session.execute(
                 text("""
                     UPDATE module
                     SET lifecycle_status = 'retired'
                     WHERE lifecycle_status = 'published'
-                      AND title_en = :title
+                      AND title_localized @> CAST(:title_filter AS jsonb)
                       AND :sd_id = ANY(source_document_ids)
                     RETURNING id
                 """),
-                {"title": title, "sd_id": str(sd_id)},
+                {"title_filter": title_filter, "sd_id": str(sd_id)},
             )
             n = len(list(result.scalars().all()))
             if n:

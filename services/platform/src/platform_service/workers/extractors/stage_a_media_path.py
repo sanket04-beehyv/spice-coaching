@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,9 +11,7 @@ from platform_service.db.repositories.source_repository import SourceRepository
 from platform_service.workers.extractors.calibration import CalibrationDecision
 from platform_service.workers.extractors.stage_a_outline_assembler import assemble_outline_from_page_pairs
 from platform_service.workers.extractors.text_extractor import ExtractedPage
-
-if TYPE_CHECKING:
-    from platform_service.workers.stage_a_extract import StageAResult
+from platform_service.workers.stage_a_types import StageAResult
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +70,6 @@ async def run_media_transcript_path(
             "Stage 1 media transcript produced no outline sections for source_document_id=%s; proceeding"
         ),
     )
-
-    from platform_service.workers.stage_a_extract import StageAResult
 
     return StageAResult(
         source_document_id=source_document_id,

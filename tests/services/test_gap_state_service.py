@@ -12,7 +12,11 @@ from uuid import uuid4
 import pytest
 from platform_service.config import get_settings
 from platform_service.db.models.behavioural_gap import BehaviouralGap
+from platform_service.db.models.module import Module
+from platform_service.db.models.module_family import ModuleFamily
+from platform_service.db.repositories.trigger_repository import TriggerRepository
 from platform_service.services.gap_state_service import GapStateService
+from platform_service.services.module_selector import ModuleSelector
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import requires_db
@@ -179,13 +183,21 @@ async def test_reset_after_pass_clears_failures_and_de_escalates(
 async def test_telemetry_to_module_surface_e2e(db_session: AsyncSession) -> None:
     """End-to-end: 2 observations cross threshold → evaluator says fire →
     module_selector returns the module bound to the trigger."""
-    from platform_service.db.models.module_family import ModuleFamily
-    from platform_service.db.repositories.trigger_repository import TriggerRepository
-    from platform_service.services.module_selector import ModuleSelector
-
     gap = await _make_gap(db_session)
     family = ModuleFamily(module_code=f"E2E-{uuid4().hex[:8]}")
     db_session.add(family)
+    await db_session.flush()
+
+    module = Module(
+        module_family_id=family.id,
+        version=1,
+        title_localized={"bn": "e2e gap module"},
+        domain="iccm",
+        module_type="refresher",
+        lifecycle_status="published",
+        module_json={"cards": []},
+    )
+    db_session.add(module)
     await db_session.flush()
 
     trigger_repo = TriggerRepository(db_session)
@@ -199,7 +211,7 @@ async def test_telemetry_to_module_surface_e2e(db_session: AsyncSession) -> None
         },
     )
     await trigger_repo.bind_module_to_trigger(
-        module_family_id=family.id,
+        module_id=module.id,
         trigger_definition_id=trigger.id,
         priority_weight=10,
     )

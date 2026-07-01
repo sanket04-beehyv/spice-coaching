@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 
 from platform_service.config import get_settings
+from platform_service.deps import get_object_storage_client
 from platform_service.services.object_storage import looks_like_object_storage_storage_path
 
 
@@ -26,8 +27,6 @@ async def materialize_local_source_file(source_ref: str | Path) -> tuple[Path, P
     settings = get_settings()
     if not looks_like_object_storage_storage_path(ref_str, bucket_name=settings.minio_bucket_name):
         return Path(ref_str), None
-
-    from platform_service.deps import get_object_storage_client
 
     client = get_object_storage_client()
     work_dir = Path(settings.upload_dir) / "ingest_work"

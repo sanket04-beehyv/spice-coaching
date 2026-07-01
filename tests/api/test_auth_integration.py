@@ -10,6 +10,7 @@ import pytest
 import pytest_asyncio
 from fastapi import APIRouter, FastAPI
 from httpx import ASGITransport, AsyncClient
+from mc_contracts.morning import MorningCardsResponse
 from platform_service.api.morning import router as morning_router
 from platform_service.auth.rate_limit_middleware import RateLimitMiddleware
 from platform_service.auth.spice_auth_middleware import SpiceAuthMiddleware
@@ -33,6 +34,8 @@ DEVICE_USER = SpiceUserContext.model_validate(
         "roles": [{"name": "CHW", "suiteAccessName": "mob"}],
     }
 )
+
+
 def _contexts_for(user: SpiceUserContext) -> SpiceContexts:
     return SpiceContexts(user_detail=user, tenants=None)
 
@@ -97,8 +100,6 @@ async def test_device_user_can_query_own_chw_id(
     integration_client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from mc_contracts.morning import MorningCardsResponse
-
     monkeypatch.setattr(
         "platform_service.api.morning.MorningSuggestionService.get_morning_cards",
         AsyncMock(return_value=MorningCardsResponse(items=[], total_points=0)),

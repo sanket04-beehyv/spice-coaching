@@ -35,6 +35,7 @@ from mc_foundation.request_middleware import RequestIdMiddleware  # noqa: E402
 from redis.asyncio import Redis  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
+from platform_service.api.admin_assignments import router as admin_assignments_router
 from platform_service.api.admin_files import router as admin_files_router  # noqa: E402
 from platform_service.api.admin_ingest import router as admin_ingest_router  # noqa: E402
 from platform_service.api.admin_ingestion_runs import router as admin_ingestion_runs_router  # noqa: E402
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
     api_router.include_router(admin_modules_router)
     api_router.include_router(admin_trigger_bindings_router)
     api_router.include_router(admin_ingestion_runs_router)
+    api_router.include_router(admin_assignments_router)
     api_router.include_router(dashboard_router)
     api_router.include_router(morning_router)
     api_router.include_router(sync_router)
@@ -151,8 +153,7 @@ def create_app() -> FastAPI:
                 body = response.json()
                 if body.get("provider") != settings.ai_cloud_provider:
                     logger.warning(
-                        "readiness check failed: ai_runtime provider mismatch "
-                        "(platform=%s ai_runtime=%s)",
+                        "readiness check failed: ai_runtime provider mismatch (platform=%s ai_runtime=%s)",
                         settings.ai_cloud_provider,
                         body.get("provider"),
                     )

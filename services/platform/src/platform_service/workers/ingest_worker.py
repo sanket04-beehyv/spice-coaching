@@ -8,13 +8,16 @@ the API request session is not reused.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 from platform_service.config import get_settings
 from platform_service.db.base import SessionLocal
+from platform_service.db.repositories.source_repository import SourceRepository
 from platform_service.services.attribution_audit import record_attribution_event
 from platform_service.services.cross_source_fusion_runner import CrossSourceFusionRunner
 from platform_service.services.run_state_service import (
@@ -23,9 +26,12 @@ from platform_service.services.run_state_service import (
     ConcurrentRunError,
     RunStateService,
 )
+from platform_service.services.source_thumbnail_service import source_type_supports_thumbnail
 from platform_service.workers.pipeline_orchestrator import PipelineOrchestrator
 
 logger = logging.getLogger(__name__)
+
+_THUMBNAIL_POLL_INTERVAL_S = 0.5
 
 
 @dataclass(frozen=True)
@@ -75,6 +81,7 @@ async def _mark_active_ingest_failed(source_document_id: UUID) -> None:
 
 async def run_pipeline_for_source_job(job: IngestJob) -> None:
     """Run the full A→B→C→D pipeline for one source_document."""
+    logger.info("Running pipeline for source_document_id=%s", job.source_document_id)
     try:
         result = await PipelineOrchestrator.run_staged(
             source_document_id=job.source_document_id,
@@ -155,24 +162,36 @@ async def run_cross_source_fusion_job(payload: dict[str, Any]) -> None:
         raise
 
 
-async def _wait_for_thumbnail_task(job: IngestJob) -> None:
-    """Wait for the thumbnail Celery task; swallow errors so extraction always runs."""
-    import asyncio
-    import time
-
-    from platform_service.celery_tasks import generate_source_thumbnail_task
+async def _wait_for_thumbnail_ready(job: IngestJob) -> None:
+    """Poll for thumbnail_storage_path set by the upload-time Celery task."""
+    if not source_type_supports_thumbnail(job.source_type):
+        return
 
     settings = get_settings()
-    async_result = generate_source_thumbnail_task.apply_async(args=[ingest_job_to_dict(job)])
     deadline = time.monotonic() + settings.ingest_thumbnail_wait_seconds
+    logger.info(
+        "Waiting for thumbnail source_document_id=%s timeout_seconds=%d",
+        job.source_document_id,
+        settings.ingest_thumbnail_wait_seconds,
+    )
     try:
-        while not async_result.ready():
-            if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"thumbnail task did not complete within {settings.ingest_thumbnail_wait_seconds}s"
-                )
-            await asyncio.sleep(0.5)
-        await asyncio.to_thread(async_result.get, timeout=1)
+        while time.monotonic() < deadline:
+            async with SessionLocal() as session:
+                doc = await SourceRepository(session).get_source_document(job.source_document_id)
+                if doc is not None and doc.thumbnail_storage_path:
+                    logger.info(
+                        "Thumbnail ready source_document_id=%s path=%s",
+                        job.source_document_id,
+                        doc.thumbnail_storage_path,
+                    )
+                    return
+            await asyncio.sleep(_THUMBNAIL_POLL_INTERVAL_S)
+        logger.warning(
+            "Thumbnail wait timed out source_document_id=%s after %ds",
+            job.source_document_id,
+            settings.ingest_thumbnail_wait_seconds,
+        )
+        raise TimeoutError(f"thumbnail did not complete within {settings.ingest_thumbnail_wait_seconds}s")
     except Exception:
         logger.warning(
             "Thumbnail task did not complete for source_document_id=%s; continuing ingest",
@@ -187,7 +206,7 @@ async def run_ingest_batch_job(payload: dict[str, Any]) -> None:
     fuse_sources = bool(payload.get("fuse_sources", False))
     source_document_ids = [job.source_document_id for job in jobs]
     for job in jobs:
-        await _wait_for_thumbnail_task(job)
+        await _wait_for_thumbnail_ready(job)
         await run_pipeline_for_source_job(job)
     if fuse_sources:
         await run_cross_source_fusion_job({"source_document_ids": [str(d) for d in source_document_ids]})

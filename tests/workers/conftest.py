@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
+from platform_service.config import get_settings
 from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
 from platform_service.workers import module_completion_worker
+from platform_service.workers.module_completion_worker import parse_uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -18,10 +21,30 @@ def _test_chw_id() -> int:
     return uuid4().int % (10**15) + 1
 
 
+@pytest.fixture(autouse=True)
+def _gap_state_telemetry_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing worker tests target behavioural-gap telemetry mode."""
+    monkeypatch.setenv("TELEMETRY_BEHAVIOURAL_GAP_STATE_ENABLED", "true")
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _always_claim_module_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests often omit event_id; bypass idempotency claim only in that case."""
+    original = module_completion_worker._try_claim_module_event
+
+    async def _claim(session, payload) -> bool:
+        event_id = payload.get("event_id")
+        if not event_id or parse_uuid(event_id, field="event_id") is None:
+            return True
+        return await original(session, payload)
+
+    monkeypatch.setattr(module_completion_worker, "_try_claim_module_event", _claim)
+
+
 @pytest.fixture
 def patch_session_local(db_session: AsyncSession):
     """Make module_completion_worker.SessionLocal yield our test session."""
-    from contextlib import asynccontextmanager
 
     @asynccontextmanager
     async def _factory():
@@ -55,7 +78,7 @@ async def _make_module(
         version=version,
         lifecycle_status="published",
         module_type="refresher",
-        title_bn="মডিউল",
+        title_localized={"bn": "মডিউল"},
         domain="hypertension",
         estimated_minutes=5,
         difficulty_level="basic",
@@ -93,9 +116,9 @@ async def _add_quiz_questions(
             question_order=idx + 1,
             question_family_id=uuid4(),
             question_version=1,
-            question_bn="q",
+            question_localized={"bn": "q"},
             question_type="single_select",
-            options_bn=["a", "b"],
+            options_localized={"bn": ["a", "b"]},
             correct_indices=[0],
         )
         session.add(q)

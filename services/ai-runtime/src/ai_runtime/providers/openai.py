@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from openai import AsyncOpenAI
 
@@ -58,6 +58,7 @@ class OpenAIProvider(BaseProvider):
         temperature: float,
         images: list[ProviderImage] | None = None,
         output_format: str = "json",
+        json_root: Literal["object", "any"] = "object",
     ) -> tuple[str, int, int]:
         """Call OpenAI and return (raw_text, input_tokens, output_tokens)."""
         # OpenAI JSON mode requires the word 'json' in the prompt.
@@ -84,7 +85,7 @@ class OpenAIProvider(BaseProvider):
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        if output_format == "json":
+        if output_format == "json" and json_root == "object":
             kwargs["response_format"] = {"type": "json_object"}
 
         response = await self._client.chat.completions.create(**kwargs)

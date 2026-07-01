@@ -23,6 +23,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pymupdf  # type: ignore[import-untyped]
+from pptx import Presentation  # type: ignore[import-untyped]
 
 from platform_service.config import get_settings
 
@@ -102,8 +103,6 @@ def count_pages(source_path: str | Path, source_type: str) -> int:
     if source_type == "pdf":
         return count_pdf_pages(source_path)
     if source_type == "pptx":
-        from pptx import Presentation  # type: ignore[import-untyped]
-
         return len(Presentation(str(source_path)).slides)
     if source_type == "docx":
         # docx has no inherent "page" concept; we treat the whole document as

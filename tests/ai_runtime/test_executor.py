@@ -60,6 +60,7 @@ class _StubProvider(BaseProvider):
         temperature: float,
         images: list[ProviderImage] | None = None,
         output_format: str = "json",
+        json_root: str = "object",
     ) -> tuple[str, int, int]:
         self.generate_calls.append(
             {
@@ -70,6 +71,7 @@ class _StubProvider(BaseProvider):
                 "temperature": temperature,
                 "images": images,
                 "output_format": output_format,
+                "json_root": json_root,
             }
         )
         if self.raise_on_generate is not None:
@@ -278,7 +280,7 @@ class TestStructuredOutputParsedJson:
 class TestErrorPaths:
     @pytest.mark.asyncio
     async def test_provider_exception_returns_error_response(self) -> None:
-        stub = _StubProvider(raise_on_generate=RuntimeError("provider boom"))
+        stub = _StubProvider(raise_on_generate=ValueError("provider boom"))
         with patch("ai_runtime.services.prompt_executor._get_provider", return_value=stub):
             executor = PromptExecutor()
             req = _make_request(generation_type=GenerationType.CARD_DRAFTING)

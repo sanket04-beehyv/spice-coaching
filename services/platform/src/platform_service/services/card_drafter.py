@@ -42,7 +42,6 @@ INSUFFICIENT_REASONS = (
     "no_actionable_content",
     "single_concept_only",
     "no_quiz_anchors",
-    "language_imbalance_severe",
 )
 
 
@@ -92,6 +91,8 @@ class CardDrafter:
             module_type=module_type,
             card_min_count=settings.card_min_count,
             card_max_count=settings.card_max_count,
+            deployment_primary_locale=settings.deployment_primary_locale,
+            deployment_region_context=settings.deployment_region_context,
         )
         human_message = render_human_message(candidate=candidate, cited_blocks=cited_blocks)
 
@@ -105,7 +106,10 @@ class CardDrafter:
                 resolved_system_prompt=system_prompt,
                 resolved_human_message=human_message,
             ),
-            constraints=GenerationConstraints(language="bn", output_format="json"),
+            constraints=GenerationConstraints(
+                language=settings.deployment_primary_locale,
+                output_format="json",
+            ),
             trace_context=trace_context or TraceContext(),
         )
         response = await self._client.generate(request)

@@ -18,7 +18,6 @@ vs `scenario_id` text), different completion semantics (passed quiz at
 |---|---|---|
 | Add | `mc_contracts/enums.py` | 3 new `CoachingEventType` values: `MODULE_DELIVERED`, `MODULE_CARD_VIEWED`, `MODULE_QUIZ_ATTEMPTED` |
 | Add | `mc_contracts/telemetry.py` | 3 optional `TelemetryEvent` fields (`module_family_id: UUID`, `module_version: int`, `quiz_score_pct: float`) + 2 new `TelemetryAckResponse` lists (`duplicates`, `buffered`) + 500-event batch cap |
-| Add | `services/quiz_evaluator.py` | Pure scoring function (correct/total/pct/passed + missed-question ids). No DB. |
 | Add | `db/repositories/module_completion_repository.py` | CRUD for `chw_module_completion` (table from W-1). **Flush-only** — no commit inside the repo. |
 | Add | `workers/module_completion_worker.py` | Consumes the 4 new event types; updates module-completion + behavioural-gap-state |
 | Add | `services/telemetry_dedup.py` | Redis SET-NX dedup with 24h TTL |
@@ -117,7 +116,6 @@ These are your code, your call. Listed for your awareness so you decide whether 
 ## Tests (50 new, all passing)
 
 ```
-tests/services/test_quiz_evaluator.py          —  9 tests, pure-unit
 tests/services/test_telemetry_dedup.py         —  5 tests, mocked Redis
 tests/services/test_telemetry_buffer.py        —  7 tests, mocked Redis
 tests/db/test_module_completion_repository.py  —  7 tests, real Postgres
@@ -155,7 +153,6 @@ flow, so future regressions to your code are caught too.
  services/platform/src/platform_service/celery_tasks.py               |  +12
  services/platform/src/platform_service/clickhouse/client.py          |  +12
  services/platform/src/platform_service/db/repositories/module_completion_repository.py | +136 (new)
- services/platform/src/platform_service/services/quiz_evaluator.py    | +120 (new)
  services/platform/src/platform_service/services/telemetry_buffer.py  | +110 (new)
  services/platform/src/platform_service/services/telemetry_dedup.py   |  +85 (new)
  services/platform/src/platform_service/workers/module_completion_worker.py | +220 (new)

@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import InferenceResponse, TokenUsage
+from platform_service.config import get_settings
 from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
@@ -59,19 +60,16 @@ async def _seed_module(session: AsyncSession) -> Module:
     module = Module(
         module_family_id=fam.id,
         version=1,
-        title_bn="শিরোনাম",
-        title_en="Referral module",
-        description_en="Teaches referral thresholds.",
+        title_localized={"bn": "শিরোনাম", "en": "Referral module"},
+        description_localized={"en": "Teaches referral thresholds."},
         domain="hypertension",
         module_type="refresher",
         module_json={
             "cards": [
                 {
-                    "title_bn": "কার্ড",
-                    "body_bn": "x" * 500,
-                    "title_en": "Card",
-                    "body_en": "Content",
-                    "next_action_bn": "act",
+                    "title": {"bn": "কার্ড"},
+                    "body": {"bn": "x" * 500},
+                    "next_action": {"bn": "act"},
                 }
             ]
         },
@@ -101,37 +99,36 @@ class TestModulePayloadForClassification:
         module = Module(
             module_family_id=uuid4(),
             version=1,
-            title_bn="t",
+            title_localized={"bn": "t"},
             domain="rmnch",
             module_type="refresher",
             module_json={
                 "cards": [
                     {
-                        "title_bn": "T",
-                        "body_bn": "b" * 500,
-                        "body_en": "e" * 500,
-                        "next_action_bn": "n" * 300,
+                        "title": {"bn": "T"},
+                        "body": {"bn": "b" * 500},
+                        "next_action": {"bn": "n" * 300},
                     }
                 ]
             },
         )
         payload = module_payload_for_classification(module)
-        assert payload["cards"][0]["body_bn"].endswith("...")
-        assert len(payload["cards"][0]["body_bn"]) == 400
-        assert len(payload["cards"][0]["next_action_bn"]) == 200
+        assert payload["cards"][0]["body"]["bn"].endswith("...")
+        assert len(payload["cards"][0]["body"]["bn"]) == 400
+        assert len(payload["cards"][0]["next_action"]["bn"]) == 200
 
     def test_skips_non_dict_cards(self) -> None:
         module = Module(
             module_family_id=uuid4(),
             version=1,
-            title_bn="t",
+            title_localized={"bn": "t"},
             domain="rmnch",
             module_type="refresher",
-            module_json={"cards": ["not-a-dict", {"title_bn": "ok"}]},
+            module_json={"cards": ["not-a-dict", {"title": {"bn": "ok"}}]},
         )
         payload = module_payload_for_classification(module)
         assert len(payload["cards"]) == 1
-        assert payload["cards"][0]["title_bn"] == "ok"
+        assert payload["cards"][0]["title"]["bn"] == "ok"
 
 
 @pytest.mark.asyncio
@@ -238,8 +235,6 @@ class TestClassifyModule:
     async def test_respects_max_associations(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from platform_service.config import get_settings
-
         settings = get_settings()
         monkeypatch.setattr(settings, "gap_classification_max_associations", 1)
 

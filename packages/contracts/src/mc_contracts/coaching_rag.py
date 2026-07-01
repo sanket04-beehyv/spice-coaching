@@ -8,27 +8,22 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from mc_contracts.enums import SourceDocumentType
+from mc_contracts.localized import LocalizedString
 
 
 class CoachingRagRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=4000)
-    module_limit: int = Field(5, ge=1, le=20, description="Top-k published modules from embedding search")
-    response_language: Literal["bn", "en"] = Field(
-        "bn",
-        description="Preferred language for the `answer` field (model is instructed accordingly).",
-    )
-    presigned_url_ttl_seconds: int = Field(
-        3600,
-        ge=60,
-        le=86400,
-        description="TTL for MinIO GET presigns on source PDFs/objects (capped at platform max).",
+    response_language: str = Field(
+        "",
+        description=(
+            "Preferred language for the `answer` field. When empty, the deployment primary locale is used."
+        ),
     )
 
 
 class RetrievedModuleHit(BaseModel):
     module_id: UUID
-    title_bn: str
-    title_en: str | None
+    title: LocalizedString
     domain: str
     cosine_distance: float = Field(..., description="pgvector cosine distance; lower is more similar")
 
@@ -90,3 +85,10 @@ class CoachingRagResponse(BaseModel):
     source_documents: list[SourceAttribution]
     model: str
     cited_module_ids: list[UUID] = Field(default_factory=list)
+    suggested_questions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Follow-up questions answerable from retrieved module content; "
+            "language matches request response_language."
+        ),
+    )

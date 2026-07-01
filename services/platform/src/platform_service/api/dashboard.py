@@ -1,8 +1,9 @@
 """Dashboard API — ClickHouse-backed analytics for supervisors and administrators.
 
 GET /dashboard/supervisor/{chw_id}       → SupervisorDashboardResponse
-GET /dashboard/district/{upazila_id}     → DistrictDashboardResponse
+GET /dashboard/district/{upazila_id}     → 501 (not implemented)
 GET /dashboard/llm-quality               → LLMQualityResponse
+GET /dashboard/digital-help-modules      → DigitalHelpModuleUsageResponse
 
 Supervisor and LLM quality routes query ClickHouse materialized views.
 District dashboard still returns 501 until implemented.
@@ -14,8 +15,14 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from mc_contracts.dashboard import CHWSkillSnapshot, LLMQualityResponse, SupervisorDashboardResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from mc_contracts.dashboard import (
+    CHWSkillSnapshot,
+    DigitalHelpModuleUsageResponse,
+    LLMQualityResponse,
+    SupervisorDashboardResponse,
+)
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.auth.spice_identity import (
     require_chw_id_for_device_route,
@@ -24,7 +31,8 @@ from platform_service.auth.spice_identity import (
 from platform_service.auth.spice_principal import is_admin_principal
 from platform_service.auth.spice_user import get_spice_user
 from platform_service.config import get_settings
-from platform_service.deps import get_clickhouse_client
+from platform_service.deps import get_clickhouse_client, get_db
+from platform_service.services.dashboard_analytics_service import DashboardAnalyticsService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 logger = logging.getLogger(__name__)
@@ -221,3 +229,31 @@ async def llm_quality(
         avg_input_tokens=None,
         avg_output_tokens=None,
     )
+
+
+@router.get("/digital-help-modules")
+async def digital_help_module_usage(
+    request: Request,
+    period_days: int = Query(default=30, ge=1, le=366),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    tenant_id: UUID | None = Query(
+        default=None,
+        description="Optional tenant UUID override (admin principals only when auth is enabled).",
+    ),
+    session: AsyncSession = Depends(get_db),
+) -> DigitalHelpModuleUsageResponse:
+    """Rank modules by digital_help_used query volume for a tenant."""
+    tenant_id = resolve_tenant_id_for_dashboard(request, tenant_id)
+    try:
+        return await DashboardAnalyticsService(
+            get_clickhouse_client(), session
+        ).get_digital_help_module_usage(
+            tenant_id=tenant_id,
+            period_days=period_days,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("ClickHouse query failed for digital help module usage")
+        raise HTTPException(status_code=502, detail="Analytics backend unavailable") from None

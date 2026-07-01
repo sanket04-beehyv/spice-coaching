@@ -1,12 +1,12 @@
-"""Gap-driven module suggestions for a CHW (W-8 adjacent).
+"""Gap-driven or quiz-driven module suggestions for a CHW (W-8 adjacent).
 
-Resolves published modules from `chw_behavioural_gap_state` via
-`module_behavioural_gap` links, with tenant scoping and a fallback to published
-modules per family when the gap-driven list is empty.
+When ``telemetry_behavioural_gap_state_enabled`` is true, resolves published
+modules from ``chw_behavioural_gap_state`` via ``module_behavioural_gap`` links.
 
-Suggestion order: registry gap severity (`behavioural_gap.severity_default`),
-then occurrence count, then most recent observation; fallback uses primary-gap
-severity when set, else `created_at`.
+When false (default), resolves from ``chw_quiz_question_state`` rows with failed
+attempts, ranked per quiz question.
+
+Both modes fall back to published modules per family when the driven list is empty.
 """
 
 from __future__ import annotations
@@ -20,12 +20,15 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from platform_service.config import get_settings
 from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.chw_behavioural_gap_state import CHWBehaviouralGapState
+from platform_service.db.models.chw_quiz_question_state import CHWQuizQuestionState
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.repositories.module_gap_repository import ModuleGapRepository
 from platform_service.db.repositories.module_repository import ModuleRepository
+from platform_service.db.tenant_scope import tenant_scope_filter
 
 _SEVERITY_RANK = {"high": 0, "moderate": 1, "low": 2}
 
@@ -54,8 +57,9 @@ def _module_fallback_sort_key(
 class ModuleSuggestionItem:
     module_id: UUID
     module_family_id: UUID
-    source: Literal["gap", "fallback"]
+    source: Literal["gap", "quiz", "fallback"]
     behavioural_gap_id: UUID | None = None
+    quiz_id: UUID | None = None
 
 
 class ModuleSuggestionService:
@@ -69,6 +73,9 @@ class ModuleSuggestionService:
         chw_id: int,
         tenant_id: UUID,
     ) -> list[ModuleSuggestionItem]:
+        if not get_settings().telemetry_behavioural_gap_state_enabled:
+            return await self._suggest_from_quiz_state(chw_id=chw_id, tenant_id=tenant_id)
+
         state_pairs = await self._load_relevant_gap_states(chw_id=chw_id, tenant_id=tenant_id)
         sorted_pairs = sorted(state_pairs, key=lambda p: _gap_state_sort_key(p[0], p[1]))
         gap_ids = [s.behavioural_gap_id for s, _ in sorted_pairs]
@@ -128,6 +135,58 @@ class ModuleSuggestionService:
                 behavioural_gap_id=gid,
             )
             for m, gid in picked
+        ]
+
+    async def _suggest_from_quiz_state(
+        self,
+        *,
+        chw_id: int,
+        tenant_id: UUID,
+    ) -> list[ModuleSuggestionItem]:
+        stmt = (
+            select(CHWQuizQuestionState, Module)
+            .join(Module, Module.id == CHWQuizQuestionState.module_id)
+            .where(
+                CHWQuizQuestionState.chw_id == chw_id,
+                CHWQuizQuestionState.status == "active",
+                CHWQuizQuestionState.failed_attempts_count > 0,
+                Module.lifecycle_status == "published",
+                or_(
+                    CHWQuizQuestionState.tenant_id.is_(None),
+                    CHWQuizQuestionState.tenant_id == tenant_id,
+                ),
+                tenant_scope_filter(Module.tenant_id, tenant_id),
+            )
+            .order_by(
+                CHWQuizQuestionState.failed_attempts_count.desc(),
+                CHWQuizQuestionState.last_failed_attempt_at.desc().nullslast(),
+            )
+        )
+        rows = (await self._session.execute(stmt)).all()
+        if not rows:
+            return await self._fallback_items(tenant_id=tenant_id)
+
+        used_families: set[UUID] = set()
+        picked: list[tuple[Module, UUID]] = []
+        for state, mod in rows:
+            if len(picked) >= 5:
+                break
+            if mod.module_family_id in used_families:
+                continue
+            picked.append((mod, state.quiz_id))
+            used_families.add(mod.module_family_id)
+
+        if not picked:
+            return await self._fallback_items(tenant_id=tenant_id)
+
+        return [
+            ModuleSuggestionItem(
+                module_id=m.id,
+                module_family_id=m.module_family_id,
+                source="quiz",
+                quiz_id=qid,
+            )
+            for m, qid in picked
         ]
 
     async def _load_relevant_gap_states(

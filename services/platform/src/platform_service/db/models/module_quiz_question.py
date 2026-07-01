@@ -54,22 +54,18 @@ class ModuleQuizQuestion(Base):
 
     # Scenario presented to the CHW (e.g. "PW, 22 weeks, BP 145/95, edema present").
     # Optional; biased toward populated by drafter prompt.
-    case_setup_en: Mapped[str | None] = mapped_column(Text, nullable=True)
-    case_setup_bn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    case_setup_localized: Mapped[dict[str, str] | None] = mapped_column(JSONB, nullable=True)
 
-    question_en: Mapped[str | None] = mapped_column(Text, nullable=True)
-    question_bn: Mapped[str] = mapped_column(Text, nullable=False)
+    question_localized: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False)
 
     # single_select | multi_select | order_sequence
     question_type: Mapped[str] = mapped_column(Text, nullable=False, default="single_select")
 
-    options_en: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
-    options_bn: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    options_localized: Mapped[dict[str, list[Any]]] = mapped_column(JSONB, nullable=False, default=dict)
     # One element for single_select, multiple for multi_select, ordered for sequence.
     correct_indices: Mapped[list[int]] = mapped_column(ARRAY(Integer), nullable=False)
 
-    explanation_en: Mapped[str | None] = mapped_column(Text, nullable=True)
-    explanation_bn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    explanation_localized: Mapped[dict[str, str] | None] = mapped_column(JSONB, nullable=True)
 
     # Which card family this question primarily tests. References
     # card_family_id (not card_version) so the question stays valid across

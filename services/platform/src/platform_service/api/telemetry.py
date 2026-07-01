@@ -4,10 +4,13 @@ POST /telemetry/events → TelemetryAckResponse
 
 Routing:
 - All events → ClickHouse `coaching_events` (including `event_family == digital`).
-- `event_type` ∈ MODULE_* (W-10 v3.3 module-pipeline flow) → enqueue
-  `process_module_event_task` (module completion + gap state).
-- `event_type` == SPICE_ACTION_OBSERVED → same task (gap observation from
-  `payload_json.behavioural_gap_id`).
+- `telemetry_behavioural_gap_state_enabled` (default false) selects operational state:
+  - **false (quiz mode):** only `MODULE_QUIZ_ATTEMPTED` → `process_module_event_task`
+    (per-quiz-question state in `chw_quiz_question_state`).
+  - **true (gap mode):** `event_type` ∈ MODULE_* (W-10 v3.3 module-pipeline flow) →
+    enqueue `process_module_event_task` (module completion + gap state); plus
+    `event_type` == SPICE_ACTION_OBSERVED (gap observation from
+    `payload_json.behavioural_gap_id`).
 
 W-10 hardening (additive on top of the original handler):
 1. Dedup by event_id via Redis SET-NX with 24h TTL — duplicates from SDK
@@ -31,6 +34,7 @@ from mc_contracts.telemetry import TelemetryAckResponse, TelemetryBatch, Telemet
 
 from platform_service.auth.spice_identity import require_chw_id_for_telemetry
 from platform_service.celery_tasks import process_module_event_task
+from platform_service.config import get_settings
 from platform_service.deps import get_clickhouse_client, get_redis_client
 from platform_service.services.telemetry_buffer import enqueue_rows
 from platform_service.services.telemetry_dedup import partition_for_dedup
@@ -62,6 +66,13 @@ def _as_ch_value(v: object) -> object:
         return None
     value = getattr(v, "value", None)
     return value if value is not None else v
+
+
+def _resolve_timestamp_utc(e: TelemetryEvent) -> int:
+    """Return UTC epoch seconds for ClickHouse; fall back to local when omitted."""
+    if e.timestamp_utc is not None:
+        return e.timestamp_utc
+    return e.timestamp_local
 
 
 def _event_to_row(
@@ -107,7 +118,7 @@ def _event_to_row(
         e.network_state,
         json.dumps(e.payload_json),
         e.event_date,
-        e.timestamp_utc,
+        _resolve_timestamp_utc(e),
         e.timestamp_local,
         synced_at_ms,
     ]
@@ -134,6 +145,7 @@ async def ingest_events(
     synced_at_ms = int(time.time() * 1000)
     request_id = getattr(request.state, "request_id", None)
     _ch_client = get_clickhouse_client()
+    gap_state_enabled = get_settings().telemetry_behavioural_gap_state_enabled
 
     # ── W-10 idempotency: drop duplicates BEFORE any side-effects ──
     redis = get_redis_client()
@@ -155,11 +167,43 @@ async def ingest_events(
 
             event_type_value = _as_ch_value(event.event_type)
 
-            # W-10 module-pipeline path. The legacy v3.0 scenario-level
-            # gap-update path was deleted in the architecture reset (the
-            # underlying scenario / chw_gap_profile tables are gone).
-            if event_type_value in _MODULE_EVENT_TYPES and event.module_id is not None:
-                job: dict = {
+            if gap_state_enabled:
+                # W-10 module-pipeline path (gap mode). The legacy v3.0 scenario-level
+                # gap-update path was deleted in the architecture reset (the
+                # underlying scenario / chw_gap_profile tables are gone).
+                if event_type_value in _MODULE_EVENT_TYPES and event.module_id is not None:
+                    job: dict = {
+                        "chw_id": chw_id,
+                        "tenant_id": batch.tenant_id,
+                        "event_id": event.id,
+                        "event_type": event_type_value,
+                        "module_id": str(event.module_id),
+                        "quiz_id": str(event.quiz_id) if event.quiz_id is not None else None,
+                        "quiz_score_pct": event.quiz_score_pct,
+                        "outcome": _as_ch_value(event.outcome),
+                        # Forward full payload for forward compatibility (e.g. per-question answers).
+                        "payload_json": event.payload_json or {},
+                    }
+                    if request_id:
+                        job["request_id"] = request_id
+                    module_jobs.append(job)
+                elif event_type_value == CoachingEventType.SPICE_ACTION_OBSERVED.value:
+                    spice_job: dict = {
+                        "chw_id": chw_id,
+                        "tenant_id": batch.tenant_id,
+                        "event_id": event.id,
+                        "event_type": event_type_value,
+                        "outcome": _as_ch_value(event.outcome),
+                        "payload_json": event.payload_json or {},
+                    }
+                    if request_id:
+                        spice_job["request_id"] = request_id
+                    module_jobs.append(spice_job)
+            elif (
+                event_type_value == CoachingEventType.MODULE_QUIZ_ATTEMPTED.value
+                and event.module_id is not None
+            ):
+                quiz_job: dict = {
                     "chw_id": chw_id,
                     "tenant_id": batch.tenant_id,
                     "event_id": event.id,
@@ -168,24 +212,11 @@ async def ingest_events(
                     "quiz_id": str(event.quiz_id) if event.quiz_id is not None else None,
                     "quiz_score_pct": event.quiz_score_pct,
                     "outcome": _as_ch_value(event.outcome),
-                    # Forward full payload for forward compatibility (e.g. per-question answers).
                     "payload_json": event.payload_json or {},
                 }
                 if request_id:
-                    job["request_id"] = request_id
-                module_jobs.append(job)
-            elif event_type_value == CoachingEventType.SPICE_ACTION_OBSERVED.value:
-                spice_job: dict = {
-                    "chw_id": chw_id,
-                    "tenant_id": batch.tenant_id,
-                    "event_id": event.id,
-                    "event_type": event_type_value,
-                    "outcome": _as_ch_value(event.outcome),
-                    "payload_json": event.payload_json or {},
-                }
-                if request_id:
-                    spice_job["request_id"] = request_id
-                module_jobs.append(spice_job)
+                    quiz_job["request_id"] = request_id
+                module_jobs.append(quiz_job)
         except Exception as exc:
             rejected.append(event.id)
             errors.append(f"event_id={event.id}: {exc}")

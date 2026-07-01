@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Literal
 
 
 class ProviderImage:
@@ -33,6 +34,7 @@ class BaseProvider(ABC):
         temperature: float,
         images: list[ProviderImage] | None = None,
         output_format: str = "json",
+        json_root: Literal["object", "any"] = "object",
     ) -> tuple[str, int, int]:
         """Execute a prompt and return (raw_text, input_tokens, output_tokens).
 

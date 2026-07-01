@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pymupdf  # type: ignore[import-untyped]
+from docx import Document as DocxDocument  # type: ignore[import-untyped]
+from pptx import Presentation  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +94,6 @@ def extract_pptx_slides(pptx_path: str | Path) -> list[ExtractedPage]:
     paragraphs. Embedded videos / audio / pictures are skipped (no text).
     Master slide content is excluded (per Implementation Plan W-2 edge case 7).
     """
-    from pptx import Presentation  # type: ignore[import-untyped]
-
     path = Path(pptx_path)
     if not path.is_file():
         raise TextExtractionError(f"PPTX not found: {path}")
@@ -144,8 +144,6 @@ def extract_docx_pages(docx_path: str | Path) -> list[ExtractedPage]:
     document as page 1. Heading paragraphs become #/##/### markdown headings;
     other paragraphs become plain lines.
     """
-    from docx import Document as DocxDocument  # type: ignore[import-untyped]
-
     path = Path(docx_path)
     if not path.is_file():
         raise TextExtractionError(f"DOCX not found: {path}")

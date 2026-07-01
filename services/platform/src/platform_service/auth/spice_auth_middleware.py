@@ -9,6 +9,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from platform_service.config import get_settings
+from platform_service.deps import get_spice_auth_client
 from platform_service.integrations.spice_auth_client import SpiceAuthClient, SpiceAuthError
 
 logger = logging.getLogger(__name__)
@@ -24,8 +25,6 @@ class SpiceAuthMiddleware(BaseHTTPMiddleware):
     def _get_client(self) -> SpiceAuthClient:
         if self._client is not None:
             return self._client
-        from platform_service.deps import get_spice_auth_client
-
         return get_spice_auth_client()
 
     async def dispatch(self, request: Request, call_next) -> Response:  # type: ignore[no-untyped-def]

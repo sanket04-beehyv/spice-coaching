@@ -48,6 +48,8 @@ from mc_contracts.internal_ai import (
     InferenceResponse,
     TokenUsage,
 )
+from platform_service.config import get_settings
+from platform_service.db.base import SessionLocal
 from platform_service.db.models.ingestion_run import IngestionRun, IngestionRunStep
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
@@ -62,8 +64,11 @@ from platform_service.services.module_identifier import (
     ModuleIdentifierError,
     ModuleIdentifierResult,
 )
+from platform_service.workers.embedding_worker import generate_embedding_for_module
 from platform_service.workers.extractors.text_extractor import ExtractedPage
+from platform_service.workers.gap_classification_worker import classify_module_gaps_for_module
 from platform_service.workers.pipeline_orchestrator import PipelineOrchestrator
+from platform_service.workers.quiz_generation_worker import generate_quiz_for_module
 from platform_service.workers.stage_a_extract import StageAExtractor
 from platform_service.workers.stage_c_identify import StageCOrchestrator
 from platform_service.workers.stage_d_draft import StageDOrchestrator
@@ -80,18 +85,29 @@ pytestmark = [requires_db]
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE module_quiz_question, module, module_family, "
-            "behavioural_gap, module_candidate_draft, content_block, source_page, "
-            "source_document, ingestion_run_step, ingestion_run, "
-            "llm_call_cache "
-            "RESTART IDENTITY CASCADE"
-        )
+    tables = (
+        "TRUNCATE module_quiz_question, module, module_family, "
+        "behavioural_gap, module_candidate_draft, content_block, source_page, "
+        "source_document, ingestion_run_step, ingestion_run, "
+        "llm_call_cache "
+        "RESTART IDENTITY CASCADE"
     )
-    await db_session.commit()
+
+    async def _wipe() -> None:
+        await db_session.rollback()
+        await db_session.execute(text(tables))
+        await db_session.commit()
+
+    await _wipe()
+    yield
+    await _wipe()
+
+
+@pytest.fixture(autouse=True)
+def _disable_published_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Merge calls ai-runtime; keep integration tests offline."""
+    monkeypatch.setenv("STAGE_D_PUBLISHED_MERGE_ENABLED", "false")
+    get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)
@@ -155,11 +171,9 @@ def _draft_response(*, cards: list[dict] | None = None, insufficient: str | None
 
 def _card(idx: int = 0) -> dict[str, Any]:
     return {
-        "title_bn": f"কার্ড {idx}",
-        "body_bn": "মূল বিষয় এবং পরবর্তী পদক্ষেপ। " * 5,
-        "title_en": f"Card {idx}",
-        "body_en": "Body content for the card. " * 5,
-        "next_action_bn": "পরবর্তী পদক্ষেপ নিন।",
+        "title": {"bn": f"কার্ড {idx}", "en": f"Card {idx}" * 5},
+        "body": {"bn": "মূল বিষয় এবং পরবর্তী পদক্ষেপ। " * 5},
+        "next_action": {"bn": "পরবর্তী পদক্ষেপ নিন।"},
         "source_block_ids": [str(uuid4())],
     }
 
@@ -221,8 +235,6 @@ async def _run_orchestrator(
     runs each ingestion on its own session via `ingest_worker.run_pipeline_for_source_job`;
     mirroring that here gives stable behaviour.
     """
-    from platform_service.db.base import SessionLocal
-
     own_session = session or SessionLocal()
     try:
         text_extractor_fn = MagicMock(return_value=text_pages)
@@ -290,12 +302,10 @@ def _make_card_drafter_with_canned_response(cards: list[dict]) -> CardDrafter:
 
 def _quiz_q(idx: int) -> dict[str, Any]:
     return {
-        "question_bn": f"প্রশ্ন {idx}",
-        "question_en": f"Question {idx}",
-        "options_bn": ["a", "b", "c", "d"],
-        "options_en": ["A", "B", "C", "D"],
+        "question": {"bn": f"প্রশ্ন {idx}", "en": f"Question {idx}"},
+        "options": {"bn": ["a", "b", "c", "d"], "en": ["A", "B", "C", "D"]},
         "correct_index": 0,
-        "explanation_bn": "ব্যাখ্যা",
+        "explanation": {"bn": "ব্যাখ্যা"},
         "primary_card_index": 1,
         "difficulty": "moderate",
     }
@@ -338,23 +348,19 @@ async def _run_post_publish_inproc(
         async def embed(self, _texts: list[str]) -> list[list[float]]:
             if embed_raises is not None:
                 raise embed_raises
-            from platform_service.config import get_settings as _gs
-
-            dim = _gs().embedding_dimension
+            dim = get_settings().embedding_dimension
             vec = embed_vector if embed_vector is not None else [0.1] * dim
             return [vec]
 
-    with patch("platform_service.workers.quiz_generation_worker.AIRuntimeClient", _QuizClientStub):
-        from platform_service.workers.quiz_generation_worker import generate_quiz_for_module
-
+    with patch(
+        "platform_service.workers.quiz_generation_worker.get_ai_client", return_value=_QuizClientStub()
+    ):
         try:
             await generate_quiz_for_module(module_id)
         except Exception:  # noqa: BLE001 — workers must not propagate
             pass
 
-    with patch("platform_service.workers.embedding_worker.AIRuntimeClient", _EmbedClientStub):
-        from platform_service.workers.embedding_worker import generate_embedding_for_module
-
+    with patch("platform_service.workers.embedding_worker.get_ai_client", return_value=_EmbedClientStub()):
         try:
             await generate_embedding_for_module(module_id)
         except Exception:  # noqa: BLE001
@@ -378,11 +384,9 @@ async def _run_post_publish_inproc(
             return gap_resp
 
     with patch(
-        "platform_service.services.module_gap_classifier.AIRuntimeClient",
-        _GapClientStub,
+        "platform_service.services.module_gap_classifier.get_ai_client",
+        return_value=_GapClientStub(),
     ):
-        from platform_service.workers.gap_classification_worker import classify_module_gaps_for_module
-
         try:
             await classify_module_gaps_for_module(module_id)
         except Exception:  # noqa: BLE001
@@ -437,8 +441,6 @@ class TestHappyPath:
 
         await db_session.refresh(m)
         assert m.embedding is not None
-        from platform_service.config import get_settings
-
         assert len(m.embedding) == get_settings().embedding_dimension
 
         quiz = (
@@ -453,7 +455,7 @@ class TestHappyPath:
 
 
 class TestOutlineEmptyFailsRun:
-    async def test_no_heading_markers_fails_run_no_module(
+    async def test_no_heading_markers_still_runs_identifier_on_body(
         self,
         db_session: AsyncSession,
         patch_count_pages: Callable[[int], None],
@@ -464,14 +466,11 @@ class TestOutlineEmptyFailsRun:
 
         result, _ = await _run_orchestrator(source_document_id=sd_id, text_pages=text_pages)
 
-        assert result.final_status == "failed"
-        modules = (await db_session.execute(select(Module))).scalars().all()
-        assert modules == []
+        assert result.final_status == "succeeded"
         run = (
             await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
         ).scalar_one()
-        assert run.status == "failed"
-        assert run.error_jsonb["failed_stage"] == "extract"
+        assert run.status == "succeeded"
 
 
 # ─── Scenario 3: Stage C zero candidates ──────────────────────────────────
@@ -545,12 +544,9 @@ class TestStageDPerCandidateFailure:
         )
 
         assert result.final_status == "partially_succeeded"
-        modules = (
-            (await db_session.execute(select(Module).where(Module.lifecycle_status == "published")))
-            .scalars()
-            .all()
-        )
+        modules = (await db_session.execute(select(Module))).scalars().all()
         assert len(modules) == 2
+        assert all(m.lifecycle_status == "draft" for m in modules)
         run = (
             await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
         ).scalar_one()
@@ -575,8 +571,6 @@ class TestResumeAfterPartialFailure:
         db_session: AsyncSession,
         patch_count_pages: Callable[[int], None],
     ) -> None:
-        from platform_service.db.base import SessionLocal
-
         sd_id = await _seed_source_doc(db_session)
         text_pages = _good_text_pages(2)
         patch_count_pages(2)
@@ -689,15 +683,9 @@ class TestEmbeddingWorkerFailureNonBlocking:
         result, _ = await _run_orchestrator(source_document_id=sd_id, text_pages=text_pages)
 
         assert result.final_status == "succeeded"
-        modules = (
-            (await db_session.execute(select(Module).where(Module.lifecycle_status == "published")))
-            .scalars()
-            .all()
-        )
+        modules = (await db_session.execute(select(Module))).scalars().all()
         assert len(modules) >= 1
         m = modules[0]
-
-        # Run embedding worker with the AI-runtime raising.
         await _run_post_publish_inproc(m.id, embed_raises=RuntimeError("Vertex 503"))
 
         await db_session.refresh(m)
@@ -720,11 +708,7 @@ class TestQuizWorkerMalformedJsonNonBlocking:
         result, _ = await _run_orchestrator(source_document_id=sd_id, text_pages=text_pages)
 
         assert result.final_status == "succeeded"
-        modules = (
-            (await db_session.execute(select(Module).where(Module.lifecycle_status == "published")))
-            .scalars()
-            .all()
-        )
+        modules = (await db_session.execute(select(Module))).scalars().all()
         assert len(modules) >= 1
         m = modules[0]
 

@@ -1,8 +1,8 @@
 """Internal embed endpoint — platform → ai-runtime.
 
 POST /internal/embed
-Body: {"texts": ["...", "..."]}
-Returns: {"embeddings": [[0.1, 0.2, ...], ...]}
+Body: EmbedRequest
+Returns: EmbedResponse
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from mc_contracts.internal_ai import EmbedRequest, EmbedResponse
 
 from ai_runtime.security import require_internal_token
 from ai_runtime.services.prompt_executor import PromptExecutor
@@ -19,14 +19,6 @@ router = APIRouter(prefix="/internal", tags=["internal"])
 logger = logging.getLogger(__name__)
 
 _executor = PromptExecutor()
-
-
-class EmbedRequest(BaseModel):
-    texts: list[str]
-
-
-class EmbedResponse(BaseModel):
-    embeddings: list[list[float]]
 
 
 @router.post("/embed", response_model=EmbedResponse)

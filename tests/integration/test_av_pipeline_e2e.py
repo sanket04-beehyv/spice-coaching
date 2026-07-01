@@ -20,7 +20,7 @@ together end-to-end on top of Deepak's pipeline.
 from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.content_block import ContentBlock
@@ -105,17 +105,15 @@ def _id_candidate_for_source(
     """Variant of ``_id_candidate`` that pins ``source_document_id`` to the
     seeded doc so Stage D's ``_extract_source_document_ids`` ends up with
     the real id (production identifier output points at real docs; the
-    shared shared fixture uses ``uuid4()`` for that field which is fine
+    shared     shared fixture uses ``uuid4()`` for that field which is fine
     for the PDF test's weaker assertion but masks attribution drift)."""
-    from uuid import uuid4 as _uuid4
-
     return {
         "proposed_title": title,
         "scope_summary": "Summary of the topic.",
         "source_provenance": [
             {
                 "source_document_id": str(source_document_id),
-                "source_page_id": str(_uuid4()),
+                "source_page_id": str(uuid4()),
                 "content_block_ids": [str(b) for b in block_ids],
             }
         ],
@@ -260,11 +258,18 @@ class TestAvHappyPath:
         # source_block_ids on each card so /coaching/rag-query can join
         # through to source_page (timecodes) and source_document.
         modules = (
-            (await db_session.execute(select(Module).where(Module.lifecycle_status == "draft")))
+            (
+                await db_session.execute(
+                    select(Module).where(
+                        Module.lifecycle_status == "draft",
+                        Module.source_document_ids.contains([sd_id]),
+                    )
+                )
+            )
             .scalars()
             .all()
         )
-        assert len(modules) >= 1
+        assert len(modules) == 1
         m = modules[0]
         assert m.module_json is not None
         cards = m.module_json.get("cards", [])

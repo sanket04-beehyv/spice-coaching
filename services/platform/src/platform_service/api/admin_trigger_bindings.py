@@ -23,20 +23,20 @@ def _binding_to_payload(binding: ModuleTriggerBinding) -> TriggerBindingPayload:
     return TriggerBindingPayload(
         id=binding.id,
         trigger_definition_id=binding.trigger_definition_id,
-        module_family_id=binding.module_family_id,
+        module_id=binding.module_id,
         relationship=binding.relationship,
         priority_weight=binding.priority_weight,
         notes=binding.notes,
     )
 
 
-@router.get("/trigger-bindings/by-module/{module_family_id}", response_model=list[TriggerBindingPayload])
-async def list_bindings_for_family(
-    module_family_id: UUID,
+@router.get("/trigger-bindings/by-module/{module_id}", response_model=list[TriggerBindingPayload])
+async def list_bindings_for_module(
+    module_id: UUID,
     session: AsyncSession = Depends(get_db),
 ) -> list[TriggerBindingPayload]:
     repo = TriggerRepository(session)
-    bindings = await repo.list_bindings_for_module_family(module_family_id)
+    bindings = await repo.list_bindings_for_module(module_id)
     return [_binding_to_payload(b) for b in bindings]
 
 
@@ -48,7 +48,7 @@ async def create_binding(
     repo = TriggerRepository(session)
     binding = await repo.bind_module_to_trigger(
         trigger_definition_id=body.trigger_definition_id,
-        module_family_id=body.module_family_id,
+        module_id=body.module_id,
         relationship=body.relationship,
         priority_weight=body.priority_weight,
         notes=body.notes,

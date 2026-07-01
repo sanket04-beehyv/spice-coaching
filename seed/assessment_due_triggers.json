@@ -1,0 +1,1348 @@
+{
+  "_comment": "Global workflow_event triggers for morning assessment-due module matching. One row per canonical assessment_topic. Bound to module families at ingest time via trigger_binding_worker.",
+  "triggers": [
+    {
+      "trigger_code": "wf:assessment_due:anc",
+      "assessment_topic": "anc",
+      "description": "Patients due for antenatal care visit",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "anc",
+          "match": {
+            "encounter_type_any": [
+              "ANC"
+            ],
+            "reason_any": [],
+            "diagnosis_any": [
+              "ANC"
+            ],
+            "patient_status_any": [
+              "anc"
+            ],
+            "reason_display_any": [
+              "ANC Signs"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [
+              "ANC"
+            ],
+            "encounter_program_any": [
+              "RMNCH"
+            ],
+            "is_pregnant": true,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:anemia",
+      "assessment_topic": "anemia",
+      "description": "Anemia follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "anemia",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [
+              "ANEMIA"
+            ],
+            "patient_status_any": [
+              "anemia"
+            ],
+            "reason_display_any": [
+              "Anemia"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:cbs",
+      "assessment_topic": "cbs",
+      "description": "CBS escalation follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "cbs",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [],
+            "patient_status_any": [
+              "cbs"
+            ],
+            "reason_display_any": [
+              "CBS"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:child_health",
+      "assessment_topic": "child_health",
+      "description": "Under-five child health visit due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "child_health",
+          "match": {
+            "encounter_type_any": [
+              "CHILDHOOD_VISIT",
+              "PNC_CHILD",
+              "PNC_NEONATE",
+              "UNDER_FIVE_YEARS",
+              "UNDER_TWO_MONTHS"
+            ],
+            "reason_any": [],
+            "diagnosis_any": [
+              "PNC_NEONATE",
+              "UNDER_FIVE_YEARS",
+              "UNDER_TWO_MONTHS"
+            ],
+            "patient_status_any": [
+              "child_health"
+            ],
+            "reason_display_any": [
+              "Childhood Visit Signs",
+              "PNC Neonate Signs"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [
+              "CHILDHOOD_VISIT",
+              "PNC_CHILD",
+              "PNC_NEONATE"
+            ],
+            "encounter_program_any": [
+              "CHILDHOOD_VISIT"
+            ],
+            "is_pregnant": null,
+            "max_age": 5,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:childhood_visit",
+      "assessment_topic": "childhood_visit",
+      "description": "Childhood wellness visit due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "childhood_visit",
+          "match": {
+            "encounter_type_any": [
+              "CHILDHOOD_VISIT"
+            ],
+            "reason_any": [],
+            "diagnosis_any": [],
+            "patient_status_any": [
+              "childhood_visit"
+            ],
+            "reason_display_any": [
+              "Childhood Visit Signs"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [
+              "CHILDHOOD_VISIT"
+            ],
+            "encounter_program_any": [
+              "CHILDHOOD_VISIT",
+              "RMNCH"
+            ],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:cough",
+      "assessment_topic": "cough",
+      "description": "Cough follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "cough",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [
+              "COUGH"
+            ],
+            "diagnosis_any": [],
+            "patient_status_any": [
+              "cough"
+            ],
+            "reason_display_any": [
+              "Cough"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:diarrhea",
+      "assessment_topic": "diarrhea",
+      "description": "Diarrhoea follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "diarrhea",
+          "match": {
+            "encounter_type_any": [
+              "DIARRHEA"
+            ],
+            "reason_any": [
+              "DIARRHEA",
+              "DIARRHOEA"
+            ],
+            "diagnosis_any": [
+              "DIARRHEA",
+              "DIARRHOEA"
+            ],
+            "patient_status_any": [
+              "diarrhea"
+            ],
+            "reason_display_any": [
+              "Diarrhoea",
+              "Dysentry (Bloody Diarrhoea)",
+              "Watery diarrhoea / Dysentery"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [
+              "ICCM"
+            ],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:ear_problem",
+      "assessment_topic": "ear_problem",
+      "description": "Ear problem follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "ear_problem",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [
+              "EARPROBLEM",
+              "EAR_PROBLEM"
+            ],
+            "patient_status_any": [
+              "ear_problem"
+            ],
+            "reason_display_any": [
+              "Ear Problem"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:fever",
+      "assessment_topic": "fever",
+      "description": "Fever follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "fever",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [
+              "FEVER"
+            ],
+            "diagnosis_any": [],
+            "patient_status_any": [
+              "fever"
+            ],
+            "reason_display_any": [
+              "Fever"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [
+              "ICCM"
+            ],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:general_danger_signs",
+      "assessment_topic": "general_danger_signs",
+      "description": "General danger signs follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "general_danger_signs",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [],
+            "patient_status_any": [
+              "general_danger_signs"
+            ],
+            "reason_display_any": [
+              "General Danger Signs"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:hiv_aids",
+      "assessment_topic": "hiv_aids",
+      "description": "HIV/AIDS follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "hiv_aids",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [
+              "HIVAIDS",
+              "HIVINFECTION",
+              "HIV_AIDS"
+            ],
+            "patient_status_any": [
+              "hiv_aids"
+            ],
+            "reason_display_any": [
+              "HIV Infection",
+              "HIV/AIDS"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:iccm",
+      "assessment_topic": "iccm",
+      "description": "ICCM community follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "iccm",
+          "match": {
+            "encounter_type_any": [
+              "DIARRHEA",
+              "ICCM",
+              "MALARIA",
+              "OTHER_SYMPTOMS",
+              "PNEUMONIA",
+              "UNDER_FIVE_YEARS",
+              "UNDER_TWO_MONTHS"
+            ],
+            "reason_any": [
+              "COUGH",
+              "DIARRHEA",
+              "DIARRHOEA",
+              "FEVER",
+              "MALARIA",
+              "MUAC",
+              "PNEUMONIA",
+              "SYMPTOMS"
+            ],
+            "diagnosis_any": [
+              "ANEMIA",
+              "EARPROBLEM",
+              "EAR_PROBLEM",
+              "HIVAIDS",
+              "HIVINFECTION",
+              "HIV_AIDS",
+              "JAUNDICE",
+              "MODERATEMALNUTRITION",
+              "MODERATE_MALNUTRITION",
+              "MUAC",
+              "OTHER_SYMPTOMS",
+              "SEVEREMALARIA",
+              "SEVEREMALNUTRITION",
+              "SEVERE_MALARIA",
+              "SEVERE_MALNUTRITION",
+              "UNCOMPLICATEDMALARIA",
+              "UNCOMPLICATED_MALARIA",
+              "UNDER_FIVE_YEARS",
+              "UNDER_TWO_MONTHS"
+            ],
+            "patient_status_any": [
+              "iccm"
+            ],
+            "reason_display_any": [],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [
+              "ICCM"
+            ],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:jaundice",
+      "assessment_topic": "jaundice",
+      "description": "Jaundice follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "jaundice",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [
+              "JAUNDICE"
+            ],
+            "patient_status_any": [
+              "jaundice"
+            ],
+            "reason_display_any": [
+              "Jaundice"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:malaria",
+      "assessment_topic": "malaria",
+      "description": "Malaria follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "malaria",
+          "match": {
+            "encounter_type_any": [
+              "MALARIA"
+            ],
+            "reason_any": [
+              "MALARIA"
+            ],
+            "diagnosis_any": [
+              "MALARIA",
+              "SEVEREMALARIA",
+              "SEVERE_MALARIA",
+              "UNCOMPLICATEDMALARIA",
+              "UNCOMPLICATED_MALARIA"
+            ],
+            "patient_status_any": [
+              "malaria"
+            ],
+            "reason_display_any": [
+              "Malaria",
+              "Uncomplicated Malaria"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [
+              "ICCM"
+            ],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:maternal_health",
+      "assessment_topic": "maternal_health",
+      "description": "Maternal health follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "maternal_health",
+          "match": {
+            "encounter_type_any": [
+              "ANC",
+              "PNC_MOTHER"
+            ],
+            "reason_any": [],
+            "diagnosis_any": [
+              "ANC",
+              "PNC"
+            ],
+            "patient_status_any": [
+              "maternal_health"
+            ],
+            "reason_display_any": [
+              "ANC Signs",
+              "Gaps in PNC",
+              "High Risk Mother",
+              "PNC Mother Signs"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [
+              "ANC",
+              "PNC_MOTHER"
+            ],
+            "encounter_program_any": [
+              "RMNCH"
+            ],
+            "is_pregnant": true,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:miscarriage",
+      "assessment_topic": "miscarriage",
+      "description": "Miscarriage follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "miscarriage",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [],
+            "patient_status_any": [
+              "miscarriage"
+            ],
+            "reason_display_any": [
+              "Miscarriage"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:moderate_malnutrition",
+      "assessment_topic": "moderate_malnutrition",
+      "description": "Moderate malnutrition follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "moderate_malnutrition",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [
+              "MODERATEMALNUTRITION",
+              "MODERATE_MALNUTRITION"
+            ],
+            "patient_status_any": [
+              "moderate_malnutrition"
+            ],
+            "reason_display_any": [
+              "Moderate Malnutrition"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:muac",
+      "assessment_topic": "muac",
+      "description": "MUAC malnutrition follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "muac",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [
+              "MUAC"
+            ],
+            "diagnosis_any": [
+              "MUAC"
+            ],
+            "patient_status_any": [
+              "muac"
+            ],
+            "reason_display_any": [
+              "MUAC"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:ncd",
+      "assessment_topic": "ncd",
+      "description": "NCD follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "ncd",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [],
+            "patient_status_any": [
+              "ncd"
+            ],
+            "reason_display_any": [
+              "NCD",
+              "NCDSymptoms"
+            ],
+            "appointment_type_any": [],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:neonatal",
+      "assessment_topic": "neonatal",
+      "description": "Neonatal follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "neonatal",
+          "match": {
+            "encounter_type_any": [
+              "PNC_NEONATE",
+              "UNDER_TWO_MONTHS"
+            ],
+            "reason_any": [],
+            "diagnosis_any": [
+              "PNC_NEONATE",
+              "UNDER_TWO_MONTHS"
+            ],
+            "patient_status_any": [
+              "neonatal"
+            ],
+            "reason_display_any": [],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [
+              "PNC_NEONATE"
+            ],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": 0,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:on_treatment",
+      "assessment_topic": "on_treatment",
+      "description": "On-treatment household visit due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "on_treatment",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [],
+            "patient_status_any": [
+              "on_treatment"
+            ],
+            "reason_display_any": [
+              "On Treatment",
+              "OnTreatment"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:other_symptoms",
+      "assessment_topic": "other_symptoms",
+      "description": "Other symptoms ICCM follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "other_symptoms",
+          "match": {
+            "encounter_type_any": [
+              "OTHER_SYMPTOMS"
+            ],
+            "reason_any": [
+              "SYMPTOMS"
+            ],
+            "diagnosis_any": [
+              "OTHER_SYMPTOMS"
+            ],
+            "patient_status_any": [
+              "other_symptoms"
+            ],
+            "reason_display_any": [
+              "Symptoms",
+              "TB Symptoms"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [
+              "ICCM"
+            ],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:pnc_child",
+      "assessment_topic": "pnc_child",
+      "description": "Postnatal child visit due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "pnc_child",
+          "match": {
+            "encounter_type_any": [
+              "PNC_CHILD"
+            ],
+            "reason_any": [],
+            "diagnosis_any": [],
+            "patient_status_any": [
+              "pnc_child"
+            ],
+            "reason_display_any": [
+              "Childhood Visit Signs"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [
+              "PNC_CHILD"
+            ],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:pnc_mother",
+      "assessment_topic": "pnc_mother",
+      "description": "Postnatal mother visit due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "pnc_mother",
+          "match": {
+            "encounter_type_any": [
+              "PNC_MOTHER"
+            ],
+            "reason_any": [],
+            "diagnosis_any": [
+              "PNC"
+            ],
+            "patient_status_any": [
+              "pnc_mother"
+            ],
+            "reason_display_any": [
+              "Gaps in PNC",
+              "PNC Mother Signs",
+              "PNC Visit"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [
+              "PNC_MOTHER"
+            ],
+            "encounter_program_any": [
+              "RMNCH"
+            ],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:pnc_neonate",
+      "assessment_topic": "pnc_neonate",
+      "description": "Neonatal postnatal visit due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "pnc_neonate",
+          "match": {
+            "encounter_type_any": [
+              "PNC_NEONATE"
+            ],
+            "reason_any": [],
+            "diagnosis_any": [
+              "PNC_NEONATE"
+            ],
+            "patient_status_any": [
+              "pnc_neonate"
+            ],
+            "reason_display_any": [
+              "PNC Neonate Signs"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [
+              "PNC_NEONATE"
+            ],
+            "encounter_program_any": [
+              "RMNCH"
+            ],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:pneumonia",
+      "assessment_topic": "pneumonia",
+      "description": "Pneumonia follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "pneumonia",
+          "match": {
+            "encounter_type_any": [
+              "PNEUMONIA"
+            ],
+            "reason_any": [
+              "COUGH",
+              "PNEUMONIA"
+            ],
+            "diagnosis_any": [
+              "PNEUMONIA"
+            ],
+            "patient_status_any": [
+              "pneumonia"
+            ],
+            "reason_display_any": [
+              "Cough or Difficult Breathing",
+              "Pneumonia",
+              "Pneumonia / Fever"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [
+              "ICCM"
+            ],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:recovered",
+      "assessment_topic": "recovered",
+      "description": "Recovered patient follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "recovered",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [],
+            "patient_status_any": [
+              "recovered"
+            ],
+            "reason_display_any": [
+              "Recovered"
+            ],
+            "appointment_type_any": [],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:referred",
+      "assessment_topic": "referred",
+      "description": "Referred patient follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "referred",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [],
+            "patient_status_any": [
+              "referred"
+            ],
+            "reason_display_any": [
+              "Referred"
+            ],
+            "appointment_type_any": [
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:respiratory",
+      "assessment_topic": "respiratory",
+      "description": "Respiratory illness follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "respiratory",
+          "match": {
+            "encounter_type_any": [
+              "PNEUMONIA"
+            ],
+            "reason_any": [
+              "COUGH",
+              "PNEUMONIA"
+            ],
+            "diagnosis_any": [
+              "PNEUMONIA"
+            ],
+            "patient_status_any": [
+              "respiratory"
+            ],
+            "reason_display_any": [],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:severe_malaria",
+      "assessment_topic": "severe_malaria",
+      "description": "Severe malaria follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "severe_malaria",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [
+              "SEVEREMALARIA",
+              "SEVERE_MALARIA"
+            ],
+            "patient_status_any": [
+              "severe_malaria"
+            ],
+            "reason_display_any": [
+              "Severe Malaria"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:severe_malnutrition",
+      "assessment_topic": "severe_malnutrition",
+      "description": "Severe malnutrition follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "severe_malnutrition",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [
+              "SEVEREMALNUTRITION",
+              "SEVERE_MALNUTRITION"
+            ],
+            "patient_status_any": [
+              "severe_malnutrition"
+            ],
+            "reason_display_any": [
+              "Severe Malnutrition"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:symptoms",
+      "assessment_topic": "symptoms",
+      "description": "Unspecified symptoms follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "symptoms",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [
+              "SYMPTOMS"
+            ],
+            "diagnosis_any": [],
+            "patient_status_any": [
+              "symptoms"
+            ],
+            "reason_display_any": [
+              "Symptoms"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:tb_symptoms",
+      "assessment_topic": "tb_symptoms",
+      "description": "TB symptoms follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "tb_symptoms",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [],
+            "patient_status_any": [
+              "tb_symptoms"
+            ],
+            "reason_display_any": [
+              "TB Symptoms"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:under_five_years",
+      "assessment_topic": "under_five_years",
+      "description": "Under-five-years ICCM visit due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "under_five_years",
+          "match": {
+            "encounter_type_any": [
+              "UNDER_FIVE_YEARS"
+            ],
+            "reason_any": [],
+            "diagnosis_any": [
+              "UNDER_FIVE_YEARS"
+            ],
+            "patient_status_any": [
+              "under_five_years"
+            ],
+            "reason_display_any": [],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:under_two_months",
+      "assessment_topic": "under_two_months",
+      "description": "Under-two-months ICCM visit due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "under_two_months",
+          "match": {
+            "encounter_type_any": [
+              "UNDER_TWO_MONTHS"
+            ],
+            "reason_any": [],
+            "diagnosis_any": [
+              "UNDER_TWO_MONTHS"
+            ],
+            "patient_status_any": [
+              "under_two_months"
+            ],
+            "reason_display_any": [],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    },
+    {
+      "trigger_code": "wf:assessment_due:worsened",
+      "assessment_topic": "worsened",
+      "description": "Worsened condition follow-up due today",
+      "predicate": {
+        "spice_event_code": "assessment_due",
+        "filter_predicate": {
+          "assessment_topic": "worsened",
+          "match": {
+            "encounter_type_any": [],
+            "reason_any": [],
+            "diagnosis_any": [
+              "WORSENED"
+            ],
+            "patient_status_any": [
+              "worsened"
+            ],
+            "reason_display_any": [
+              "Worsened"
+            ],
+            "appointment_type_any": [
+              "HH_VISIT",
+              "MEDICAL_REVIEW",
+              "REFERRED"
+            ],
+            "encounter_name_any": [],
+            "encounter_program_any": [],
+            "is_pregnant": null,
+            "max_age": null,
+            "min_age": null
+          }
+        }
+      }
+    }
+  ]
+}

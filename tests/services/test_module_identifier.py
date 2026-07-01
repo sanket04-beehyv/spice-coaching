@@ -38,9 +38,11 @@ from mc_contracts.internal_ai import (
 from platform_service.services.module_identifier import (
     ModuleIdentifier,
     ModuleIdentifierError,
+    _apply_ingestion_instruction_gate,
     _extract_candidates,
     _validate_candidate,
 )
+from platform_service.services.prompt_id_codec import PromptIdCodec
 from platform_service.services.prompts.module_identifier_prompt import (
     MODULE_IDENTIFIER_TEMPLATE_VERSION,
     render_human_message,
@@ -121,8 +123,6 @@ class TestPromptGapContextRemoved:
         assert "behavioural_gap_code" not in prompt
 
     def test_human_message_omits_behavioural_gap_registry_payload(self) -> None:
-        from platform_service.services.prompt_id_codec import PromptIdCodec
-
         msg = render_human_message(
             already_published_modules=[],
             document_outlines=[
@@ -139,10 +139,8 @@ class TestPromptGapContextRemoved:
         assert "behavioural_gap_registry_repeat" not in msg
 
     def test_human_message_includes_already_published_modules(self) -> None:
-        from platform_service.services.prompt_id_codec import PromptIdCodec
-
         msg = render_human_message(
-            already_published_modules=[{"module_code": "anc-referral", "title_bn": "ANC Referral"}],
+            already_published_modules=[{"module_code": "anc-referral", "title": {"bn": "ANC Referral"}}],
             document_outlines=[],
             page_corpus=[],
             codec=PromptIdCodec.from_corpus([]),
@@ -154,7 +152,76 @@ class TestPromptGapContextRemoved:
         """v5 added the annexure-exclusion rule (Hindi NCDs run was
         proposing modules from Annexure 1-4). Tests must fail if someone
         reverts to v4 (no annexure rule) or earlier."""
-        assert MODULE_IDENTIFIER_TEMPLATE_VERSION >= 6
+        assert MODULE_IDENTIFIER_TEMPLATE_VERSION >= 10
+
+    def test_system_prompt_includes_ingestion_guidance_when_instructions_set(self) -> None:
+        prompt = render_system_prompt(
+            {"clinical"},
+            ingestion_instructions="Focus on referral workflows.",
+        )
+        assert "INGESTION GUIDANCE MODE" in prompt
+        assert "USER_INGESTION_GUIDANCE" in prompt
+        assert "ingestion_instruction_rationale" in prompt
+        assert "HARD scope filter" in prompt
+
+    def test_system_prompt_omits_ingestion_guidance_when_instructions_absent(self) -> None:
+        prompt = render_system_prompt({"clinical"})
+        assert "INGESTION GUIDANCE MODE" not in prompt
+        assert "ingestion_instruction_rationale" not in prompt
+
+    def test_human_message_includes_guidance_when_instructions_set(self) -> None:
+        msg = render_human_message(
+            already_published_modules=[],
+            document_outlines=[],
+            page_corpus=[],
+            codec=PromptIdCodec.from_corpus([]),
+            ingestion_instructions="Focus on referral workflows.",
+        )
+        assert "## USER_INGESTION_GUIDANCE ##" in msg
+        assert "<<<BEGIN_ADMIN_STEERING>>>" in msg
+        assert "Focus on referral workflows." in msg
+
+    def test_human_message_omits_guidance_when_instructions_absent(self) -> None:
+        msg = render_human_message(
+            already_published_modules=[],
+            document_outlines=[],
+            page_corpus=[],
+            codec=PromptIdCodec.from_corpus([]),
+        )
+        assert "USER_INGESTION_GUIDANCE" not in msg
+        assert "BEGIN_ADMIN_STEERING" not in msg
+
+    def test_human_message_single_page_citation_note(self) -> None:
+        page_id = uuid4()
+        block_id = uuid4()
+        corpus = [
+            {
+                "source_document_id": str(uuid4()),
+                "content_domain": "clinical",
+                "primary_language": "en",
+                "pages": [
+                    {
+                        "source_page_id": str(page_id),
+                        "page_number": 1,
+                        "blocks": [
+                            {
+                                "content_block_id": str(block_id),
+                                "block_type": "paragraph",
+                                "content_text": "Sample text",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+        msg = render_human_message(
+            already_published_modules=[],
+            document_outlines=[],
+            page_corpus=corpus,
+            codec=PromptIdCodec.from_corpus(corpus),
+        )
+        assert "exactly ONE page" in msg
+        assert "only valid source_page_id token is p1" in msg
 
     def test_system_prompt_excludes_annexures(self) -> None:
         """The grouping rules must explicitly forbid proposing modules
@@ -164,17 +231,14 @@ class TestPromptGapContextRemoved:
         prompt = render_system_prompt({"clinical"})
         lowered = prompt.lower()
         assert "annexure" in lowered
-        assert "appendix" in lowered
+        assert "appendices" in lowered
         assert "job aid" in lowered
-        # Hindi-Bijoy mojibake cue (lowercase form, since prompt is lowered).
-        assert "layxud" in lowered
+        assert "পরিশিষ্ট" in prompt
 
     def test_human_message_uses_short_tokens_not_uuids(self) -> None:
         """The corpus body must reference content blocks/pages/docs by
         short tokens (d1/p47/b231), NOT by raw UUIDs. Regressing to
         raw UUIDs re-introduces the transcription failure mode."""
-        from platform_service.services.prompt_id_codec import PromptIdCodec
-
         doc_id = str(uuid4())
         page_id = str(uuid4())
         block_id = str(uuid4())
@@ -379,6 +443,55 @@ class TestValidateCandidate:
         assert _validate_candidate(cand, valid_block_ids={b1}) is False
 
 
+# ─── Ingestion instruction rationale gate ──────────────────────────────────
+
+
+class TestIngestionInstructionGate:
+    def test_keeps_candidate_with_rationale_when_instructions_present(self) -> None:
+        cand = _valid_candidate()
+        cand["ingestion_instruction_rationale"] = "Guidance asked for ANC referral."
+        kept = _apply_ingestion_instruction_gate(
+            [cand],
+            ingestion_instructions="Focus on ANC referral.",
+        )
+        assert kept == [cand]
+        assert cand["ingestion_instruction_rationale"] == "Guidance asked for ANC referral."
+
+    def test_drops_candidate_without_rationale_when_instructions_present(self) -> None:
+        cand = _valid_candidate()
+        kept = _apply_ingestion_instruction_gate(
+            [cand],
+            ingestion_instructions="Focus on ANC referral.",
+        )
+        assert kept == []
+
+    def test_accepts_missing_rationale_when_instructions_absent(self) -> None:
+        cand = _valid_candidate()
+        kept = _apply_ingestion_instruction_gate([cand], ingestion_instructions=None)
+        assert kept == [cand]
+        assert cand.get("ingestion_instruction_rationale") is None
+
+    def test_strips_whitespace_rationale(self) -> None:
+        cand = _valid_candidate()
+        cand["ingestion_instruction_rationale"] = "  maps to guidance  "
+        kept = _apply_ingestion_instruction_gate(
+            [cand],
+            ingestion_instructions="Focus on referral.",
+        )
+        assert len(kept) == 1
+        assert kept[0]["ingestion_instruction_rationale"] == "maps to guidance"
+
+    def test_empty_rationale_treated_as_missing_when_instructions_present(self) -> None:
+        cand = _valid_candidate()
+        cand["ingestion_instruction_rationale"] = "   "
+        kept = _apply_ingestion_instruction_gate(
+            [cand],
+            ingestion_instructions="Focus on referral.",
+        )
+        assert kept == []
+        assert cand["ingestion_instruction_rationale"] is None
+
+
 # ─── ModuleIdentifier.identify: end-to-end with mocked client ──────────────
 
 
@@ -516,6 +629,53 @@ class TestIdentifyValidationFiltersInvalid:
         # Only the valid one survives.
         assert len(result.candidates) == 1
         assert result.candidates[0]["estimated_card_count"] == 5
+
+    @pytest.mark.asyncio
+    async def test_drops_candidates_without_rationale_when_instructions_present(self) -> None:
+        b1, p1 = uuid4(), uuid4()
+        client = MagicMock()
+        client.generate = AsyncMock(
+            return_value=_mock_response(
+                {
+                    "candidates": [
+                        _valid_candidate(cited_block_ids=[b1], source_page_id=p1),
+                    ]
+                }
+            )
+        )
+        identifier = ModuleIdentifier(client=client)
+        result = await identifier.identify(
+            content_domains=set(),
+            already_published_modules=[],
+            document_outlines=[],
+            page_corpus=[],
+            valid_block_ids={b1},
+            valid_page_ids={p1},
+            ingestion_instructions="Focus on ANC referral.",
+        )
+        assert result.candidates == []
+
+    @pytest.mark.asyncio
+    async def test_keeps_candidates_with_rationale_when_instructions_present(self) -> None:
+        b1, p1 = uuid4(), uuid4()
+        cand = _valid_candidate(cited_block_ids=[b1], source_page_id=p1)
+        cand["ingestion_instruction_rationale"] = "Corpus chapter 3 covers ANC referral."
+        client = MagicMock()
+        client.generate = AsyncMock(return_value=_mock_response({"candidates": [cand]}))
+        identifier = ModuleIdentifier(client=client)
+        result = await identifier.identify(
+            content_domains=set(),
+            already_published_modules=[],
+            document_outlines=[],
+            page_corpus=[],
+            valid_block_ids={b1},
+            valid_page_ids={p1},
+            ingestion_instructions="Focus on ANC referral.",
+        )
+        assert len(result.candidates) == 1
+        assert (
+            result.candidates[0]["ingestion_instruction_rationale"] == "Corpus chapter 3 covers ANC referral."
+        )
 
 
 class TestIdentifyErrorPaths:

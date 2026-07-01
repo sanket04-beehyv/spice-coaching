@@ -68,19 +68,16 @@ async def _seed_module_with_primary(session: AsyncSession) -> tuple[Module, Beha
     module = Module(
         module_family_id=fam.id,
         version=1,
-        title_bn="শিরোনাম",
-        title_en="Hypertension referral",
-        description_en="Teaches correct BP referral thresholds.",
+        title_localized={"bn": "শিরোনাম", "en": "Hypertension referral"},
+        description_localized={"en": "Teaches correct BP referral thresholds."},
         domain="hypertension",
         module_type="refresher",
         primary_gap_id=primary.id,
         module_json={
             "cards": [
                 {
-                    "title_bn": "কার্ড",
-                    "body_bn": "বিষয়বস্তু",
-                    "title_en": "Card",
-                    "body_en": "Content about referral when BP is high.",
+                    "title": {"bn": "কার্ড"},
+                    "body": {"bn": "বিষয়বস্তু"},
                 }
             ]
         },
@@ -148,7 +145,7 @@ class TestClassifyModuleGapsWorker:
         client.generate = AsyncMock(return_value=_inference_response(gap_codes=["referral_cbs"]))
 
         with patch(
-            "platform_service.services.module_gap_classifier.AIRuntimeClient",
+            "platform_service.services.module_gap_classifier.get_ai_client",
             return_value=client,
         ):
             count = await classify_module_gaps_for_module(module.id)

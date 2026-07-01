@@ -2,8 +2,8 @@
 
 POST /internal/generate/{generation_type}
 
-All four generation types (counselling, it_help, extraction, quiz) share the
-same handler. The generation_type path param is validated against GenerationType.
+All ``GenerationType`` values share the same handler. The path param is
+validated against the enum and must match the request body.
 """
 
 from __future__ import annotations

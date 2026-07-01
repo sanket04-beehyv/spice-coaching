@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,10 +44,10 @@ class SourceRepository:
         content_sha256: str | None = None,
         original_filename: str | None = None,
         uploaded_by: str | None = None,
+        ingestion_instructions: str | None = None,
+        sync_published_visible: bool = False,
     ) -> SourceDocument:
         """Insert a new source_document and return the persisted row."""
-        from uuid import uuid4
-
         doc = SourceDocument(
             title=title,
             source_type=source_type,
@@ -63,6 +63,8 @@ class SourceRepository:
             content_sha256=content_sha256,
             original_filename=original_filename,
             uploaded_by=uploaded_by,
+            ingestion_instructions=ingestion_instructions,
+            sync_published_visible=sync_published_visible,
             status="ingesting",
         )
         self._session.add(doc)

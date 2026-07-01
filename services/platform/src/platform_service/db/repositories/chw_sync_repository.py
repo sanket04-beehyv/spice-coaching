@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.models.chw_behavioural_gap_state import CHWBehaviouralGapState
 from platform_service.db.models.chw_module_quiz_progress import CHWModuleQuizProgress
+from platform_service.db.models.chw_quiz_question_state import CHWQuizQuestionState
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
 
@@ -33,6 +34,24 @@ class CHWSyncRepository:
         stmt = stmt.order_by(
             CHWBehaviouralGapState.updated_at.asc().nullslast(),
             CHWBehaviouralGapState.behavioural_gap_id.asc(),
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_quiz_question_states_for_chw(
+        self,
+        *,
+        chw_id: int,
+        since: datetime | None,
+    ) -> list[CHWQuizQuestionState]:
+        stmt = select(CHWQuizQuestionState).where(CHWQuizQuestionState.chw_id == chw_id)
+        if since is not None:
+            stmt = stmt.where(
+                CHWQuizQuestionState.updated_at.is_not(None),
+                CHWQuizQuestionState.updated_at > since,
+            )
+        stmt = stmt.order_by(
+            CHWQuizQuestionState.updated_at.asc().nullslast(),
+            CHWQuizQuestionState.quiz_id.asc(),
         )
         return list((await self._session.execute(stmt)).scalars().all())
 

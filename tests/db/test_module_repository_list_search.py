@@ -27,11 +27,13 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 class TestListModules:
     async def test_default_excludes_retired(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
-        await _make_module(db_session, family=fam, title_bn="Live", lifecycle_status="published")
+        await _make_module(
+            db_session, family=fam, title_localized={"bn": "Live"}, lifecycle_status="published"
+        )
         await _make_module(
             db_session,
             family=fam,
-            title_bn="Gone",
+            title_localized={"bn": "Gone"},
             lifecycle_status="retired",
             version=2,
             set_family_pointer=False,
@@ -39,17 +41,17 @@ class TestListModules:
 
         repo = ModuleRepository(db_session)
         rows = await repo.list_modules()
-        titles = {m.title_bn for m in rows if m.module_family_id == fam.id}
+        titles = {m.title_localized["bn"] for m in rows if m.module_family_id == fam.id}
         assert "Live" in titles
         assert "Gone" not in titles
 
     async def test_status_retired_filter_returns_only_retired(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
-        await _make_module(db_session, family=fam, title_bn="Live")
+        await _make_module(db_session, family=fam, title_localized={"bn": "Live"})
         await _make_module(
             db_session,
             family=fam,
-            title_bn="Gone",
+            title_localized={"bn": "Gone"},
             lifecycle_status="retired",
             version=2,
             set_family_pointer=False,
@@ -57,22 +59,24 @@ class TestListModules:
 
         repo = ModuleRepository(db_session)
         rows = await repo.list_modules(status="retired")
-        titles = {m.title_bn for m in rows if m.module_family_id == fam.id}
+        titles = {m.title_localized["bn"] for m in rows if m.module_family_id == fam.id}
         assert titles == {"Gone"}
 
     async def test_clinically_reviewed_true_filter(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
-        await _make_module(db_session, family=fam, title_bn="Pending", clinically_reviewed=False)
+        await _make_module(
+            db_session, family=fam, title_localized={"bn": "Pending"}, clinically_reviewed=False
+        )
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="Approved",
+            title_localized={"bn": "Approved"},
             clinically_reviewed=True,
         )
 
         repo = ModuleRepository(db_session)
         rows = await repo.list_modules(clinically_reviewed=True)
-        titles = {m.title_bn for m in rows}
+        titles = {m.title_localized["bn"] for m in rows}
         assert "Approved" in titles
         assert "Pending" not in titles
 
@@ -80,20 +84,20 @@ class TestListModules:
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="Approved-only",
+            title_localized={"bn": "Approved-only"},
             clinically_reviewed=True,
         )
         unique_title = f"Pending-{uuid4().hex[:8]}"
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn=unique_title,
+            title_localized={"bn": unique_title},
             clinically_reviewed=False,
         )
 
         repo = ModuleRepository(db_session)
         rows = await repo.list_modules(clinically_reviewed=False)
-        titles = {m.title_bn for m in rows}
+        titles = {m.title_localized["bn"] for m in rows}
         assert unique_title in titles
         assert "Approved-only" not in titles
 
@@ -103,19 +107,19 @@ class TestListModules:
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn=unique_title,
+            title_localized={"bn": unique_title},
             visibility_window=Range(now, now + timedelta(days=14), lower_inc=True, upper_inc=False),
         )
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="No-window",
+            title_localized={"bn": "No-window"},
             visibility_window=None,
         )
 
         repo = ModuleRepository(db_session)
         rows = await repo.list_modules(has_visibility_window=True)
-        titles = {m.title_bn for m in rows}
+        titles = {m.title_localized["bn"] for m in rows}
         assert unique_title in titles
         assert "No-window" not in titles
 
@@ -125,19 +129,19 @@ class TestListModules:
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="With-window",
+            title_localized={"bn": "With-window"},
             visibility_window=Range(now, now + timedelta(days=14), lower_inc=True, upper_inc=False),
         )
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn=unique_no,
+            title_localized={"bn": unique_no},
             visibility_window=None,
         )
 
         repo = ModuleRepository(db_session)
         rows = await repo.list_modules(has_visibility_window=False)
-        titles = {m.title_bn for m in rows}
+        titles = {m.title_localized["bn"] for m in rows}
         assert unique_no in titles
         assert "With-window" not in titles
 
@@ -146,46 +150,45 @@ class TestListModules:
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="NCD-mod",
+            title_localized={"bn": "NCD-mod"},
             domain=unique_dom,
         )
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="RMNCH-mod",
+            title_localized={"bn": "RMNCH-mod"},
             domain="rmnch",
         )
 
         repo = ModuleRepository(db_session)
         rows = await repo.list_modules(domain=unique_dom)
         assert all(m.domain == unique_dom for m in rows)
-        assert any(m.title_bn == "NCD-mod" for m in rows)
+        assert any(m.title_localized["bn"] == "NCD-mod" for m in rows)
 
     async def test_full_text_query_matches_title_bn(self, db_session: AsyncSession) -> None:
         unique = f"Pregnancy{uuid4().hex[:6]}"
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn=f"Module about {unique}",
+            title_localized={"bn": f"Module about {unique}"},
         )
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="Module about diabetes",
+            title_localized={"bn": "Module about diabetes"},
         )
 
         repo = ModuleRepository(db_session)
         rows = await repo.list_modules(full_text_query=unique)
         assert len(rows) == 1
-        assert unique in rows[0].title_bn
+        assert unique in rows[0].title_localized["bn"]
 
     async def test_full_text_query_matches_title_en(self, db_session: AsyncSession) -> None:
         marker = f"FollowUp{uuid4().hex[:6]}"
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="x",
-            title_en=f"English {marker} guidance",
+            title_localized={"bn": f"English {marker} guidance", "en": "x"},
         )
 
         repo = ModuleRepository(db_session)
@@ -197,8 +200,8 @@ class TestListModules:
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="hypertension",
-            description_bn=f"covers {marker} signs",
+            title_localized={"bn": "hypertension"},
+            description_localized={"bn": f"covers {marker} signs"},
         )
 
         repo = ModuleRepository(db_session)
@@ -212,7 +215,7 @@ class TestListModules:
             await _make_module(
                 db_session,
                 family=await _make_family(db_session),
-                title_bn=f"M{i}",
+                title_localized={"bn": f"M{i}"},
                 domain=domain,
                 published_at=datetime.now(UTC) + timedelta(seconds=i),
             )
@@ -236,14 +239,14 @@ class TestListModules:
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="older",
+            title_localized={"bn": "older"},
             domain=domain,
             published_at=old,
         )
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="newer",
+            title_localized={"bn": "newer"},
             domain=domain,
             published_at=new,
         )
@@ -251,8 +254,8 @@ class TestListModules:
         repo = ModuleRepository(db_session)
         rows = await repo.list_modules(domain=domain)
         # Newest-first.
-        assert rows[0].title_bn == "newer"
-        assert rows[1].title_bn == "older"
+        assert rows[0].title_localized["bn"] == "newer"
+        assert rows[1].title_localized["bn"] == "older"
 
 
 # ─── get_module / list_quiz_questions ───────────────────────────────────────
@@ -282,8 +285,8 @@ class TestListQuizQuestions:
                     question_order=order,
                     question_family_id=uuid4(),
                     question_version=1,
-                    question_bn=f"Q{order}",
-                    options_bn=["a", "b", "c", "d"],
+                    question_localized={"bn": f"Q{order}"},
+                    options_localized={"bn": ["a", "b", "c", "d"]},
                     correct_indices=[0],
                 )
             )
@@ -307,8 +310,8 @@ class TestListQuizQuestions:
                 question_order=1,
                 question_family_id=uuid4(),
                 question_version=1,
-                question_bn="for m1",
-                options_bn=["a", "b", "c", "d"],
+                question_localized={"bn": "for m1"},
+                options_localized={"bn": ["a", "b", "c", "d"]},
                 correct_indices=[0],
             )
         )
@@ -318,8 +321,8 @@ class TestListQuizQuestions:
                 question_order=1,
                 question_family_id=uuid4(),
                 question_version=1,
-                question_bn="for m2",
-                options_bn=["a", "b", "c", "d"],
+                question_localized={"bn": "for m2"},
+                options_localized={"bn": ["a", "b", "c", "d"]},
                 correct_indices=[0],
             )
         )
@@ -327,7 +330,7 @@ class TestListQuizQuestions:
         repo = ModuleRepository(db_session)
         rows = await repo.list_quiz_questions(m1.id)
         assert len(rows) == 1
-        assert rows[0].question_bn == "for m1"
+        assert rows[0].question_localized["bn"] == "for m1"
 
 
 # ─── search_by_embedding (pgvector cosine distance) ─────────────────────────
@@ -340,19 +343,19 @@ class TestSearchByEmbedding:
         a = await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="A",
+            title_localized={"bn": "A"},
             embedding=_unit_basis_vector(0),
         )
         b = await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="B",
+            title_localized={"bn": "B"},
             embedding=_unit_basis_vector(1),
         )
         c = await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="C",
+            title_localized={"bn": "C"},
             embedding=_unit_basis_vector(2),
         )
 
@@ -374,13 +377,13 @@ class TestSearchByEmbedding:
         with_emb = await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="indexed",
+            title_localized={"bn": "indexed"},
             embedding=_unit_basis_vector(0),
         )
         without_emb = await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="not-indexed",
+            title_localized={"bn": "not-indexed"},
             embedding=None,
         )
 
@@ -394,7 +397,7 @@ class TestSearchByEmbedding:
         retired = await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_bn="retired",
+            title_localized={"bn": "retired"},
             lifecycle_status="retired",
             embedding=_unit_basis_vector(0),
             set_family_pointer=False,
@@ -411,7 +414,7 @@ class TestSearchByEmbedding:
             await _make_module(
                 db_session,
                 family=await _make_family(db_session),
-                title_bn=f"M{i}",
+                title_localized={"bn": f"M{i}"},
                 embedding=_unit_basis_vector(i % 10),
             )
 

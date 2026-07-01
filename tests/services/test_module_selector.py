@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 from platform_service.db.models.chw_module_completion import CHWModuleCompletion
+from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.repositories.trigger_repository import TriggerRepository
 from platform_service.services.module_selector import ModuleSelector
@@ -26,6 +27,21 @@ async def _make_family(session: AsyncSession) -> ModuleFamily:
     return family
 
 
+async def _make_published_module(session: AsyncSession, family: ModuleFamily) -> Module:
+    module = Module(
+        module_family_id=family.id,
+        version=1,
+        title_localized={"bn": "selector test"},
+        domain="iccm",
+        module_type="refresher",
+        lifecycle_status="published",
+        module_json={"cards": []},
+    )
+    session.add(module)
+    await session.flush()
+    return module
+
+
 async def _make_trigger_with_bindings(
     session: AsyncSession,
     *,
@@ -40,8 +56,9 @@ async def _make_trigger_with_bindings(
         predicate_jsonb={"behavioural_gap_code": "x"} if trigger_kind == "gap" else {},
     )
     for family, weight in bindings or []:
+        module = await _make_published_module(session, family)
         await repo.bind_module_to_trigger(
-            module_family_id=family.id,
+            module_id=module.id,
             trigger_definition_id=trigger.id,
             priority_weight=weight,
         )
@@ -176,8 +193,28 @@ async def test_module_reachable_from_two_triggers_dedupes_by_higher_weight(
     db_session: AsyncSession,
 ) -> None:
     fam = await _make_family(db_session)
-    t1 = await _make_trigger_with_bindings(db_session, bindings=[(fam, 5)])
-    t2 = await _make_trigger_with_bindings(db_session, bindings=[(fam, 15)])
+    module = await _make_published_module(db_session, fam)
+    repo = TriggerRepository(db_session)
+    t1 = await repo.create_trigger(
+        trigger_kind="gap",
+        trigger_code=f"trig_{uuid4().hex[:8]}",
+        predicate_jsonb={"behavioural_gap_code": "x"},
+    )
+    await repo.bind_module_to_trigger(
+        module_id=module.id,
+        trigger_definition_id=t1.id,
+        priority_weight=5,
+    )
+    t2 = await repo.create_trigger(
+        trigger_kind="gap",
+        trigger_code=f"trig_{uuid4().hex[:8]}",
+        predicate_jsonb={"behavioural_gap_code": "y"},
+    )
+    await repo.bind_module_to_trigger(
+        module_id=module.id,
+        trigger_definition_id=t2.id,
+        priority_weight=15,
+    )
     selector = ModuleSelector(db_session)
     out = await selector.select_modules_for_chw(
         chw_id=_test_chw_id(),

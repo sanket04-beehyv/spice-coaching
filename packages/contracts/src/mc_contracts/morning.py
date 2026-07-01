@@ -9,8 +9,9 @@ from pydantic import BaseModel
 class MorningModuleSuggestionItem(BaseModel):
     module_id: UUID
     module_family_id: UUID
-    source: Literal["gap", "fallback"]
+    source: Literal["gap", "quiz", "fallback"]
     behavioural_gap_id: UUID | None = None
+    quiz_id: UUID | None = None
 
 
 class MorningCardsResponse(BaseModel):

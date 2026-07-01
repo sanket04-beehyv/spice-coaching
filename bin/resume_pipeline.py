@@ -21,18 +21,16 @@ from uuid import UUID
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "services" / "platform" / "src"))
 
+from platform_service.config import get_settings  # noqa: E402
+from platform_service.db.models.source_document import SourceDocument  # noqa: E402
+from platform_service.workers.pipeline_orchestrator import PipelineOrchestrator  # noqa: E402
+from sqlalchemy import text  # noqa: E402
+from sqlalchemy.engine import make_url  # noqa: E402
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
+
 
 async def _resume(doc_id: UUID, *, invalidate_cache: bool) -> None:
-    # Build engine from .env so this works alongside the running services.
-    from platform_service.config import get_settings
-    from platform_service.db.models.source_document import SourceDocument
-    from platform_service.workers.pipeline_orchestrator import PipelineOrchestrator
-    from sqlalchemy import text
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
     s = get_settings()
-    from sqlalchemy.engine import make_url
-
     url = make_url(s.database_url)
     if s.database_password:
         url = url.set(password=s.database_password)

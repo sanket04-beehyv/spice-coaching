@@ -41,11 +41,11 @@ async def _make_module(session: AsyncSession) -> Module:
     mod = Module(
         module_family_id=fam.id,
         version=1,
-        title_bn="t",
+        title_localized={"bn": "t"},
         domain="rmnch",
         module_type="refresher",
         lifecycle_status="published",
-        module_json={"cards": [{"title_bn": "c"}]},
+        module_json={"cards": [{"title": {"bn": "c"}}]},
     )
     session.add(mod)
     await session.flush()

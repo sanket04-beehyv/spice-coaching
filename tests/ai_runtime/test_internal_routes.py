@@ -25,10 +25,10 @@ from ai_runtime.main import create_app  # noqa: E402
 
 
 def _internal_headers() -> dict[str, str]:
-    return {"X-Internal-Token": get_settings().internal_token}
+    return {"X-Internal-Token": get_settings().internal_token.get_secret_value()}
 
 
-def _sample_request(*, generation_type: GenerationType = GenerationType.QUIZ) -> InferenceRequest:
+def _sample_request(*, generation_type: GenerationType = GenerationType.QUIZ_DRAFTING) -> InferenceRequest:
     return InferenceRequest(
         request_id="req-route-1",
         generation_type=generation_type,
@@ -55,7 +55,7 @@ class TestGenerateRoute:
     @pytest.mark.asyncio
     async def test_missing_token_returns_401(self, client: AsyncClient) -> None:
         body = _sample_request().model_dump(mode="json")
-        resp = await client.post("/internal/generate/quiz", json=body)
+        resp = await client.post("/internal/generate/quiz_drafting", json=body)
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
@@ -71,9 +71,9 @@ class TestGenerateRoute:
 
     @pytest.mark.asyncio
     async def test_path_body_mismatch_returns_400(self, client: AsyncClient) -> None:
-        body = _sample_request(generation_type=GenerationType.QUIZ).model_dump(mode="json")
+        body = _sample_request(generation_type=GenerationType.QUIZ_DRAFTING).model_dump(mode="json")
         resp = await client.post(
-            "/internal/generate/counselling",
+            "/internal/generate/card_drafting",
             json=body,
             headers=_internal_headers(),
         )
@@ -84,7 +84,7 @@ class TestGenerateRoute:
     async def test_success_delegates_to_executor(self, client: AsyncClient) -> None:
         expected = InferenceResponse(
             request_id="req-route-1",
-            generation_type=GenerationType.QUIZ,
+            generation_type=GenerationType.QUIZ_DRAFTING,
             provider="openai",
             model="gemini-2.5-flash",
             raw_text='{"ok": true}',
@@ -98,7 +98,7 @@ class TestGenerateRoute:
             return_value=expected,
         ):
             resp = await client.post(
-                "/internal/generate/quiz",
+                "/internal/generate/quiz_drafting",
                 json=_sample_request().model_dump(mode="json"),
                 headers=_internal_headers(),
             )

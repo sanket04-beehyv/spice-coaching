@@ -42,7 +42,9 @@ class ModuleGapRepository:
         if not module_ids:
             return {}
         result = await self._session.execute(
-            select(ModuleBehaviouralGap).where(ModuleBehaviouralGap.module_id.in_(module_ids))
+            select(ModuleBehaviouralGap)
+            .where(ModuleBehaviouralGap.module_id.in_(module_ids))
+            .order_by(ModuleBehaviouralGap.is_primary.desc())
         )
         out: dict[UUID, list[UUID]] = {mid: [] for mid in module_ids}
         for link in result.scalars().all():

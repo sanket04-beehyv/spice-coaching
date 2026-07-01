@@ -51,12 +51,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from platform_service.config import get_settings
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.module import Module
 from platform_service.db.repositories.gap_telemetry_repository import GapTelemetryRepository
 from platform_service.services.module_completion import (
     GapEscalationHandler,
     LearningPointsHandler,
+    QuizEscalationHandler,
     QuizProgressHandler,
     coerce_tenant_uuid,
     module_quiz_outcome_kind,
@@ -145,6 +147,13 @@ async def process_module_event_job(payload: dict[str, Any]) -> None:
         return
 
     if event_type == "spice_action_observed":
+        if not get_settings().telemetry_behavioural_gap_state_enabled:
+            logger.info(
+                "module_completion_worker skipping spice_action_observed event_id=%s "
+                "(telemetry_behavioural_gap_state_enabled=false)",
+                payload.get("event_id"),
+            )
+            return
         await _process_spice_action(payload)
         return
 
@@ -280,14 +289,31 @@ async def _process_module_quiz(payload: dict[str, Any], *, event_type: str) -> N
                 )
 
             if event_type == "module_quiz_attempted":
-                await GapEscalationHandler(session).handle_quiz_attempt(
-                    chw_id=chw_id,
-                    module=module,
-                    score_pct=payload.get("quiz_score_pct"),
-                    tenant_uuid=tenant_uuid,
-                    event_id=payload.get("event_id"),
-                    gap_outcome_kind=module_quiz_outcome_kind(payload),
-                )
+                if get_settings().telemetry_behavioural_gap_state_enabled:
+                    await GapEscalationHandler(session).handle_quiz_attempt(
+                        chw_id=chw_id,
+                        module=module,
+                        score_pct=payload.get("quiz_score_pct"),
+                        tenant_uuid=tenant_uuid,
+                        event_id=payload.get("event_id"),
+                        gap_outcome_kind=module_quiz_outcome_kind(payload),
+                    )
+                elif quiz_id is not None:
+                    await QuizEscalationHandler(session).handle_quiz_attempt(
+                        chw_id=chw_id,
+                        module=module,
+                        quiz_id=quiz_id,
+                        score_pct=payload.get("quiz_score_pct"),
+                        tenant_uuid=tenant_uuid,
+                        event_id=payload.get("event_id"),
+                        gap_outcome_kind=module_quiz_outcome_kind(payload),
+                    )
+                else:
+                    logger.warning(
+                        "module_completion_worker dropping quiz escalation event_id=%s: "
+                        "missing quiz_id in quiz-id telemetry mode",
+                        payload.get("event_id"),
+                    )
 
             await LearningPointsHandler(session).try_award_from_payload(
                 event_id=payload.get("event_id"),

@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from mc_contracts.localized import LocalizedOptions, LocalizedString
+
 
 class ModuleSummary(BaseModel):
     """List-row response. Keeps the payload light; full content via GET /modules/:id."""
@@ -15,9 +17,8 @@ class ModuleSummary(BaseModel):
     id: UUID
     module_family_id: UUID
     version: int
-    title_bn: str
-    title_en: str | None
-    description_bn: str | None
+    title: LocalizedString
+    description: LocalizedString | None = None
     domain: str
     module_type: str
     lifecycle_status: str
@@ -33,6 +34,8 @@ class ModuleSummary(BaseModel):
     # so the dashboard can build a "needs attention" view; presence of any
     # flag does NOT block publish.
     quality_flags: dict[str, Any] | None
+    # LLM-generated bilingual keywords, search phrases, and topic tags for retrieval.
+    search_metadata: dict[str, Any] | None = None
     thumbnail_storage_path: str | None = None
     thumbnail_presigned_url: str | None = None
     thumbnail_presigned_expires_seconds: int | None = None
@@ -72,15 +75,11 @@ class CardSourcePageRef(BaseModel):
 class QuizQuestionPayload(BaseModel):
     id: UUID
     question_order: int | None
-    question_bn: str
-    question_en: str | None
-    case_setup_bn: str | None
-    case_setup_en: str | None
-    options_bn: list[Any]
-    options_en: list[Any] | None
+    question: LocalizedString
+    case_setup: LocalizedString | None = None
+    options: LocalizedOptions
     correct_indices: list[int]
-    explanation_bn: str | None
-    explanation_en: str | None
+    explanation: LocalizedString | None = None
     difficulty: str
 
 
@@ -111,22 +110,17 @@ class ModuleDetail(ModuleSummary):
 class QuizQuestionEditRequest(BaseModel):
     id: str | None = None
     question_order: int | None = None
-    question_bn: str | None = None
-    question_en: str | None = None
-    case_setup_bn: str | None = None
-    case_setup_en: str | None = None
-    options_bn: list[Any]
-    options_en: list[Any] | None = None
+    question: LocalizedString | None = None
+    case_setup: LocalizedString | None = None
+    options: LocalizedOptions
     correct_indices: list[int]
-    explanation_bn: str | None = None
-    explanation_en: str | None = None
+    explanation: LocalizedString | None = None
     difficulty: str = "moderate"
 
 
 class ModuleEditRequest(BaseModel):
-    title_bn: str | None = None
-    title_en: str | None = None
-    description_bn: str | None = None
+    title: LocalizedString | None = None
+    description: LocalizedString | None = None
     module_json: dict[str, Any] | None = None
     editor_id: UUID | None = None
     quiz: list[QuizQuestionEditRequest] | None = None
@@ -148,10 +142,8 @@ class ModuleEditRequest(BaseModel):
 
 
 class ModuleCreateRequest(BaseModel):
-    title_bn: str
-    title_en: str | None = None
-    description_bn: str | None = None
-    description_en: str | None = None
+    title: LocalizedString
+    description: LocalizedString | None = None
     domain: str = "clinical"
     sub_domain: str | None = None
     module_type: str = "refresher"
@@ -193,7 +185,7 @@ class SemanticSearchRequest(BaseModel):
 class TriggerBindingPayload(BaseModel):
     id: UUID
     trigger_definition_id: UUID
-    module_family_id: UUID
+    module_id: UUID
     # primary | secondary — bindings have no on/off flag; deactivation is
     # done via DELETE.
     relationship: str
@@ -204,7 +196,7 @@ class TriggerBindingPayload(BaseModel):
 
 class CreateBindingRequest(BaseModel):
     trigger_definition_id: UUID
-    module_family_id: UUID
+    module_id: UUID
     relationship: str = "primary"
     priority_weight: int = 10
     notes: str | None = None
@@ -233,6 +225,7 @@ class IngestionRunCandidatePayload(BaseModel):
     estimated_card_count: int | None
     estimated_quiz_count: int | None
     quality_flags: dict[str, Any] | None = None
+    ingestion_instruction_rationale: str | None = None
 
 
 class PublishedModuleMergePoll(BaseModel):

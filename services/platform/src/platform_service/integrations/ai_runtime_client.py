@@ -11,6 +11,8 @@ import logging
 
 import httpx
 from mc_contracts.internal_ai import (
+    EmbedRequest,
+    EmbedResponse,
     InferenceRequest,
     InferenceResponse,
     TranscribeRequest,
@@ -84,10 +86,10 @@ class AIRuntimeClient:
         url = f"{self._base_url}/internal/embed"
         headers = {"X-Internal-Token": self._token, "Content-Type": "application/json"}
 
-        resp = await self._client.post(url, json={"texts": texts}, headers=headers)
+        payload = EmbedRequest(texts=texts)
+        resp = await self._client.post(url, json=payload.model_dump(), headers=headers)
         resp.raise_for_status()
-        data = resp.json()
-        return data["embeddings"]
+        return EmbedResponse.model_validate(resp.json()).embeddings
 
     async def transcribe_media(self, media_bytes: bytes, mime_type: str) -> str:
         """Request speech transcription from ai-runtime."""

@@ -46,6 +46,7 @@ class SyncPresignService:
         source_document_ids: list[UUID],
         storage: ObjectStorageClient,
         settings: Settings | None = None,
+        tenant_id: UUID | None = None,
     ) -> SourceDocumentsPresignResponse:
         """Return presigned GET URLs for object-storage-backed source documents.
 
@@ -63,6 +64,14 @@ class SyncPresignService:
                 server_time_utc=datetime.now(UTC).isoformat(),
             )
 
+        module_repo = ModuleRepository(self._session)
+        allowed_doc_ids: set[UUID] | None = None
+        if tenant_id is not None:
+            allowed_doc_ids = await module_repo.filter_source_document_ids_for_tenant(
+                source_document_ids,
+                tenant_id,
+            )
+
         docs = await SourceRepository(self._session).list_source_documents_by_ids(source_document_ids)
         doc_by_id = {doc.id: doc for doc in docs}
 
@@ -72,6 +81,9 @@ class SyncPresignService:
         for doc_id in source_document_ids:
             doc = doc_by_id.get(doc_id)
             if doc is None:
+                missing_ids.append(doc_id)
+                continue
+            if allowed_doc_ids is not None and doc_id not in allowed_doc_ids:
                 missing_ids.append(doc_id)
                 continue
 
@@ -125,6 +137,7 @@ class SyncPresignService:
         source_document_ids: list[UUID],
         storage: ObjectStorageClient,
         settings: Settings | None = None,
+        tenant_id: UUID | None = None,
     ) -> SourceDocumentThumbnailsPresignResponse:
         """Return presigned GET URLs for source document thumbnails (partial success)."""
         settings = settings or get_settings()
@@ -136,8 +149,18 @@ class SyncPresignService:
                 server_time_utc=datetime.now(UTC).isoformat(),
             )
 
+        module_repo = ModuleRepository(self._session)
+        allowed_doc_ids: set[UUID] | None = None
+        if tenant_id is not None:
+            allowed_doc_ids = await module_repo.filter_source_document_ids_for_tenant(
+                source_document_ids,
+                tenant_id,
+            )
+
         docs = await SourceRepository(self._session).list_source_documents_by_ids(source_document_ids)
         doc_by_id = {doc.id: doc for doc in docs}
+        if allowed_doc_ids is not None:
+            doc_by_id = {doc_id: doc for doc_id, doc in doc_by_id.items() if doc_id in allowed_doc_ids}
 
         urls, missing_ids = await self._presign_thumbnail_batch(
             entity_ids=source_document_ids,
@@ -167,6 +190,7 @@ class SyncPresignService:
         module_ids: list[UUID],
         storage: ObjectStorageClient,
         settings: Settings | None = None,
+        tenant_id: UUID | None = None,
     ) -> ModuleThumbnailsPresignResponse:
         """Return presigned GET URLs for module thumbnails (partial success)."""
         settings = settings or get_settings()
@@ -178,7 +202,10 @@ class SyncPresignService:
                 server_time_utc=datetime.now(UTC).isoformat(),
             )
 
-        modules = await ModuleRepository(self._session).list_modules_by_ids(module_ids)
+        modules = await ModuleRepository(self._session).list_modules_by_ids(
+            module_ids,
+            tenant_id=tenant_id,
+        )
         module_by_id = {module.id: module for module in modules}
 
         urls, missing_ids = await self._presign_thumbnail_batch(

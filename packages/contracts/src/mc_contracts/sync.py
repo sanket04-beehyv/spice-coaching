@@ -6,26 +6,43 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from mc_contracts.localized import LocaleConfig, LocalizedOptions, LocalizedString
+
 
 class ConfigSyncBundle(BaseModel):
     """Configurable thresholds pushed to device for offline use."""
 
     thresholds: dict  # key → value_json
+    locales: LocaleConfig
+    server_time_utc: str
+
+
+class ChatFaqItem(BaseModel):
+    """One ranked frequent question mined from ``digital_help_used`` telemetry."""
+
+    id: UUID
+    question: LocalizedString
+    occurrence_count: int
+    rank: int
+    last_seen_at: datetime | None = None
+
+
+class ChatFaqsSyncBundle(BaseModel):
+    """Frequent chat questions for on-device suggestion chips."""
+
+    faqs: list[ChatFaqItem] = Field(default_factory=list)
+    computed_at: datetime | None = None
     server_time_utc: str
 
 
 class ModuleQuizQuestionPayload(BaseModel):
     id: UUID
     question_order: int | None
-    question_bn: str
-    question_en: str | None
-    case_setup_bn: str | None
-    case_setup_en: str | None
-    options_bn: list[Any]
-    options_en: list[Any] | None
+    question: LocalizedString
+    case_setup: LocalizedString | None = None
+    options: LocalizedOptions
     correct_indices: list[int]
-    explanation_bn: str | None
-    explanation_en: str | None
+    explanation: LocalizedString | None = None
     difficulty: str
 
 
@@ -44,13 +61,19 @@ class SourceDocumentSyncPayload(BaseModel):
 
 
 class ModuleSyncPayload(BaseModel):
+    """Published module payload for device sync (cards + quiz).
+
+    Each card dict may include ``source_block_ids`` (when pipeline-drafted) and
+    a server-enriched ``source_pages`` list (``CardSourcePageRef`` shape from
+    ``mc_contracts.admin_modules``). Presign fields on ``source_pages`` are null;
+    devices fetch URLs via ``POST /sync/source-documents/presigned-urls``.
+    """
+
     id: UUID
     module_family_id: UUID
     version: int
-    title_bn: str
-    title_en: str | None
-    description_bn: str | None
-    description_en: str | None
+    title: LocalizedString
+    description: LocalizedString | None = None
     domain: str
     sub_domain: str | None
     module_type: str
@@ -63,6 +86,9 @@ class ModuleSyncPayload(BaseModel):
     updated_at: datetime
     source_documents: list[SourceDocumentSyncPayload] = Field(default_factory=list)
     has_thumbnail: bool = False
+    search_metadata: dict[str, Any] | None = None
+    primary_gap_id: UUID | None = None
+    behavioural_gap_ids: list[UUID] = Field(default_factory=list)
     cards: list[dict[str, Any]]
     quiz: list[ModuleQuizQuestionPayload]
 
@@ -78,6 +104,31 @@ class ModuleFamilySyncPayload(BaseModel):
 class ModulesSyncBundle(BaseModel):
     modules: list[ModuleSyncPayload]
     module_families: list[ModuleFamilySyncPayload]
+    assigned_module_ids: list[UUID] = Field(default_factory=list)
+    server_time_utc: str
+
+
+class PublishedSourceDocumentPayload(BaseModel):
+    """Presigned access for one source document linked to a published module.
+
+    Module metadata and cards come from ``GET /sync/modules``; this payload only
+    supplies downloadable URLs for linked source documents.
+    """
+
+    source_document_id: UUID
+    title: str | None = None
+    original_filename: str | None = None
+    presigned_url: str | None = None
+    presigned_expires_seconds: int | None = None
+    thumbnail_presigned_url: str | None = None
+    thumbnail_presigned_expires_seconds: int | None = None
+
+
+class PublishedSourceDocumentsBundle(BaseModel):
+    """Presigned URLs for source documents linked to published modules."""
+
+    source_documents: list[PublishedSourceDocumentPayload]
+    missing_ids: list[UUID] = Field(default_factory=list)
     server_time_utc: str
 
 
@@ -97,7 +148,7 @@ class TriggerDefinitionSyncPayload(BaseModel):
 class ModuleTriggerBindingSyncPayload(BaseModel):
     id: UUID
     trigger_definition_id: UUID
-    module_family_id: UUID
+    module_id: UUID
     relationship: str
     priority_weight: int
     notes: str | None
@@ -135,6 +186,20 @@ class CHWBehaviouralGapStateSyncPayload(BaseModel):
     updated_at: datetime | None
 
 
+class CHWQuizQuestionStateSyncPayload(BaseModel):
+    chw_id: int
+    quiz_id: UUID
+    module_id: UUID
+    tenant_id: UUID | None
+    failed_attempts_count: int
+    last_failed_attempt_at: datetime | None
+    first_attempt_at: datetime | None
+    last_attempt_at: datetime | None
+    escalated_to_supervisor: bool
+    status: str
+    updated_at: datetime | None
+
+
 class CHWModuleCompletionSyncPayload(BaseModel):
     chw_id: int
     module_family_id: UUID
@@ -160,6 +225,7 @@ class CHWModulePartialCompletionSyncPayload(BaseModel):
 class GapsSyncBundle(BaseModel):
     behavioural_gaps: list[BehaviouralGapSyncPayload]
     chw_behavioural_gap_states: list[CHWBehaviouralGapStateSyncPayload]
+    chw_quiz_question_states: list[CHWQuizQuestionStateSyncPayload] = Field(default_factory=list)
     chw_module_completions: list[CHWModuleCompletionSyncPayload]
     chw_module_partial_completions: list[CHWModulePartialCompletionSyncPayload] = Field(default_factory=list)
     server_time_utc: str

@@ -22,8 +22,10 @@ from uuid import UUID
 
 import pytest
 import pytest_asyncio
+from platform_service.config import get_settings
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.db.models.source_page import SourcePage
+from platform_service.workers.extractors.media_splitter import MediaChunk
 from platform_service.workers.extractors.text_extractor import ExtractedPage
 from platform_service.workers.extractors.vision_extractor import VisionExtractionError, VisionExtractionResult
 from platform_service.workers.stage_a_extract import (
@@ -129,8 +131,6 @@ class TestMediaTranscriptPath:
         db_session.add(sd)
         await db_session.flush()
         await db_session.commit()
-
-        from platform_service.workers.extractors.media_splitter import MediaChunk
 
         media_transcriber = AsyncMock(return_value="This English transcript should not be routed to vision.")
         page_renderer = MagicMock(return_value=b"SHOULD_NOT_RENDER")
@@ -346,8 +346,6 @@ class TestCalibrationAllVision:
     ) -> None:
         # Force `decide_path` to "all_vision" by lowering the force threshold
         # below any non-negative fail rate.
-        from platform_service.config import get_settings
-
         settings = get_settings()
         monkeypatch.setattr(settings, "extraction_calibration_force_vision_threshold", -1.0)
         monkeypatch.setattr(settings, "extraction_calibration_skip_vision_threshold", -1.0)
@@ -475,8 +473,6 @@ async def _fast_recovery_settings(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _force_all_vision(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make every page route through the vision path via calibration."""
-    from platform_service.config import get_settings
-
     settings = get_settings()
     monkeypatch.setattr(settings, "extraction_calibration_force_vision_threshold", -1.0)
     monkeypatch.setattr(settings, "extraction_calibration_skip_vision_threshold", -1.0)
@@ -538,8 +534,6 @@ class TestVisionRecoveryPass:
         Stage 1 raises Stage1RecoveryFailedError with the page numbers that
         remain in vision_failed. Operator can then raise quota / tolerance."""
         _force_all_vision(monkeypatch)
-        from platform_service.config import get_settings
-
         settings = get_settings()
         # Keep tolerance strict (default 0).
         # Drop max_retries to 1 so the test runs quickly.
@@ -579,8 +573,6 @@ class TestVisionRecoveryPass:
         completes. The pages stay marked vision_failed in the DB so the
         dashboard can flag them, but the run is allowed to proceed."""
         _force_all_vision(monkeypatch)
-        from platform_service.config import get_settings
-
         settings = get_settings()
         monkeypatch.setattr(settings, "stage_a_vision_failed_tolerance", 2)
         monkeypatch.setattr(settings, "stage_a_vision_recovery_max_retries", 1)
@@ -651,8 +643,6 @@ class TestVisionRecoveryPass:
         succeeded in the main loop are not re-extracted (would be wasteful
         + would clobber fresh content with a redundant call)."""
         _force_all_vision(monkeypatch)
-        from platform_service.config import get_settings
-
         settings = get_settings()
         monkeypatch.setattr(settings, "stage_a_vision_recovery_max_retries", 1)
 

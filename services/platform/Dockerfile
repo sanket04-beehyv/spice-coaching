@@ -11,16 +11,13 @@ RUN apt-get update \
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
-# Copy workspace files
-COPY pyproject.toml /app/pyproject.toml
+# Copy workspace files (all lockfile members required for locked workspace sync)
+COPY pyproject.toml uv.lock /app/
 COPY packages/ /app/packages/
-COPY services/platform/ /app/services/platform/
+COPY services/ /app/services/
 
-# Install platform service and its workspace dependencies
-RUN uv pip install --system --no-cache \
-    -e /app/packages/contracts \
-    -e /app/packages/foundation \
-    -e /app/services/platform
+RUN uv sync --locked --no-dev --package microcoaching-platform
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy infra for migrations
 COPY infra/ /app/infra/

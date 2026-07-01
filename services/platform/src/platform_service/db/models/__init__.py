@@ -1,10 +1,13 @@
 from platform_service.db.models.attribution_event import AttributionEvent
 from platform_service.db.models.behavioural_gap import BehaviouralGap
+from platform_service.db.models.chat_frequent_question import ChatFrequentQuestion
 from platform_service.db.models.chw_behavioural_gap_state import CHWBehaviouralGapState
 from platform_service.db.models.chw_gap_telemetry_event import CHWGapTelemetryEvent
 from platform_service.db.models.chw_learning_point_event import CHWLearningPointEvent
+from platform_service.db.models.chw_module_assignment import CHWModuleAssignment
 from platform_service.db.models.chw_module_completion import CHWModuleCompletion
 from platform_service.db.models.chw_module_quiz_progress import CHWModuleQuizProgress
+from platform_service.db.models.chw_quiz_question_state import CHWQuizQuestionState
 from platform_service.db.models.config_threshold import ConfigThreshold
 from platform_service.db.models.content_block import ContentBlock
 from platform_service.db.models.file_upload import FileUpload
@@ -45,8 +48,11 @@ __all__ = [
     "CHWLearningPointEvent",
     "CHWModuleCompletion",
     "CHWModuleQuizProgress",
+    "CHWModuleAssignment",
+    "CHWQuizQuestionState",
     "ModuleTriggerBinding",
     "TriggerDefinition",
     # config
+    "ChatFrequentQuestion",
     "ConfigThreshold",
 ]

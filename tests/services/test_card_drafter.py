@@ -12,6 +12,11 @@ from platform_service.services.card_drafter import (
     CardDrafter,
     CardDrafterError,
 )
+from platform_service.services.prompts.card_drafter_prompt import (
+    CARD_DRAFTER_TEMPLATE_VERSION,
+    render_human_message,
+    render_system_prompt,
+)
 
 
 def _resp(parsed_json: Any = None, raw_text: str = "", error: str | None = None) -> InferenceResponse:
@@ -30,9 +35,8 @@ def _resp(parsed_json: Any = None, raw_text: str = "", error: str | None = None)
 def _refresher_card(block_ids: list[str], *, title: str = "Card 1") -> dict[str, Any]:
     return {
         "card_order": 1,
-        "title_bn": title,
-        "body_bn": "বাংলা বডি কন্টেন্ট",
-        "body_en": "English body content",
+        "title": {"bn": title},
+        "body": {"bn": "বাংলা বডি কন্টেন্ট"},
         "source_block_ids": block_ids,
     }
 
@@ -40,11 +44,11 @@ def _refresher_card(block_ids: list[str], *, title: str = "Card 1") -> dict[str,
 def _content_update_card(block_ids: list[str]) -> dict[str, Any]:
     return {
         "card_order": 1,
-        "title_bn": "Title",
-        "body_bn": "",
-        "previous_practice_bn": "আগে",
-        "current_practice_bn": "এখন",
-        "rationale_for_change_bn": "কারণ",
+        "title": {"bn": "Title"},
+        "body": {"bn": ""},
+        "previous_practice": {"bn": "আগে"},
+        "current_practice": {"bn": "এখন"},
+        "rationale_for_change": {"bn": "কারণ"},
         "source_block_ids": block_ids,
     }
 
@@ -103,7 +107,7 @@ class TestCardDrafterValidation:
     async def test_missing_body_bn_for_refresher_rejected(self) -> None:
         b1 = str(uuid4())
         bad = _refresher_card([b1])
-        bad["body_bn"] = ""
+        bad["body"]["bn"] = ""
         client = AsyncMock()
         client.generate = AsyncMock(
             return_value=_resp(parsed_json={"cards": [bad, _refresher_card([b1]), _refresher_card([b1])]})
@@ -127,7 +131,7 @@ class TestCardDrafterValidation:
         through and got published unrenderable."""
         b1 = str(uuid4())
         bad = _refresher_card([b1])  # same shape; module_type drives validation
-        bad["body_bn"] = ""
+        bad["body"]["bn"] = ""
         client = AsyncMock()
         client.generate = AsyncMock(
             return_value=_resp(parsed_json={"cards": [bad, _refresher_card([b1]), _refresher_card([b1])]})
@@ -170,7 +174,7 @@ class TestCardDrafterValidation:
     async def test_content_update_missing_required_field_rejected(self) -> None:
         b1 = str(uuid4())
         bad = _content_update_card([b1])
-        del bad["previous_practice_bn"]
+        del bad["previous_practice"]
         client = AsyncMock()
         client.generate = AsyncMock(
             return_value=_resp(
@@ -322,15 +326,22 @@ class TestMultiSourceCoverage:
         """v2 introduced the cross-source coverage rule. Reverting to v1
         re-introduces the failure mode where fused candidates drop the
         smaller source's content."""
-        from platform_service.services.prompts.card_drafter_prompt import (
-            CARD_DRAFTER_TEMPLATE_VERSION,
-        )
-
         assert CARD_DRAFTER_TEMPLATE_VERSION >= 2
 
-    def test_system_prompt_has_cross_source_rule(self) -> None:
+    def test_system_prompt_has_symbol_verbalization_rules(self) -> None:
         from platform_service.services.prompts.card_drafter_prompt import render_system_prompt
+        from platform_service.services.prompts.symbol_verbalization import SYMBOL_VERBALIZATION_RULES
 
+        prompt = render_system_prompt(module_type="initial_training", card_min_count=3, card_max_count=7)
+        assert SYMBOL_VERBALIZATION_RULES.strip() in prompt
+        assert "20 থেকে 30" in prompt
+        assert "render mathematical symbols" in prompt.lower()
+        assert "spoken language" in prompt.lower()
+        assert "resolves conflicts with" in prompt.lower()
+        assert "prose and" in prompt.lower()
+        assert "terminology only" in prompt.lower()
+
+    def test_system_prompt_has_cross_source_rule(self) -> None:
         prompt = render_system_prompt(module_type="initial_training", card_min_count=3, card_max_count=7)
         lowered = prompt.lower()
         assert "cross-source coverage" in lowered
@@ -345,8 +356,6 @@ class TestMultiSourceCoverage:
         """Each block must carry `source=d{n}` so the LLM can plan card
         coverage by source. First-seen ordering keeps labels stable
         within one render call."""
-        from platform_service.services.prompts.card_drafter_prompt import render_human_message
-
         sd_a, sd_b = str(uuid4()), str(uuid4())
         blocks = [
             {
@@ -374,8 +383,6 @@ class TestMultiSourceCoverage:
         """When all blocks share one source, the multi-source notice
         must not appear. Source label still tags blocks (benignly) so
         the prompt body shape stays uniform."""
-        from platform_service.services.prompts.card_drafter_prompt import render_human_message
-
         sd = str(uuid4())
         blocks = [
             {
@@ -396,8 +403,6 @@ class TestMultiSourceCoverage:
         """The multi-source notice must include per-label block counts so
         the LLM can see which source is under-represented (e.g. 47 vs 10
         on the FP experiment) and plan to cite the smaller pile anyway."""
-        from platform_service.services.prompts.card_drafter_prompt import render_human_message
-
         sd_a, sd_b = str(uuid4()), str(uuid4())
         blocks = [
             {

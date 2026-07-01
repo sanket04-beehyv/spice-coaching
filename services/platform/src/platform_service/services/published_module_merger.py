@@ -16,11 +16,18 @@ from mc_contracts.internal_ai import (
     PromptSpec,
     TraceContext,
 )
+from mc_foundation.locale import LOCALIZED_CARD_TEXT_FIELDS
 
 from platform_service.config import get_settings
 from platform_service.db.models.module import Module
 from platform_service.deps import get_ai_client
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
+from platform_service.localized import (
+    deployment_locales,
+    migrate_legacy_card,
+    primary_text,
+)
+from platform_service.services.card_body_text import card_body_plain_text, is_rich_text_body
 from platform_service.services.card_normalisation import normalise_draft_card
 from platform_service.services.llm_response_resolver import resolve_parsed_dict
 from platform_service.services.prompts.published_module_merger_prompt import (
@@ -33,20 +40,7 @@ from platform_service.services.text_similarity import trigram_similarity
 
 logger = logging.getLogger(__name__)
 
-_CARD_TEXT_FIELDS = (
-    "title_bn",
-    "title_en",
-    "body_bn",
-    "body_en",
-    "next_action_bn",
-    "next_action_en",
-    "previous_practice_bn",
-    "previous_practice_en",
-    "current_practice_bn",
-    "current_practice_en",
-    "rationale_for_change_bn",
-    "rationale_for_change_en",
-)
+_BODY_PRESERVE_FIELDS = ("body",)
 
 
 @dataclass(frozen=True)
@@ -114,6 +108,7 @@ class PublishedModuleMerger:
         system_prompt = render_system_prompt(
             card_min_count=settings.card_min_count,
             card_max_count=settings.card_max_count,
+            deployment_primary_locale=settings.deployment_primary_locale,
         )
         human_message = render_human_message(
             candidate=candidate,
@@ -158,13 +153,94 @@ class PublishedModuleMerger:
         )
 
 
+def _normalize_plain_text(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _find_matching_existing_card(
+    merged_card: dict[str, Any],
+    existing_cards: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    merged_family = str(merged_card.get("card_family_id") or "").strip()
+    if merged_family:
+        for existing in existing_cards:
+            if str(existing.get("card_family_id") or "").strip() == merged_family:
+                return existing
+
+    merged_blocks = _card_block_ids(merged_card)
+    if not merged_blocks:
+        return None
+
+    best_score = -1.0
+    best_card: dict[str, Any] | None = None
+    for existing in existing_cards:
+        overlap = len(merged_blocks & _card_block_ids(existing))
+        if overlap == 0:
+            continue
+        score = overlap / len(merged_blocks)
+        if score > best_score:
+            best_score = score
+            best_card = existing
+    return best_card
+
+
+def preserve_rich_card_bodies(
+    merged_cards: list[dict[str, Any]],
+    existing_cards: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep rich-text bodies from existing cards when merge output is plain-text equivalent."""
+    if not existing_cards:
+        return merged_cards
+
+    preserved: list[dict[str, Any]] = []
+    for merged in merged_cards:
+        card = dict(merged)
+        existing = _find_matching_existing_card(card, existing_cards)
+        if existing is None:
+            preserved.append(card)
+            continue
+
+        for field in _BODY_PRESERVE_FIELDS:
+            existing_raw = existing.get(field)
+            if not isinstance(existing_raw, dict):
+                continue
+            merged_raw = card.get(field)
+            if not isinstance(merged_raw, dict):
+                merged_raw = {}
+            merged_body = dict(merged_raw)
+            for locale, existing_val in existing_raw.items():
+                if not is_rich_text_body(existing_val):
+                    continue
+                merged_val = merged_body.get(locale)
+                if is_rich_text_body(merged_val):
+                    continue
+                merged_plain = _normalize_plain_text(card_body_plain_text(merged_val))
+                existing_plain = _normalize_plain_text(card_body_plain_text(existing_val))
+                if not merged_plain or not existing_plain:
+                    continue
+                if merged_plain == existing_plain or trigram_similarity(merged_plain, existing_plain) >= 0.95:
+                    merged_body[locale] = existing_val
+            card[field] = merged_body
+        preserved.append(card)
+    return preserved
+
+
 def _card_fingerprint(card: dict[str, Any]) -> str:
     """Normalised text blob for similarity scoring."""
+    settings = get_settings()
+    primary = deployment_locales(settings)
+    migrated = migrate_legacy_card(dict(card), primary=primary)
     parts: list[str] = []
-    for field in _CARD_TEXT_FIELDS:
-        value = (card.get(field) or "").strip()
-        if value:
-            parts.append(value)
+    for field in LOCALIZED_CARD_TEXT_FIELDS:
+        value = migrated.get(field)
+        if not isinstance(value, dict):
+            continue
+        raw = value.get(primary)
+        if raw is None:
+            continue
+        text = card_body_plain_text(raw) if field == "body" else str(raw).strip()
+        if text:
+            parts.append(text)
     return " ".join(parts)
 
 
@@ -270,7 +346,10 @@ def _prefilter_existing(
         return existing_modules
     scored: list[tuple[float, dict[str, Any]]] = []
     for mod in existing_modules:
-        title = (mod.get("title_en") or mod.get("title_bn") or "").strip()
+        title_map = mod.get("title_localized")
+        title = ""
+        if isinstance(title_map, dict):
+            title = (primary_text(title_map) or "").strip()
         title_score = trigram_similarity(candidate_title, title)
         mod_cards = mod.get("cards") if isinstance(mod.get("cards"), list) else []
         content_score = _module_content_similarity(mod_cards, new_cards)
@@ -371,6 +450,8 @@ def _parse_merge_payload(
             merged_cards=list(new_cards),
         )
 
+    cards = preserve_rich_card_bodies(cards, existing_cards)
+
     return PublishedModuleMergerResult(
         matched_module_id=matched_id,
         match_rationale=rationale,
@@ -384,9 +465,8 @@ def published_module_to_merge_dict(module: Module) -> dict[str, Any]:
     return {
         "module_id": str(module.id),
         "lifecycle_status": module.lifecycle_status,
-        "title_en": module.title_en,
-        "title_bn": module.title_bn,
-        "description_bn": module.description_bn,
+        "title_localized": module.title_localized,
+        "description_localized": module.description_localized,
         "module_type": module.module_type,
         "domain": module.domain,
         "cards": cards if isinstance(cards, list) else [],
@@ -397,5 +477,6 @@ __all__ = [
     "PublishedModuleMerger",
     "PublishedModuleMergerError",
     "PublishedModuleMergerResult",
+    "preserve_rich_card_bodies",
     "published_module_to_merge_dict",
 ]

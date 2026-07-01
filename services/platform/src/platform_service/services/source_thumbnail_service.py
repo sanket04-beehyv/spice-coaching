@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 _MVP_SKIP_SOURCE_TYPES = frozenset({"docx", "pptx"})
 
 
+def source_type_supports_thumbnail(source_type: str) -> bool:
+    """Return whether ingest should wait for a thumbnail for this source type."""
+    return source_type not in _MVP_SKIP_SOURCE_TYPES
+
+
 def thumbnail_object_name(source_document_id: UUID) -> str:
     return f"ingest/thumbnails/{source_document_id}.png"
 

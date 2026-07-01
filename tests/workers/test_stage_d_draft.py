@@ -31,14 +31,18 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
+from platform_service import celery_tasks
+from platform_service.config import get_settings
 from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.content_block import ContentBlock
+from platform_service.db.models.ingestion_run import IngestionRun
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_behavioural_gap import ModuleBehaviouralGap
 from platform_service.db.models.module_candidate_draft import ModuleCandidateDraft
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.db.models.source_page import SourcePage
+from platform_service.db.repositories.module_drafter_repository import _slugify
 from platform_service.db.repositories.module_gap_repository import ModuleGapRepository
 from platform_service.services.card_drafter import (
     CardDrafterError,
@@ -50,6 +54,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import requires_db
+from tests.localized_helpers import refresher_card
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
@@ -82,8 +87,7 @@ async def _seed_candidate(
     cited_blocks: int = 3,
     quality_flags: dict[str, Any] | None = None,
     behavioural_gap_code: str | None = None,
-    description_en: str | None = None,
-    description_bn: str | None = None,
+    description_localized: dict[str, str] | None = None,
     estimated_card_count: int = 5,
     estimated_quiz_count: int = 4,
     content_domain: str = "clinical",
@@ -126,8 +130,6 @@ async def _seed_candidate(
     # but Stage D itself only needs the candidate row to exist with valid
     # FK + provenance. We skip the run row by giving the FK a value that
     # won't be referenced (CASCADE on insert: must point at a real run).
-    from platform_service.db.models.ingestion_run import IngestionRun
-
     run = IngestionRun(
         source_document_id=sd.id,
         status="running",
@@ -139,8 +141,7 @@ async def _seed_candidate(
         ingestion_run_id=run.id,
         proposed_title=proposed_title,
         scope_summary="A scope summary explaining the topic.",
-        description_en=description_en,
-        description_bn=description_bn,
+        description_localized=description_localized,
         source_provenance_jsonb=[
             {
                 "source_document_id": str(sd.id),
@@ -162,23 +163,19 @@ async def _seed_candidate(
 
 def _make_card(
     *,
-    title_bn: str = "কার্ড",
-    body_bn: str = "মূল বিষয়।",
-    next_action_bn: str = "পরবর্তী পদক্ষেপ।",
-    title_en: str | None = "Card",
-    body_en: str | None = "Body content.",
+    title: str = "কার্ড",
+    body: str = "মূল বিষয়।",
+    next_action: str = "পরবর্তী পদক্ষেপ।",
     field_flags: dict | None = None,
     transient_card_family_id: UUID | None = None,
 ) -> dict[str, Any]:
     """Build a card dict in the shape the drafter returns."""
-    out: dict[str, Any] = {
-        "title_bn": title_bn,
-        "body_bn": body_bn,
-        "next_action_bn": next_action_bn,
-        "title_en": title_en,
-        "body_en": body_en,
-        "source_block_ids": [str(uuid4())],
-    }
+    out: dict[str, Any] = refresher_card(
+        title=title,
+        body=body,
+        next_action=next_action,
+        source_block_ids=[str(uuid4())],
+    )
     if field_flags is not None:
         out["field_flags"] = field_flags
     if transient_card_family_id is not None:
@@ -205,7 +202,7 @@ def _make_card_drafter_mock(
 class TestHappyPath:
     async def test_persists_module_with_cards_inline(self, db_session: AsyncSession) -> None:
         candidate = await _seed_candidate(db_session)
-        cards = [_make_card(title_bn=f"C{i}") for i in range(5)]
+        cards = [_make_card(title=f"C{i}") for i in range(5)]
         drafter = _make_card_drafter_mock(cards)
 
         orch = StageDOrchestrator(db_session, card_drafter=drafter)
@@ -221,24 +218,25 @@ class TestHappyPath:
         module = (await db_session.execute(select(Module).where(Module.id == result.module_id))).scalar_one()
         assert module.lifecycle_status == "draft"
         assert module.clinically_reviewed is False
-        assert module.description_en == "A scope summary explaining the topic."
-        assert module.description_bn is None
+        assert module.description_localized is None
         assert module.module_json is not None
         cards_json = module.module_json.get("cards", [])
         assert len(cards_json) == 5
         # Card shape: only public/runtime keys, no transient ones.
         first = cards_json[0]
-        assert "title_bn" in first
+        assert "title" in first
         assert "card_family_id" not in first  # transient — stripped by repo
         assert "field_flags" not in first  # transient — stripped by repo
 
-    async def test_persists_bilingual_descriptions_from_candidate(self, db_session: AsyncSession) -> None:
+    async def test_persists_localized_descriptions_from_candidate(self, db_session: AsyncSession) -> None:
         candidate = await _seed_candidate(
             db_session,
-            description_en="English description paragraph for the module.",
-            description_bn="মডিউলের বাংলা বর্ণনা অনুচ্ছেদ।",
+            description_localized={
+                "en": "English description paragraph for the module.",
+                "bn": "মডিউলের বাংলা বর্ণনা অনুচ্ছেদ।",
+            },
         )
-        cards = [_make_card(title_bn=f"C{i}") for i in range(5)]
+        cards = [_make_card(title=f"C{i}") for i in range(5)]
         drafter = _make_card_drafter_mock(cards)
 
         orch = StageDOrchestrator(db_session, card_drafter=drafter)
@@ -246,8 +244,7 @@ class TestHappyPath:
         await db_session.commit()
 
         module = (await db_session.execute(select(Module).where(Module.id == result.module_id))).scalar_one()
-        assert module.description_en == "English description paragraph for the module."
-        assert module.description_bn == "মডিউলের বাংলা বর্ণনা অনুচ্ছেদ।"
+        assert module.description_localized.get("bn") == "মডিউলের বাংলা বর্ণনা অনুচ্ছেদ।"
 
     async def test_quality_flags_propagated_from_candidate_to_module(self, db_session: AsyncSession) -> None:
         candidate = await _seed_candidate(
@@ -286,21 +283,27 @@ class TestHappyPath:
 
         with pytest.MonkeyPatch.context() as mp:
             quiz_delay = MagicMock()
-            embed_delay = MagicMock()
+            card_batch_delay = MagicMock()
+            metadata_delay = MagicMock()
             mp.setattr(
                 "platform_service.celery_tasks.generate_module_quiz_task.delay",
                 quiz_delay,
             )
             mp.setattr(
-                "platform_service.celery_tasks.generate_module_embedding_task.delay",
-                embed_delay,
+                "platform_service.celery_tasks.generate_module_card_search_metadata_batch_task.delay",
+                card_batch_delay,
+            )
+            mp.setattr(
+                "platform_service.celery_tasks.generate_module_search_metadata_task.delay",
+                metadata_delay,
             )
             result = await orch.run(candidate_id=candidate.id)
             await db_session.commit()
 
         assert result.module_id is not None
         quiz_delay.assert_not_called()
-        embed_delay.assert_called_once()
+        card_batch_delay.assert_called_once()
+        metadata_delay.assert_not_called()
 
 
 # ─── Validator interaction ────────────────────────────────────────────────
@@ -324,9 +327,9 @@ class TestValidatorInteraction:
         self, db_session: AsyncSession
     ) -> None:
         # Create cards that the validator will drop hard. Easiest way:
-        # body_bn contains "you have diabetes" — _DIAGNOSIS_RE forbidden.
+        # body contains "you have diabetes" — _DIAGNOSIS_RE forbidden.
         candidate = await _seed_candidate(db_session)
-        bad_cards = [_make_card(body_bn="you have diabetes type 2") for _ in range(5)]
+        bad_cards = [_make_card(body="you have diabetes type 2") for _ in range(5)]
         drafter = _make_card_drafter_mock(bad_cards)
 
         orch = StageDOrchestrator(db_session, card_drafter=drafter)
@@ -408,8 +411,6 @@ class TestFailurePaths:
         # try/except path is exercised. The first call raises; the second
         # would also raise but `_enqueue_post_publish` catches the first
         # exception and bails out of the whole block.
-        from platform_service import celery_tasks
-
         raising = MagicMock(side_effect=RuntimeError("broker unreachable"))
         monkeypatch.setattr(celery_tasks.generate_module_quiz_task, "delay", raising)
         monkeypatch.setattr(celery_tasks.generate_module_embedding_task, "delay", raising)
@@ -420,6 +421,7 @@ class TestFailurePaths:
         # Reload the staticmethod from the source.
         import importlib
 
+        # no-inline-imports: import-after-reload required for fresh module state
         import platform_service.workers.stage_d_draft as _stage_d_mod
 
         importlib.reload(_stage_d_mod)
@@ -443,8 +445,6 @@ class TestModuleFamily:
     async def test_collision_appends_numeric_suffix(self, db_session: AsyncSession) -> None:
         # Pre-seed a family with a code that the slug for "Sample Topic" would
         # produce, forcing the next call to append "-1".
-        from platform_service.db.repositories.module_drafter_repository import _slugify
-
         title = "Same Title"
         slug = _slugify(title)
         # Insert a family already at that slug.
@@ -490,7 +490,7 @@ class TestPrimaryBehaviouralGap:
         ).scalar_one()
         expected_code = f"module_primary_gap_{str(module.id).replace('-', '_')}"
         assert gap.gap_code == expected_code
-        assert gap.description == module.title_en
+        assert gap.description == module.title_localized.get("bn")
         assert gap.domain == module.domain
         assert gap.status == "active"
         assert gap.detection_rule_jsonb == {}
@@ -536,7 +536,7 @@ class TestCardPayloadNormalisation:
         candidate = await _seed_candidate(db_session)
         cards_with_transient = [
             _make_card(
-                title_bn=f"T{i}",
+                title=f"T{i}",
                 field_flags={"some_flag": True},
                 transient_card_family_id=uuid4(),
             )
@@ -552,7 +552,7 @@ class TestCardPayloadNormalisation:
         for card in module.module_json["cards"]:
             assert "card_family_id" not in card
             assert "field_flags" not in card
-            assert "title_bn" in card
+            assert "title" in card
 
 
 # ─── Published-module merge ───────────────────────────────────────────────
@@ -580,19 +580,16 @@ async def _seed_active_module(
     await session.flush()
     old_cards = [
         {
-            "title_bn": "পুরোনো কার্ড",
-            "body_bn": "পুরনো বিষয়বস্তু।",
-            "next_action_bn": "পুরনো পদক্ষেপ।",
-            "title_en": "Old card",
-            "body_en": "Old body.",
+            "title": {"bn": "পুরোনো কার্ড"},
+            "body": {"bn": "পুরনো বিষয়বস্তু।"},
+            "next_action": {"bn": "পুরনো পদক্ষেপ।"},
             "source_block_ids": [str(block_ids[0])],
         }
     ]
     published = Module(
         module_family_id=fam.id,
         version=1,
-        title_bn="পুরোনো মডিউল",
-        title_en=title_en,
+        title_localized={"bn": title_en},
         domain="rmnch",
         module_type="refresher",
         primary_gap_id=gap.id,
@@ -616,13 +613,15 @@ class TestPublishedModuleMerge:
         candidate = await _seed_candidate(
             db_session,
             proposed_title="Sample Topic",
-            description_en="New English description from candidate.",
-            description_bn="নতুন বাংলা বর্ণনা।",
+            description_localized={
+                "en": "New English description from candidate.",
+                "bn": "নতুন বাংলা বর্ণনা।",
+            },
         )
         block_id = UUID(candidate.source_provenance_jsonb[0]["content_block_ids"][0])
         published = await _seed_published_module(db_session, block_ids=[block_id])
 
-        new_cards = [_make_card(title_bn=f"Merged {i}") for i in range(5)]
+        new_cards = [_make_card(title=f"Merged {i}") for i in range(5)]
         for card in new_cards:
             card["source_block_ids"] = [str(block_id)]
 
@@ -678,21 +677,18 @@ class TestPublishedModuleMerge:
         }
         assert draft.quality_flags_jsonb is not None
         assert "published_module_merged" in (draft.quality_flags_jsonb.get("flags") or [])
-        assert draft.description_en == "New English description from candidate."
-        assert draft.description_bn == "নতুন বাংলা বর্ণনা।"
+        assert draft.description_localized.get("bn") == "A scope summary explaining the topic."
 
     async def test_skip_merge_skips_merge_when_globally_enabled(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from platform_service.config import get_settings
-
         monkeypatch.setattr(get_settings(), "stage_d_published_merge_enabled", True)
 
         candidate = await _seed_candidate(db_session, proposed_title="Sample Topic")
         block_id = UUID(candidate.source_provenance_jsonb[0]["content_block_ids"][0])
         published = await _seed_published_module(db_session, block_ids=[block_id])
 
-        new_cards = [_make_card(title_bn=f"New {i}") for i in range(5)]
+        new_cards = [_make_card(title=f"New {i}") for i in range(5)]
         for card in new_cards:
             card["source_block_ids"] = [str(block_id)]
 
@@ -737,7 +733,7 @@ class TestPublishedModuleMerge:
             family_code="draft-family",
         )
 
-        new_cards = [_make_card(title_bn=f"Merged {i}") for i in range(5)]
+        new_cards = [_make_card(title=f"Merged {i}") for i in range(5)]
         for card in new_cards:
             card["source_block_ids"] = [str(block_id)]
 
@@ -773,7 +769,7 @@ class TestPublishedModuleMerge:
         published = await _seed_published_module(db_session, block_ids=[block_id])
 
         # Only one valid card after merge — below card_min_count.
-        bad_cards = [_make_card(title_bn="Only one")]
+        bad_cards = [_make_card(title="Only one")]
         bad_cards[0]["source_block_ids"] = [str(block_id)]
 
         merger = MagicMock()

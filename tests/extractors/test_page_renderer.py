@@ -12,6 +12,7 @@ from platform_service.workers.extractors.page_renderer import (
 )
 
 from tests.extractors.fixture_builders import (
+    build_clean_english_docx,
     build_clean_english_pdf,
     build_clean_english_pptx,
     build_empty_pdf,
@@ -64,7 +65,5 @@ class TestSourceTypeDispatch:
         assert count_pages(pptx, "pptx") == 5
 
     def test_count_pages_docx_treats_as_one_page(self, tmp_path: Path) -> None:
-        from tests.extractors.fixture_builders import build_clean_english_docx
-
         docx = build_clean_english_docx(tmp_path / "c.docx")
         assert count_pages(docx, "docx") == 1

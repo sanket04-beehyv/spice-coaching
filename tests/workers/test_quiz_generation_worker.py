@@ -35,6 +35,7 @@ from mc_contracts.internal_ai import (
     InferenceResponse,
     TokenUsage,
 )
+from platform_service.config import get_settings
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
@@ -42,6 +43,7 @@ from platform_service.workers.quiz_generation_worker import (
     _format_card_block,
     _target_quiz_size,
     generate_quiz_for_module,
+    render_system_prompt,
 )
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,30 +53,32 @@ from tests.conftest import requires_db
 # ─── Pure unit: target quiz size + card block formatter ────────────────────
 
 
+def _card_block(card: dict[str, Any], idx: int) -> str:
+    settings = get_settings()
+    return _format_card_block(
+        card,
+        idx,
+        primary_locale=settings.deployment_primary_locale,
+        settings=settings,
+    )
+
+
 class TestTargetQuizSize:
     def test_one_card_clamps_to_quiz_min(self) -> None:
-        from platform_service.config import get_settings
-
         s = get_settings()
         assert _target_quiz_size(1) == s.quiz_min_questions
 
     def test_card_count_in_band_returns_card_count(self) -> None:
-        from platform_service.config import get_settings
-
         s = get_settings()
         # Pick something between min and max.
         n = s.quiz_min_questions + 1
         assert _target_quiz_size(n) == n
 
     def test_many_cards_clamps_to_quiz_max(self) -> None:
-        from platform_service.config import get_settings
-
         s = get_settings()
         assert _target_quiz_size(100) == s.quiz_max_questions
 
     def test_zero_cards_clamps_to_min(self) -> None:
-        from platform_service.config import get_settings
-
         s = get_settings()
         # min(0, max) = 0; max(min, 0) = min — so floor is min.
         assert _target_quiz_size(0) == s.quiz_min_questions
@@ -82,7 +86,7 @@ class TestTargetQuizSize:
 
 class TestFormatCardBlock:
     def test_includes_only_populated_fields(self) -> None:
-        block = _format_card_block({"title_bn": "T", "body_bn": "B"}, idx=1)
+        block = _card_block({"title": {"bn": "T"}, "body": {"bn": "B"}}, idx=1)
         assert "### Card 1" in block
         assert "Title (bn): T" in block
         assert "Body (bn): B" in block
@@ -91,14 +95,14 @@ class TestFormatCardBlock:
         assert "Rationale" not in block
 
     def test_includes_all_optional_fields_in_order(self) -> None:
-        block = _format_card_block(
+        block = _card_block(
             {
-                "title_bn": "t",
-                "body_bn": "b",
-                "next_action_bn": "n",
-                "previous_practice_bn": "p",
-                "current_practice_bn": "c",
-                "rationale_for_change_bn": "r",
+                "title": {"bn": "t"},
+                "body": {"bn": "b"},
+                "next_action": {"bn": "n"},
+                "previous_practice": {"bn": "p"},
+                "current_practice": {"bn": "c"},
+                "rationale_for_change": {"bn": "r"},
             },
             idx=2,
         )
@@ -107,19 +111,27 @@ class TestFormatCardBlock:
         positions = [
             block.index("Title (bn)"),
             block.index("Body (bn)"),
-            block.index("Next action (bn)"),
-            block.index("Previous practice (bn)"),
-            block.index("Current practice (bn)"),
-            block.index("Rationale (bn)"),
+            block.index("Next Action (bn)"),
+            block.index("Previous Practice (bn)"),
+            block.index("Current Practice (bn)"),
+            block.index("Rationale For Change (bn)"),
         ]
         assert positions == sorted(positions)
 
     def test_card_index_in_header(self) -> None:
-        assert "### Card 7" in _format_card_block({"title_bn": "x"}, idx=7)
+        assert "### Card 7" in _card_block({"title": {"bn": "x"}}, idx=7)
 
     def test_empty_card_only_emits_header(self) -> None:
-        block = _format_card_block({}, idx=1)
+        block = _card_block({}, idx=1)
         assert block.strip() == "### Card 1"
+
+
+class TestRenderSystemPrompt:
+    def test_forbids_card_citations_in_explanations(self) -> None:
+        prompt = render_system_prompt()
+        assert "cite which card" not in prompt.lower()
+        assert "do not mention card numbers" in prompt.lower()
+        assert "no card references" in prompt.lower()
 
 
 # ─── DB-backed setup ────────────────────────────────────────────────────────
@@ -142,7 +154,7 @@ async def _seed_module(
     session: AsyncSession,
     *,
     cards: list[dict] | None = None,
-    title_bn: str = "Module title",
+    title_localized: dict[str, str] | None = None,
     module_json_override: dict | None = None,
 ) -> UUID:
     fam = ModuleFamily(module_code=f"f-{uuid4().hex[:8]}")
@@ -151,13 +163,13 @@ async def _seed_module(
     if module_json_override is not None:
         module_json = module_json_override
     elif cards is None:
-        module_json = {"cards": [{"title_bn": "c1", "body_bn": "b1"}]}
+        module_json = {"cards": [{"title": {"bn": "c1"}, "body": {"bn": "b1"}}]}
     else:
         module_json = {"cards": cards}
     module = Module(
         module_family_id=fam.id,
         version=1,
-        title_bn=title_bn,
+        title_localized=title_localized or {"bn": "Module title"},
         domain="rmnch",
         module_type="refresher",
         lifecycle_status="published",
@@ -187,15 +199,11 @@ def _llm_response(payload: Any, *, error: str | None = None) -> InferenceRespons
 
 def _valid_question(idx: int = 0) -> dict[str, Any]:
     return {
-        "question_bn": f"Q{idx}",
-        "question_en": f"Question {idx}",
-        "case_setup_bn": "case bn",
-        "case_setup_en": "case en",
-        "options_bn": ["a", "b", "c", "d"],
-        "options_en": ["A", "B", "C", "D"],
+        "question": {"bn": f"Q{idx}", "en": f"Question {idx}"},
+        "case_setup": {"bn": "case bn", "en": "case en"},
+        "options": {"bn": ["a", "b", "c", "d"], "en": ["A", "B", "C", "D"]},
         "correct_index": 1,
-        "explanation_bn": "because",
-        "explanation_en": "because",
+        "explanation": {"bn": "because", "en": "because"},
         "primary_card_index": 1,
         "difficulty": "moderate",
     }
@@ -212,7 +220,11 @@ def mock_generate(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         async def generate(self, request: InferenceRequest) -> InferenceResponse:
             return await gen_mock(request)
 
-    monkeypatch.setattr("platform_service.workers.quiz_generation_worker.AIRuntimeClient", _StubClient)
+    stub = _StubClient()
+    monkeypatch.setattr(
+        "platform_service.workers.quiz_generation_worker.get_ai_client",
+        lambda: stub,
+    )
     return gen_mock
 
 
@@ -227,7 +239,7 @@ class TestHappyPath:
         db_session: AsyncSession,
         mock_generate: AsyncMock,
     ) -> None:
-        module_id = await _seed_module(db_session, cards=[{"title_bn": f"c{i}"} for i in range(3)])
+        module_id = await _seed_module(db_session, cards=[{"title": {"bn": f"c{i}"}} for i in range(3)])
         mock_generate.return_value = _llm_response({"questions": [_valid_question(i) for i in range(3)]})
 
         n = await generate_quiz_for_module(module_id)
@@ -248,7 +260,7 @@ class TestHappyPath:
         db_session: AsyncSession,
         mock_generate: AsyncMock,
     ) -> None:
-        module_id = await _seed_module(db_session, cards=[{"title_bn": f"c{i}"} for i in range(3)])
+        module_id = await _seed_module(db_session, cards=[{"title": {"bn": f"c{i}"}} for i in range(3)])
         mock_generate.return_value = _llm_response(
             {"questions": [_valid_question(0), _valid_question(1), _valid_question(2)]}
         )
@@ -297,6 +309,27 @@ class TestHappyPath:
         row = result.scalar_one()
         assert row.correct_indices == [0]
 
+    async def test_strips_card_citations_from_explanation_on_write(
+        self,
+        db_session: AsyncSession,
+        mock_generate: AsyncMock,
+    ) -> None:
+        module_id = await _seed_module(db_session)
+        q = _valid_question(0)
+        q["explanation"] = {
+            "bn": "সঠিক কারণ রেফার প্রয়োজন, কার্ড ১ অনুযায়ী।",
+            "en": "Correct because referral is needed. See Card 1.",
+        }
+        mock_generate.return_value = _llm_response({"questions": [q]})
+
+        await generate_quiz_for_module(module_id)
+        result = await db_session.execute(
+            select(ModuleQuizQuestion).where(ModuleQuizQuestion.module_id == module_id)
+        )
+        row = result.scalar_one()
+        assert row.explanation_localized is not None
+        assert "কার্ড" not in row.explanation_localized["bn"]
+
 
 # ─── Idempotent retry ───────────────────────────────────────────────────────
 
@@ -309,7 +342,7 @@ class TestIdempotentRetry:
         db_session: AsyncSession,
         mock_generate: AsyncMock,
     ) -> None:
-        module_id = await _seed_module(db_session, cards=[{"title_bn": "c1"}])
+        module_id = await _seed_module(db_session, cards=[{"title": {"bn": "c1"}}])
         # Pre-seed some "old" quiz rows for this module.
         for i in range(3):
             db_session.add(
@@ -318,8 +351,8 @@ class TestIdempotentRetry:
                     question_order=i + 1,
                     question_family_id=uuid4(),
                     question_version=1,
-                    question_bn=f"OLD Q{i}",
-                    options_bn=["a", "b", "c", "d"],
+                    question_localized={"bn": f"OLD Q{i}"},
+                    options_localized={"bn": ["a", "b", "c", "d"]},
                     correct_indices=[0],
                 )
             )
@@ -339,7 +372,7 @@ class TestIdempotentRetry:
         assert len(rows) == 2
         # And none of the old ones survived.
         for row in rows:
-            assert "OLD" not in row.question_bn
+            assert "OLD" not in row.question_localized["bn"]
 
 
 # ─── LLM output shape tolerance ─────────────────────────────────────────────
@@ -476,7 +509,7 @@ class TestFailureReturnZero:
         module = Module(
             module_family_id=fam.id,
             version=1,
-            title_bn="t",
+            title_localized={"bn": "t"},
             domain="rmnch",
             module_type="refresher",
             lifecycle_status="published",
@@ -539,8 +572,8 @@ class TestRequestShape:
         module_id = await _seed_module(
             db_session,
             cards=[
-                {"title_bn": "card-one-title", "body_bn": "card-one-body"},
-                {"title_bn": "card-two-title"},
+                {"title": {"bn": "card-one-title"}, "body": {"bn": "card-one-body"}},
+                {"title": {"bn": "card-two-title"}},
             ],
         )
         mock_generate.return_value = _llm_response({"questions": [_valid_question(0)]})

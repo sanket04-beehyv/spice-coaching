@@ -19,6 +19,7 @@ from platform_service.workers.extractors.vision_extractor import (
     VisionExtractionError,
     VisionExtractor,
 )
+from platform_service.workers.stage_a_types import Stage1RecoveryFailedError
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +127,6 @@ async def run_vision_recovery_pass(
         settings.stage_a_vision_failed_tolerance,
     )
     if residual_count > settings.stage_a_vision_failed_tolerance:
-        from platform_service.workers.stage_a_extract import Stage1RecoveryFailedError
-
         raise Stage1RecoveryFailedError(
             failed_page_numbers=[p.page_number for p in residual],
             tolerance=settings.stage_a_vision_failed_tolerance,

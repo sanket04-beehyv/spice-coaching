@@ -40,6 +40,7 @@ from platform_service.db.repositories.module_candidate_repository import (
     ModuleCandidateRepository,
 )
 from platform_service.db.repositories.source_repository import SourceRepository
+from platform_service.localized import candidate_description_localized
 from platform_service.services.corpus_partitioner import (
     chunk_by_token_budget,
     dedup_and_flag_cross_chunk,
@@ -148,6 +149,16 @@ class StageCResult:
     # Count of candidates flagged for cross-chunk reviewer attention
     # (trigram-similar titles from different chunks).
     cross_chunk_review_count: int = 0
+    ingestion_instructions_present: bool = False
+
+
+def _ingestion_instructions_from_documents(documents: list[Any]) -> str | None:
+    """Return the first non-null ingestion_instructions across loaded documents."""
+    for doc in documents:
+        instructions = getattr(doc, "ingestion_instructions", None)
+        if instructions:
+            return str(instructions)
+    return None
 
 
 class StageCOrchestrator:
@@ -195,6 +206,7 @@ class StageCOrchestrator:
         ) = await self._build_corpus_payload(documents)
         content_domains = {d["content_domain"] for d in page_corpus}
         estimated_tokens = estimate_corpus_tokens(page_corpus)
+        ingestion_instructions = _ingestion_instructions_from_documents(documents)
 
         # Chunk into token-budgeted, content-disjoint slices.
         chunks = chunk_by_token_budget(page_corpus, document_outlines)
@@ -217,6 +229,7 @@ class StageCOrchestrator:
                         page_corpus=chunk.page_corpus,
                         valid_block_ids=valid_block_ids,
                         valid_page_ids=valid_page_ids,
+                        ingestion_instructions=ingestion_instructions,
                     )
                     backfilled = _backfill_empty_block_ids(result.candidates, chunk.page_corpus)
                     return chunk, backfilled
@@ -302,8 +315,7 @@ class StageCOrchestrator:
                 ingestion_run_id=ingestion_run_id,
                 proposed_title=cand["proposed_title"],
                 scope_summary=cand["scope_summary"],
-                description_en=cand.get("description_en"),
-                description_bn=cand.get("description_bn"),
+                description_localized=candidate_description_localized(cand),
                 source_provenance=cand["source_provenance"],
                 estimated_card_count=int(cand["estimated_card_count"]),
                 estimated_quiz_count=int(cand["estimated_quiz_count"]),
@@ -313,6 +325,7 @@ class StageCOrchestrator:
                 previous_practice_summary=cand.get("previous_practice_summary"),
                 current_practice_summary=cand.get("current_practice_summary"),
                 rationale_summary=cand.get("rationale_summary"),
+                ingestion_instruction_rationale=cand.get("ingestion_instruction_rationale"),
             )
 
         logger.info(
@@ -326,6 +339,12 @@ class StageCOrchestrator:
             chunks_attempted,
             flag_counts,
         )
+        if ingestion_instructions and len(raw_candidates) == 0:
+            logger.info(
+                "Stage 2 ingestion_run=%s: ingestion instructions present but "
+                "zero instruction-aligned candidates were produced",
+                ingestion_run_id,
+            )
         return StageCResult(
             ingestion_run_id=ingestion_run_id,
             candidates_emitted=len(raw_candidates),
@@ -336,6 +355,7 @@ class StageCOrchestrator:
             chunks_succeeded=chunks_succeeded,
             chunks_failed=chunks_failed,
             cross_chunk_review_count=cross_chunk_review_count,
+            ingestion_instructions_present=ingestion_instructions is not None,
         )
 
     # ── Internal helpers ────────────────────────────────────────────────
@@ -380,7 +400,7 @@ class StageCOrchestrator:
             {
                 "module_code": code,
                 "module_family_id": str(mod.module_family_id),
-                "title_bn": mod.title_bn,
+                "title_localized": mod.title_localized,
                 "domain": mod.domain,
                 "module_type": mod.module_type,
             }

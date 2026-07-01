@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.module_family import ModuleFamily
+from platform_service.services.assessment_patient_match import MATCH_REQUIRED_FIELDS
 from platform_service.services.prompts.trigger_predicate_schemas import (
     VALID_TRIGGER_KINDS,
     schema_for,
@@ -118,6 +119,87 @@ def validate_predicate_shape(trigger_kind: str, predicate: dict[str, Any]) -> No
                 "enum_violation",
                 key,
                 f"predicate field {key!r} must be one of {sorted(allowed_values)}, got {predicate[key]!r}",
+            )
+
+    if trigger_kind == "workflow_event":
+        _validate_workflow_event_filter_predicate(predicate)
+
+
+def _validate_workflow_event_filter_predicate(predicate: dict[str, Any]) -> None:
+    filter_predicate = predicate.get("filter_predicate")
+    if filter_predicate is None:
+        return
+    if not isinstance(filter_predicate, dict):
+        raise PredicateError(
+            "wrong_type",
+            "filter_predicate",
+            "filter_predicate must be a JSON object",
+        )
+    event_code = predicate.get("spice_event_code")
+    assessment_topic = filter_predicate.get("assessment_topic")
+    if event_code != "assessment_due" and "assessment_topic" not in filter_predicate:
+        return
+    if not isinstance(assessment_topic, str) or not assessment_topic.strip():
+        raise PredicateError(
+            "missing_required_field",
+            "filter_predicate.assessment_topic",
+            "filter_predicate missing non-empty assessment_topic",
+        )
+    match = filter_predicate.get("match")
+    if match is None:
+        return
+    if not isinstance(match, dict):
+        raise PredicateError(
+            "wrong_type",
+            "filter_predicate.match",
+            "filter_predicate.match must be a JSON object",
+        )
+    for key in match:
+        if key not in MATCH_REQUIRED_FIELDS:
+            raise PredicateError(
+                "unknown_field",
+                f"filter_predicate.match.{key}",
+                f"unknown match field {key!r}",
+            )
+    for key in MATCH_REQUIRED_FIELDS:
+        if key not in match:
+            raise PredicateError(
+                "missing_required_field",
+                f"filter_predicate.match.{key}",
+                f"match missing required field {key!r}",
+            )
+    list_fields = (
+        "encounter_type_any",
+        "reason_any",
+        "diagnosis_any",
+        "patient_status_any",
+        "reason_display_any",
+        "appointment_type_any",
+        "encounter_name_any",
+        "encounter_program_any",
+    )
+    for key in list_fields:
+        value = match[key]
+        if not isinstance(value, list):
+            raise PredicateError(
+                "wrong_type",
+                f"filter_predicate.match.{key}",
+                f"match field {key!r} must be a list",
+            )
+        for item in value:
+            if not isinstance(item, str):
+                raise PredicateError(
+                    "wrong_type",
+                    f"filter_predicate.match.{key}",
+                    f"match field {key!r} must contain only strings",
+                )
+    for key in ("is_pregnant", "max_age", "min_age"):
+        value = match[key]
+        if value is not None and not isinstance(value, bool if key == "is_pregnant" else int):
+            raise PredicateError(
+                "wrong_type",
+                f"filter_predicate.match.{key}",
+                f"match field {key!r} has invalid type",
             )
 
 

@@ -9,6 +9,7 @@ import base64
 import pytest
 from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import (
+    _MAX_BASE64_CHARS,
     GenerationConstraints,
     InferenceImage,
     InferenceRequest,
@@ -16,6 +17,8 @@ from mc_contracts.internal_ai import (
     ModelPolicy,
     PromptSpec,
     TokenUsage,
+    TraceContext,
+    TranscribeRequest,
 )
 from pydantic import ValidationError
 
@@ -23,12 +26,6 @@ from pydantic import ValidationError
 
 
 class TestGenerationTypeEnum:
-    def test_legacy_v1_types_present(self) -> None:
-        assert GenerationType.COUNSELLING.value == "counselling"
-        assert GenerationType.IT_HELP.value == "it_help"
-        assert GenerationType.EXTRACTION.value == "extraction"
-        assert GenerationType.QUIZ.value == "quiz"
-
     def test_v33_pipeline_types_present(self) -> None:
         assert GenerationType.OUTLINE_INFERENCE.value == "outline_inference"
         assert GenerationType.MODULE_IDENTIFICATION.value == "module_identification"
@@ -38,6 +35,8 @@ class TestGenerationTypeEnum:
         assert GenerationType.DISTRACTOR_CRITIQUE.value == "distractor_critique"
         assert GenerationType.BILINGUAL_TRANSLATION.value == "bilingual_translation"
         assert GenerationType.VISION_EXTRACTION.value == "vision_extraction"
+        assert GenerationType.MODULE_SEARCH_METADATA.value == "module_search_metadata"
+        assert GenerationType.CARD_SEARCH_METADATA.value == "card_search_metadata"
 
     def test_enum_round_trip_through_str(self) -> None:
         for gt in GenerationType:
@@ -137,8 +136,8 @@ class TestInferenceRequestImages:
         assert rebuilt.image_attachments[0].data_base64 == "ZGF0YQ=="
 
     def test_text_only_request_unchanged(self) -> None:
-        """Existing text-only callers (legacy generation types) keep working."""
-        req = _make_minimal_request(generation_type=GenerationType.COUNSELLING)
+        """Text-only generation types keep working without image attachments."""
+        req = _make_minimal_request(generation_type=GenerationType.COACHING_RAG)
         assert req.image_attachments == []
         # Round-trip preserves empty list
         rebuilt = InferenceRequest.model_validate_json(req.model_dump_json())
@@ -150,8 +149,6 @@ class TestInferenceRequestImages:
 
 class TestTraceContextV33:
     def test_pipeline_fields_optional(self) -> None:
-        from mc_contracts.internal_ai import TraceContext
-
         tc = TraceContext()
         assert tc.ingestion_run_id is None
         assert tc.ingestion_run_step_id is None
@@ -159,8 +156,6 @@ class TestTraceContextV33:
         assert tc.module_candidate_id is None
 
     def test_pipeline_fields_round_trip(self) -> None:
-        from mc_contracts.internal_ai import TraceContext
-
         tc = TraceContext(
             ingestion_run_id="run-1",
             ingestion_run_step_id="step-3",
@@ -206,7 +201,7 @@ class TestInferenceResponseParsedJson:
     def test_parsed_json_accepts_none(self) -> None:
         resp = InferenceResponse(
             request_id="r",
-            generation_type=GenerationType.IT_HELP,
+            generation_type=GenerationType.COACHING_RAG,
             provider="google",
             model="gemini-2.5-flash",
             raw_text="hi",
@@ -218,8 +213,5 @@ class TestInferenceResponseParsedJson:
 
 class TestInternalAiPayloadLimits:
     def test_transcribe_request_rejects_oversized_base64(self) -> None:
-        from mc_contracts.internal_ai import _MAX_BASE64_CHARS, TranscribeRequest
-        from pydantic import ValidationError
-
         with pytest.raises(ValidationError):
             TranscribeRequest(data_base64="A" * (_MAX_BASE64_CHARS + 1), mime_type="audio/mpeg")

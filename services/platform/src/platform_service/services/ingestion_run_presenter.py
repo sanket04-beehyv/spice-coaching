@@ -146,6 +146,7 @@ class IngestionRunPresenter:
                 estimated_card_count=c.estimated_card_count,
                 estimated_quiz_count=c.estimated_quiz_count,
                 quality_flags=c.quality_flags_jsonb,
+                ingestion_instruction_rationale=c.ingestion_instruction_rationale,
             )
             for c in await self._candidate_repo.list_candidates_for_run(run.id)
         ]

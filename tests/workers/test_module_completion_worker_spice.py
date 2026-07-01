@@ -208,3 +208,32 @@ async def test_spice_action_observed_duplicate_uuid_event_id_is_idempotent(
     )
     state = r.scalar_one()
     assert state.occurrence_count == 1
+
+
+@pytest.mark.asyncio
+@requires_db
+async def test_spice_action_observed_skipped_when_quiz_telemetry_mode(
+    patch_session_local,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        module_completion_worker.get_settings(),
+        "telemetry_behavioural_gap_state_enabled",
+        False,
+    )
+    gap = await _make_gap(db_session)
+    chw = _test_chw_id()
+    await module_completion_worker.process_module_event_job(
+        {
+            "event_type": "spice_action_observed",
+            "event_id": "evt-spice-skip",
+            "chw_id": str(chw),
+            "payload_json": {
+                "kind": "assessment_submitted",
+                "behavioural_gap_id": str(gap.id),
+            },
+        }
+    )
+    r = await db_session.execute(select(CHWBehaviouralGapState))
+    assert r.first() is None

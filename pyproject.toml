@@ -35,8 +35,9 @@ markers = [
 dev = [
     "microcoaching-platform",
     "ai-runtime",
-    "pytest>=8.4.2,<9.0.0",
+    "pytest>=9.0.3,<10.0.0",
     "pytest-asyncio>=1.2.0,<2.0.0",
+    "pytest-cov>=6.0.0,<7.0.0",
     "httpx>=0.28.1,<0.29.0",
     "aiosqlite>=0.20.0",
     "python-dotenv>=1.0.0",
@@ -45,6 +46,10 @@ dev = [
     "pip-audit>=2.9.0,<3.0.0",
     "pyright>=1.1.400,<2.0.0",
 ]
+
+[tool.coverage.run]
+source = ["services/platform/src/platform_service", "services/ai-runtime/src/ai_runtime"]
+omit = ["*/tests/*"]
 
 [tool.ruff]
 line-length = 110

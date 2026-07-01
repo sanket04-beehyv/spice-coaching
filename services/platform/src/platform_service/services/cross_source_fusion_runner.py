@@ -18,7 +18,7 @@ glue needed to make fusion an end-to-end operation:
    source (drafter v2's cross-source coverage rule, see
    card_drafter_prompt.py).
 5. Retire constituent modules: for every constituent candidate id,
-   find the published module whose `title_en` matches the candidate's
+   find the published module whose primary-locale title matches the candidate's
    `proposed_title` AND whose `source_document_ids` overlaps the
    candidate's source — set `lifecycle_status = 'retired'`. The
    Android client filters on `published`, so retired constituents
@@ -39,7 +39,6 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.base import SessionLocal
@@ -47,6 +46,7 @@ from platform_service.db.repositories.module_candidate_repository import (
     ModuleCandidateRepository,
 )
 from platform_service.services.cross_source_fuser import CrossSourceFuser, CrossSourceFuserResult, FusionGroup
+from platform_service.services.fusion_candidate_loader import load_fusion_candidates
 from platform_service.services.fusion_draft_orchestrator import FusionDraftOrchestrator
 from platform_service.services.fusion_retire_policy import FusionRetirePolicy
 from platform_service.services.run_state_service import (
@@ -415,44 +415,7 @@ class CrossSourceFusionRunner:
     ) -> list[dict[str, Any]]:
         db = session or self._session
         assert db is not None
-        """For each source_document_id, find its latest ingestion run
-        whose status is in (succeeded, partially_succeeded) AND whose
-        error_jsonb does NOT mark it as a cross_source_fusion run
-        (those are fusion outputs, not source candidates). Pull every
-        candidate from those runs."""
-        rows = (
-            (
-                await db.execute(
-                    text("""
-                    WITH latest_run AS (
-                        SELECT DISTINCT ON (source_document_id)
-                               id, source_document_id
-                        FROM ingestion_run
-                        WHERE source_document_id = ANY(:doc_ids)
-                          AND status IN ('succeeded', 'partially_succeeded')
-                          AND COALESCE(error_jsonb->>'type', '') != 'cross_source_fusion'
-                        ORDER BY source_document_id, started_at DESC
-                    )
-                    SELECT d.id::text                       AS id,
-                           lr.source_document_id::text      AS source_document_id,
-                           d.proposed_title                 AS proposed_title,
-                           d.scope_summary                  AS scope_summary,
-                           d.proposed_module_type           AS proposed_module_type,
-                           d.estimated_card_count           AS estimated_card_count,
-                           d.estimated_quiz_count           AS estimated_quiz_count,
-                           d.source_provenance_jsonb        AS source_provenance,
-                           d.quality_flags_jsonb            AS quality_flags
-                    FROM module_candidate_draft d
-                    JOIN latest_run lr ON lr.id = d.ingestion_run_id
-                    ORDER BY lr.source_document_id, d.created_at
-                """),
-                    {"doc_ids": [str(d) for d in doc_ids]},
-                )
-            )
-            .mappings()
-            .all()
-        )
-        return [dict(r) for r in rows]
+        return await load_fusion_candidates(db, doc_ids)
 
     async def _persist_fused_candidate(
         self,

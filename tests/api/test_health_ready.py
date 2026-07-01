@@ -6,7 +6,9 @@ from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from platform_service.config import get_settings
 from platform_service.main import create_app
 
 from tests.conftest import platform_path, requires_db
@@ -14,24 +16,23 @@ from tests.conftest import platform_path, requires_db
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
-async def client() -> AsyncIterator[AsyncClient]:
+@pytest_asyncio.fixture
+async def health_client() -> AsyncIterator[AsyncClient]:
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
 
-@pytest.mark.asyncio
-async def test_health_returns_ok(client: AsyncClient) -> None:
-    resp = await client.get(platform_path("/health"))
+async def test_health_returns_ok(health_client: AsyncClient) -> None:
+    resp = await health_client.get(platform_path("/health"))
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
     assert "service" in body
 
 
-@pytest.mark.asyncio
-async def test_ready_returns_ok_when_dependencies_healthy(client: AsyncClient) -> None:
+async def test_ready_returns_ok_when_dependencies_healthy(health_client: AsyncClient) -> None:
     ch_mock = MagicMock()
     ch_mock.query_rows = AsyncMock(return_value=[(1,)])
     storage_mock = MagicMock()
@@ -42,8 +43,6 @@ async def test_ready_returns_ok_when_dependencies_healthy(client: AsyncClient) -
         patch("platform_service.main.get_object_storage_client", return_value=storage_mock),
         patch("platform_service.main.httpx.AsyncClient") as httpx_cls,
     ):
-        from platform_service.config import get_settings
-
         ai_client = AsyncMock()
         ai_resp = MagicMock()
         ai_resp.raise_for_status = MagicMock()
@@ -53,7 +52,7 @@ async def test_ready_returns_ok_when_dependencies_healthy(client: AsyncClient) -
         ai_client.__aexit__ = AsyncMock(return_value=None)
         httpx_cls.return_value = ai_client
 
-        resp = await client.get(platform_path("/ready"))
+        resp = await health_client.get(platform_path("/ready"))
 
     assert resp.status_code == 200
     body = resp.json()
