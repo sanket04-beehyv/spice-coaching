@@ -32,7 +32,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from platform_service.config import get_settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -159,8 +158,6 @@ class TestModuleColumnsAdded:
         assert col["data_type"] == "USER-DEFINED"
         assert col["udt_name"] == "vector"
         assert col["is_nullable"] == "YES"
-        # Verify the dimension matches `settings.embedding_dimension`.
-        expected_dim = get_settings().embedding_dimension
         # pg_attribute records the typmod for vector(N); we read it via
         # `format_type` which prints the dim into the type string.
         formatted = (

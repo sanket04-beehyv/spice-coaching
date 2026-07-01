@@ -341,7 +341,9 @@ async def _run_post_publish_inproc(
             vec = embed_vector if embed_vector is not None else [0.1] * dim
             return [vec]
 
-    with patch("platform_service.workers.quiz_generation_worker.get_ai_client", return_value=_QuizClientStub()):
+    with patch(
+        "platform_service.workers.quiz_generation_worker.get_ai_client", return_value=_QuizClientStub()
+    ):
         try:
             await generate_quiz_for_module(module_id)
         except Exception:  # noqa: BLE001 — workers must not propagate

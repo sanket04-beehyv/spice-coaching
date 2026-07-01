@@ -9,9 +9,9 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from platform_service.config import Settings
-from platform_service.services.object_storage import PresignedObjectUrl
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
+from platform_service.services.object_storage import PresignedObjectUrl
 from platform_service.services.sync_service import SyncService
 from sqlalchemy.ext.asyncio import AsyncSession
 

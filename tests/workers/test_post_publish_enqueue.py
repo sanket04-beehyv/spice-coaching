@@ -92,7 +92,9 @@ class TestEnqueuePostPublishSteps:
         with (
             patch("platform_service.services.draft_pipeline.generate_module_quiz_task", mock_quiz),
             patch("platform_service.services.draft_pipeline.generate_module_embedding_task", mock_embed),
-            patch("platform_service.services.draft_pipeline.generate_module_search_metadata_task", mock_metadata),
+            patch(
+                "platform_service.services.draft_pipeline.generate_module_search_metadata_task", mock_metadata
+            ),
             patch(
                 "platform_service.services.draft_pipeline.generate_module_card_search_metadata_batch_task",
                 mock_card_batch,
@@ -146,7 +148,9 @@ class TestEnqueuePostPublishSteps:
         with (
             patch("platform_service.services.draft_pipeline.generate_module_quiz_task", mock_quiz),
             patch("platform_service.services.draft_pipeline.generate_module_embedding_task", mock_embed),
-            patch("platform_service.services.draft_pipeline.generate_module_search_metadata_task", mock_metadata),
+            patch(
+                "platform_service.services.draft_pipeline.generate_module_search_metadata_task", mock_metadata
+            ),
             patch(
                 "platform_service.services.draft_pipeline.generate_module_card_search_metadata_batch_task",
                 mock_card_batch,
@@ -195,7 +199,9 @@ class TestEnqueuePostPublishSteps:
         with (
             patch("platform_service.services.draft_pipeline.generate_module_quiz_task", mock_quiz),
             patch("platform_service.services.draft_pipeline.generate_module_embedding_task", mock_embed),
-            patch("platform_service.services.draft_pipeline.generate_module_search_metadata_task", mock_metadata),
+            patch(
+                "platform_service.services.draft_pipeline.generate_module_search_metadata_task", mock_metadata
+            ),
             patch(
                 "platform_service.services.draft_pipeline.generate_module_card_search_metadata_batch_task",
                 mock_card_batch,
