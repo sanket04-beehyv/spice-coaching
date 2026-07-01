@@ -76,7 +76,11 @@ async def _seed_run_and_candidate(
 
 
 class TestEnqueuePostPublishSteps:
-    async def test_creates_quiz_and_embedding_steps(self, db_session: AsyncSession) -> None:
+    async def test_creates_quiz_and_embedding_steps(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("POST_PUBLISH_GAP_CLASSIFICATION_ENABLED", "true")
+        get_settings.cache_clear()
         stage_d, run, cand, sd = await _seed_run_and_candidate(db_session)
         module_id = uuid4()
         mock_quiz = MagicMock()
@@ -86,14 +90,14 @@ class TestEnqueuePostPublishSteps:
         mock_card_batch = MagicMock()
 
         with (
-            patch("platform_service.celery_tasks.generate_module_quiz_task", mock_quiz),
-            patch("platform_service.celery_tasks.generate_module_embedding_task", mock_embed),
-            patch("platform_service.celery_tasks.generate_module_search_metadata_task", mock_metadata),
+            patch("platform_service.services.draft_pipeline.generate_module_quiz_task", mock_quiz),
+            patch("platform_service.services.draft_pipeline.generate_module_embedding_task", mock_embed),
+            patch("platform_service.services.draft_pipeline.generate_module_search_metadata_task", mock_metadata),
             patch(
-                "platform_service.celery_tasks.generate_module_card_search_metadata_batch_task",
+                "platform_service.services.draft_pipeline.generate_module_card_search_metadata_batch_task",
                 mock_card_batch,
             ),
-            patch("platform_service.celery_tasks.classify_module_gaps_task", mock_gap),
+            patch("platform_service.services.draft_pipeline.classify_module_gaps_task", mock_gap),
         ):
             await stage_d._enqueue_post_publish(
                 module_id,
@@ -126,7 +130,11 @@ class TestEnqueuePostPublishSteps:
         assert run_row is not None
         assert run_row.status == RUN_RUNNING
 
-    async def test_read_only_skips_quiz_step(self, db_session: AsyncSession) -> None:
+    async def test_read_only_skips_quiz_step(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("POST_PUBLISH_GAP_CLASSIFICATION_ENABLED", "true")
+        get_settings.cache_clear()
         stage_d, run, cand, sd = await _seed_run_and_candidate(db_session, assessment_mode="read_only")
         module_id = uuid4()
         mock_quiz = MagicMock()
@@ -136,14 +144,14 @@ class TestEnqueuePostPublishSteps:
         mock_card_batch = MagicMock()
 
         with (
-            patch("platform_service.celery_tasks.generate_module_quiz_task", mock_quiz),
-            patch("platform_service.celery_tasks.generate_module_embedding_task", mock_embed),
-            patch("platform_service.celery_tasks.generate_module_search_metadata_task", mock_metadata),
+            patch("platform_service.services.draft_pipeline.generate_module_quiz_task", mock_quiz),
+            patch("platform_service.services.draft_pipeline.generate_module_embedding_task", mock_embed),
+            patch("platform_service.services.draft_pipeline.generate_module_search_metadata_task", mock_metadata),
             patch(
-                "platform_service.celery_tasks.generate_module_card_search_metadata_batch_task",
+                "platform_service.services.draft_pipeline.generate_module_card_search_metadata_batch_task",
                 mock_card_batch,
             ),
-            patch("platform_service.celery_tasks.classify_module_gaps_task", mock_gap),
+            patch("platform_service.services.draft_pipeline.classify_module_gaps_task", mock_gap),
         ):
             await stage_d._enqueue_post_publish(
                 module_id,
@@ -180,17 +188,19 @@ class TestEnqueuePostPublishSteps:
         mock_card_batch = MagicMock()
 
         settings = get_settings()
-        monkeypatch.setattr(settings, "post_publish_search_metadata_enabled", False)
+        monkeypatch.setenv("POST_PUBLISH_SEARCH_METADATA_ENABLED", "false")
+        get_settings.cache_clear()
+        settings = get_settings()
 
         with (
-            patch("platform_service.celery_tasks.generate_module_quiz_task", mock_quiz),
-            patch("platform_service.celery_tasks.generate_module_embedding_task", mock_embed),
-            patch("platform_service.celery_tasks.generate_module_search_metadata_task", mock_metadata),
+            patch("platform_service.services.draft_pipeline.generate_module_quiz_task", mock_quiz),
+            patch("platform_service.services.draft_pipeline.generate_module_embedding_task", mock_embed),
+            patch("platform_service.services.draft_pipeline.generate_module_search_metadata_task", mock_metadata),
             patch(
-                "platform_service.celery_tasks.generate_module_card_search_metadata_batch_task",
+                "platform_service.services.draft_pipeline.generate_module_card_search_metadata_batch_task",
                 mock_card_batch,
             ),
-            patch("platform_service.celery_tasks.classify_module_gaps_task", mock_gap),
+            patch("platform_service.services.draft_pipeline.classify_module_gaps_task", mock_gap),
             patch("platform_service.services.draft_pipeline.get_settings", lambda: settings),
         ):
             await stage_d._enqueue_post_publish(

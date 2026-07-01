@@ -53,6 +53,16 @@ from tests.conftest import requires_db
 # ─── Pure unit: target quiz size + card block formatter ────────────────────
 
 
+def _card_block(card: dict[str, Any], idx: int) -> str:
+    settings = get_settings()
+    return _format_card_block(
+        card,
+        idx,
+        primary_locale=settings.deployment_primary_locale,
+        settings=settings,
+    )
+
+
 class TestTargetQuizSize:
     def test_one_card_clamps_to_quiz_min(self) -> None:
         s = get_settings()
@@ -76,7 +86,7 @@ class TestTargetQuizSize:
 
 class TestFormatCardBlock:
     def test_includes_only_populated_fields(self) -> None:
-        block = _format_card_block({"title": {"bn": "T"}, "body": {"bn": "B"}}, idx=1)
+        block = _card_block({"title": {"bn": "T"}, "body": {"bn": "B"}}, idx=1)
         assert "### Card 1" in block
         assert "Title (bn): T" in block
         assert "Body (bn): B" in block
@@ -85,7 +95,7 @@ class TestFormatCardBlock:
         assert "Rationale" not in block
 
     def test_includes_all_optional_fields_in_order(self) -> None:
-        block = _format_card_block(
+        block = _card_block(
             {
                 "title": {"bn": "t"},
                 "body": {"bn": "b"},
@@ -101,18 +111,18 @@ class TestFormatCardBlock:
         positions = [
             block.index("Title (bn)"),
             block.index("Body (bn)"),
-            block.index("Next action (bn)"),
-            block.index("Previous practice (bn)"),
-            block.index("Current practice (bn)"),
-            block.index("Rationale (bn)"),
+            block.index("Next Action (bn)"),
+            block.index("Previous Practice (bn)"),
+            block.index("Current Practice (bn)"),
+            block.index("Rationale For Change (bn)"),
         ]
         assert positions == sorted(positions)
 
     def test_card_index_in_header(self) -> None:
-        assert "### Card 7" in _format_card_block({"title": {"bn": "x"}}, idx=7)
+        assert "### Card 7" in _card_block({"title": {"bn": "x"}}, idx=7)
 
     def test_empty_card_only_emits_header(self) -> None:
-        block = _format_card_block({}, idx=1)
+        block = _card_block({}, idx=1)
         assert block.strip() == "### Card 1"
 
 
@@ -210,7 +220,11 @@ def mock_generate(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         async def generate(self, request: InferenceRequest) -> InferenceResponse:
             return await gen_mock(request)
 
-    monkeypatch.setattr("platform_service.workers.quiz_generation_worker.AIRuntimeClient", _StubClient)
+    stub = _StubClient()
+    monkeypatch.setattr(
+        "platform_service.workers.quiz_generation_worker.get_ai_client",
+        lambda: stub,
+    )
     return gen_mock
 
 

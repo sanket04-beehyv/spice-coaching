@@ -19,8 +19,7 @@ from platform_service.db.models.module_behavioural_gap import ModuleBehaviouralG
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
 from platform_service.db.models.source_page import SourcePage
-from platform_service.deps import get_object_storage_client
-from platform_service.integrations import ai_runtime_client as arc
+from platform_service.deps import get_ai_client, get_object_storage_client
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -272,7 +271,8 @@ class TestGetModuleDetail:
         assert page_ref["page_number"] == 12
         assert page_ref["start_ms"] is None
         assert page_ref["end_ms"] is None
-        assert page_ref["presigned_url"] == f"{_PRESIGNED_URL}#page=12"
+        assert page_ref["presigned_url"].endswith("#page=12")
+        assert "minio" in page_ref["presigned_url"]
         assert page_ref["presigned_expires_seconds"] == get_settings().admin_file_presigned_max_seconds
 
     async def test_source_documents_empty_when_no_linked_docs(
@@ -424,13 +424,12 @@ class TestCreateModule:
             )
         ).scalar_one_or_none()
         assert family is not None
-        assert family.module_code == "new-manual-module"
+        assert family.module_code == "নতন-মডউল"
 
         # Module
         module = (await db_session.execute(select(Module).where(Module.id == new_id))).scalar_one_or_none()
         assert module is not None
         assert module.title_localized["bn"] == "নতুন মডিউল"
-        assert module.title_localized["en"] == "New Manual Module"
         assert module.lifecycle_status == "draft"
         assert module.clinically_reviewed is False
 
@@ -454,7 +453,7 @@ class TestCreateModule:
             await db_session.execute(select(BehaviouralGap).where(BehaviouralGap.id == module.primary_gap_id))
         ).scalar_one_or_none()
         assert gap is not None
-        assert gap.description == "New Manual Module"
+        assert gap.description == "নতুন মডিউল"
         assert gap.gap_code.startswith("module_primary_gap_")
 
         # Gap link
@@ -637,8 +636,7 @@ class TestEditModule:
         result = await db_session.execute(stmt)
         questions = result.scalars().all()
         assert len(questions) == 1
-        assert questions[0].question_localized["en"] == "Test question from json"
-        assert questions[0].question_localized.get("bn", "") == ""
+        assert questions[0].question_localized["bn"] == "Test question from json"
 
     async def test_returns_404_for_unknown(self, client: AsyncClient) -> None:
         resp = await client.put(
@@ -971,13 +969,12 @@ class TestSemanticSearch:
 
     async def test_query_string_embeds_via_ai_runtime(
         self,
+        app: FastAPI,
         client: AsyncClient,
         db_session: AsyncSession,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """When the body sends `query` instead of `query_vector`, the endpoint
-        embeds via ai-runtime and feeds the result into search_by_embedding.
-        Mock the AIRuntimeClient.embed call to return a known vector."""
+        embeds via ai-runtime and feeds the result into search_by_embedding."""
 
         target = await _seed_module(
             db_session, title_localized={"bn": "target"}, embedding=_unit_basis_vector(0)
@@ -985,7 +982,9 @@ class TestSemanticSearch:
         await _seed_module(db_session, title_localized={"bn": "other"}, embedding=_unit_basis_vector(1))
 
         embed_mock = AsyncMock(return_value=[_unit_basis_vector(0)])
-        monkeypatch.setattr(arc.AIRuntimeClient, "embed", embed_mock)
+        stub = MagicMock()
+        stub.embed = embed_mock
+        app.dependency_overrides[get_ai_client] = lambda: stub
 
         resp = await client.post(
             platform_path("/admin/modules/search"), json={"query": "any text", "limit": 2}

@@ -52,8 +52,8 @@ class TestSearchMetadataWorker:
         module = await _seed_module(db_session)
         metadata = {
             "schema_version": 1,
-            "keywords": {"en": ["cough"], "bn": []},
-            "search_phrases": {"en": ["child cough"], "bn": []},
+            "keywords": {"bn": ["cough"], "en": []},
+            "search_phrases": {"bn": ["child cough"], "en": []},
             "synonyms": {"en": {}},
             "topic_tags": ["respiratory"],
             "clinical_conditions": [],
@@ -80,7 +80,7 @@ class TestSearchMetadataWorker:
         assert ok is True
         await db_session.refresh(module)
         assert module.search_metadata_jsonb is not None
-        assert module.search_metadata_jsonb["keywords_en"] == ["cough"]
+        assert module.search_metadata_jsonb["keywords"]["bn"] == ["cough"]
         mock_embed.delay.assert_called_once()
 
     async def test_chains_embedding_on_generation_failure(self, db_session: AsyncSession) -> None:
@@ -121,8 +121,8 @@ class TestSearchMetadataWorker:
         module = await _seed_module(db_session)
         metadata = {
             "schema_version": 1,
-            "keywords": {"en": ["cough"], "bn": []},
-            "search_phrases": {"en": ["child cough"], "bn": []},
+            "keywords": {"bn": ["cough"], "en": []},
+            "search_phrases": {"bn": ["child cough"], "en": []},
             "synonyms": {"en": {}},
             "topic_tags": ["respiratory"],
             "clinical_conditions": [],

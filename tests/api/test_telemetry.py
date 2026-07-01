@@ -127,6 +127,7 @@ class TestTelemetryIngest:
                 "platform_service.api.telemetry.partition_for_dedup",
                 side_effect=_pass_through_dedup,
             ),
+            patch("platform_service.api.telemetry.get_clickhouse_client", return_value=ch_mock),
             patch("platform_service.api.telemetry.process_module_event_task") as celery_mock,
             patch.object(
                 get_settings(),
@@ -144,13 +145,21 @@ class TestTelemetryIngest:
         rows = ch_mock.insert_coaching_events.await_args.args[0]
         assert rows[0][_TIMESTAMP_UTC_COLUMN_INDEX] == body["events"][0]["timestamp_local"]
 
-    async def test_quiz_mode_only_enqueues_module_quiz_attempted(self, client: AsyncClient) -> None:
+    async def test_quiz_mode_only_enqueues_module_quiz_attempted(
+        self, app: FastAPI, client: AsyncClient
+    ) -> None:
         redis_mock = AsyncMock()
         redis_mock.aclose = AsyncMock()
+        pipe_mock = MagicMock()
+        pipe_mock.rpush = MagicMock()
+        pipe_mock.ltrim = MagicMock()
+        pipe_mock.execute = AsyncMock(return_value=[])
+        redis_mock.pipeline = MagicMock(return_value=pipe_mock)
         module_id = str(uuid4())
         quiz_id = str(uuid4())
         delivered_id = str(uuid4())
         quiz_event_id = str(uuid4())
+        ch_mock = app.dependency_overrides[get_clickhouse_client]()
         body = {
             "events": [
                 {
@@ -185,6 +194,7 @@ class TestTelemetryIngest:
                 "platform_service.api.telemetry.partition_for_dedup",
                 side_effect=_pass_through_dedup,
             ),
+            patch("platform_service.api.telemetry.get_clickhouse_client", return_value=ch_mock),
             patch("platform_service.api.telemetry.process_module_event_task") as celery_mock,
             patch.object(
                 get_settings(),

@@ -188,7 +188,7 @@ class TestListModules:
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_localized={"bn": "x", "en": f"English {marker} guidance"},
+            title_localized={"bn": f"English {marker} guidance", "en": "x"},
         )
 
         repo = ModuleRepository(db_session)

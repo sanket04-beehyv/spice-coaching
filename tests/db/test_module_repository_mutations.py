@@ -32,7 +32,7 @@ class TestEditModule:
         v1 = await _make_module(db_session, family=fam, title_localized={"bn": "v1 title"}, version=1)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2 title"})
+        v2 = await repo.edit_module(v1.id, title={"bn": "v2 title"})
 
         assert v2.id != v1.id
         assert v2.module_family_id == fam.id
@@ -51,7 +51,7 @@ class TestEditModule:
         v1.clinically_reviewed_by = uuid4()
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_localized={"bn": "new title"})
+        v2 = await repo.edit_module(v1.id, title={"bn": "new title"})
         # New version starts unreviewed regardless of v1's flag.
         assert v2.clinically_reviewed is False
 
@@ -70,7 +70,7 @@ class TestEditModule:
 
         repo = ModuleRepository(db_session)
         # Edit ONLY the title.
-        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"})
+        v2 = await repo.edit_module(v1.id, title={"bn": "v2"})
 
         assert v2.title_localized["bn"] == "v2"
         # Untouched fields copy forward.
@@ -88,37 +88,34 @@ class TestEditModule:
         assert fam.current_published_module_id == v1.id
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"})
+        v2 = await repo.edit_module(v1.id, title={"bn": "v2"})
         await db_session.refresh(fam)
         assert fam.current_published_module_id == v2.id
 
     async def test_edit_unknown_module_raises(self, db_session: AsyncSession) -> None:
         repo = ModuleRepository(db_session)
         with pytest.raises(ModuleNotFoundError):
-            await repo.edit_module(uuid4(), title_localized={"bn": "x"})
+            await repo.edit_module(uuid4(), title={"bn": "x"})
 
     async def test_previous_version_is_retired_on_edit(self, db_session: AsyncSession) -> None:
-        """Without retiring v1, the dashboard's default `?status=published`
-        list returns BOTH versions for one family (B1 review finding)."""
+        """Edits create a new draft version; the prior published row stays published."""
         fam = await _make_family(db_session)
         v1 = await _make_module(db_session, family=fam, title_localized={"bn": "v1"})
         assert v1.lifecycle_status == "published"
         assert v1.deprecated_at is None
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"})
+        v2 = await repo.edit_module(v1.id, title={"bn": "v2"})
         await db_session.refresh(v1)
 
-        assert v1.lifecycle_status == "retired"
-        assert v1.deprecated_at is not None
-        # New version is published.
-        assert v2.lifecycle_status == "published"
+        assert v1.lifecycle_status == "published"
+        assert v1.deprecated_at is None
+        assert v2.lifecycle_status == "draft"
 
-        # Default list (status=None → excludes retired) returns ONLY v2.
-        published = await repo.list_modules()
+        published = await repo.list_modules(status="published")
         ids = [m.id for m in published]
-        assert v2.id in ids
-        assert v1.id not in ids
+        assert v1.id in ids
+        assert v2.id not in ids
 
     async def test_edit_retired_module_raises(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
@@ -126,7 +123,7 @@ class TestEditModule:
 
         repo = ModuleRepository(db_session)
         with pytest.raises(ModuleNotFoundError):
-            await repo.edit_module(m.id, title_localized={"bn": "post-retire"})
+            await repo.edit_module(m.id, title={"bn": "post-retire"})
 
     async def test_edit_replaces_module_json_when_provided(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
@@ -158,7 +155,7 @@ class TestEditModule:
         await gap_repo.replace_links(v1.id, gap_ids=[gap_a.id, gap_b.id], primary_gap_id=gap_a.id)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"})
+        v2 = await repo.edit_module(v1.id, title={"bn": "v2"})
 
         v2_gap_ids = await gap_repo.get_gap_ids(v2.id)
         assert set(v2_gap_ids) == {gap_a.id, gap_b.id}
@@ -171,7 +168,7 @@ class TestEditModule:
         v1 = await _make_module(db_session, family=fam, thumbnail_storage_path=thumb)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"})
+        v2 = await repo.edit_module(v1.id, title={"bn": "v2"})
 
         assert v2.thumbnail_storage_path == thumb
 
@@ -181,7 +178,7 @@ class TestEditModule:
         v1 = await _make_module(db_session, family=fam, thumbnail_storage_path=thumb)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"}, thumbnail_storage_path=None)
+        v2 = await repo.edit_module(v1.id, title={"bn": "v2"}, thumbnail_storage_path=None)
 
         assert v2.thumbnail_storage_path is None
 
@@ -192,7 +189,7 @@ class TestEditModule:
         v1 = await _make_module(db_session, family=fam, thumbnail_storage_path=old_thumb)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title_localized={"bn": "v2"}, thumbnail_storage_path=new_thumb)
+        v2 = await repo.edit_module(v1.id, title={"bn": "v2"}, thumbnail_storage_path=new_thumb)
 
         assert v2.thumbnail_storage_path == new_thumb
 

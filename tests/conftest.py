@@ -78,6 +78,21 @@ def _align_database_url_with_test_url() -> Iterator[None]:
     yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _disable_spice_auth_for_tests(_align_database_url_with_test_url: None) -> Iterator[None]:
+    """Most API/worker tests build minimal apps without SPICE JWT headers."""
+    os.environ["SPICE_AUTH_ENABLED"] = "false"
+    try:
+        get_settings.cache_clear()
+    except Exception:
+        pass
+    yield
+    try:
+        get_settings.cache_clear()
+    except Exception:
+        pass
+
+
 @pytest.fixture(scope="session")
 def test_db_url() -> str:
     url = os.environ.get("DATABASE_URL_TEST")

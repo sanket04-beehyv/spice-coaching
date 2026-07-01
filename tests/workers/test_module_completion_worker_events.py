@@ -12,6 +12,7 @@ from platform_service.services.learning_points_thresholds import (
     learning_points_delta_for_event,
 )
 from platform_service.workers import module_completion_worker
+from platform_service.workers.module_completion_worker import ModuleNotFoundForEventError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -150,13 +151,13 @@ async def test_invalid_chw_id_drops_event(patch_session_local, db_session: Async
 @pytest.mark.asyncio
 @requires_db
 async def test_unknown_module_id_drops_event(patch_session_local, db_session: AsyncSession) -> None:
-    await module_completion_worker.process_module_event_job(
-        {
-            "event_type": "module_quiz_attempted",
-            "chw_id": _test_chw_id(),
-            "module_id": str(uuid4()),  # not in DB
-            "quiz_score_pct": 0.9,
-        }
-    )
-    r = await db_session.execute(select(CHWModuleCompletion))
-    assert r.first() is None
+    with pytest.raises(ModuleNotFoundForEventError):
+        await module_completion_worker.process_module_event_job(
+            {
+                "event_type": "module_quiz_attempted",
+                "event_id": str(uuid4()),
+                "chw_id": _test_chw_id(),
+                "module_id": str(uuid4()),  # not in DB
+                "quiz_score_pct": 0.9,
+            }
+        )

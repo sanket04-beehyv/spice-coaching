@@ -77,6 +77,8 @@ class _FakeAttachmentStorage:
         object_name: str,
         expires_seconds: int,
         disposition: str = "auto",
+        download_filename: str | None = None,
+        **kwargs: object,
     ) -> PresignedObjectUrl:
         return PresignedObjectUrl(
             url=f"https://minio.test/{object_name}?exp={expires_seconds}",

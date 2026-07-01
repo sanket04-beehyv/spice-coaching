@@ -145,7 +145,7 @@ class TestClassifyModuleGapsWorker:
         client.generate = AsyncMock(return_value=_inference_response(gap_codes=["referral_cbs"]))
 
         with patch(
-            "platform_service.services.module_gap_classifier.AIRuntimeClient",
+            "platform_service.services.module_gap_classifier.get_ai_client",
             return_value=client,
         ):
             count = await classify_module_gaps_for_module(module.id)

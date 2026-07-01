@@ -161,7 +161,7 @@ def _draft_response(*, cards: list[dict] | None = None, insufficient: str | None
 def _card(idx: int = 0) -> dict[str, Any]:
     return {
         "title": {"bn": f"কার্ড {idx}", "en": f"Card {idx}" * 5},
-        "body": {"bn": "মূল বিষয় এবং পরবর্তী পদক্ষেপ। "} * 5,
+        "body": {"bn": "মূল বিষয় এবং পরবর্তী পদক্ষেপ। " * 5},
         "next_action": {"bn": "পরবর্তী পদক্ষেপ নিন।"},
         "source_block_ids": [str(uuid4())],
     }
@@ -341,13 +341,13 @@ async def _run_post_publish_inproc(
             vec = embed_vector if embed_vector is not None else [0.1] * dim
             return [vec]
 
-    with patch("platform_service.workers.quiz_generation_worker.AIRuntimeClient", _QuizClientStub):
+    with patch("platform_service.workers.quiz_generation_worker.get_ai_client", return_value=_QuizClientStub()):
         try:
             await generate_quiz_for_module(module_id)
         except Exception:  # noqa: BLE001 — workers must not propagate
             pass
 
-    with patch("platform_service.workers.embedding_worker.AIRuntimeClient", _EmbedClientStub):
+    with patch("platform_service.workers.embedding_worker.get_ai_client", return_value=_EmbedClientStub()):
         try:
             await generate_embedding_for_module(module_id)
         except Exception:  # noqa: BLE001
@@ -371,8 +371,8 @@ async def _run_post_publish_inproc(
             return gap_resp
 
     with patch(
-        "platform_service.services.module_gap_classifier.AIRuntimeClient",
-        _GapClientStub,
+        "platform_service.services.module_gap_classifier.get_ai_client",
+        return_value=_GapClientStub(),
     ):
         try:
             await classify_module_gaps_for_module(module_id)

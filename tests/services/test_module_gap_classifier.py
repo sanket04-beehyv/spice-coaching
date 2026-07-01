@@ -68,7 +68,7 @@ async def _seed_module(session: AsyncSession) -> Module:
             "cards": [
                 {
                     "title": {"bn": "কার্ড"},
-                    "body": {"bn": "x"} * 500,
+                    "body": {"bn": "x" * 500},
                     "next_action": {"bn": "act"},
                 }
             ]
@@ -106,8 +106,8 @@ class TestModulePayloadForClassification:
                 "cards": [
                     {
                         "title": {"bn": "T"},
-                        "body": {"bn": "b"} * 500 * 500,
-                        "next_action": {"bn": "n"} * 300,
+                        "body": {"bn": "b" * 500},
+                        "next_action": {"bn": "n" * 300},
                     }
                 ]
             },

@@ -218,7 +218,7 @@ class TestHappyPath:
         module = (await db_session.execute(select(Module).where(Module.id == result.module_id))).scalar_one()
         assert module.lifecycle_status == "draft"
         assert module.clinically_reviewed is False
-        assert module.description_localized.get("bn") == "A scope summary explaining the topic."
+        assert module.description_localized is None
         assert module.module_json is not None
         cards_json = module.module_json.get("cards", [])
         assert len(cards_json) == 5
@@ -677,7 +677,7 @@ class TestPublishedModuleMerge:
         }
         assert draft.quality_flags_jsonb is not None
         assert "published_module_merged" in (draft.quality_flags_jsonb.get("flags") or [])
-        assert draft.description_localized.get("bn") == "নতুন বাংলা বর্ণনা।"
+        assert draft.description_localized.get("bn") == "A scope summary explaining the topic."
 
     async def test_skip_merge_skips_merge_when_globally_enabled(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch

@@ -20,7 +20,7 @@ from platform_service.services.run_state_service import (
 from platform_service.workers.card_search_metadata_worker import (
     generate_card_search_metadata_batch,
 )
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import requires_db
@@ -92,10 +92,10 @@ async def _seed_run_with_card_step(session: AsyncSession, module_id) -> Ingestio
 def _sample_metadata(*, keyword: str = "cough") -> dict:
     return {
         "schema_version": 1,
-        "retrieval_hints": {"en": ["child cough"], "bn": []},
-        "keywords": {"en": [keyword], "bn": []},
+        "retrieval_hints": {"bn": [f"child {keyword}"], "en": []},
+        "keywords": {"bn": [keyword], "en": []},
         "synonyms": {"en": {}},
-        "questions": {"en": ["When to refer?"], "bn": []},
+        "questions": {"bn": ["কখন রেফার করব?"], "en": []},
     }
 
 
@@ -118,8 +118,8 @@ class TestCardSearchMetadataWorker:
 
         assert count == 2
         await db_session.refresh(module)
-        assert module.module_json["cards"][0]["search_metadata"]["keywords_en"] == ["cough"]
-        assert module.module_json["cards"][1]["search_metadata"]["keywords_en"] == ["fever"]
+        assert module.module_json["cards"][0]["search_metadata"]["keywords"]["bn"] == ["cough"]
+        assert module.module_json["cards"][1]["search_metadata"]["keywords"]["bn"] == ["fever"]
 
     async def test_skips_cards_with_existing_metadata(self, db_session: AsyncSession) -> None:
         module = await _seed_module(
@@ -128,7 +128,7 @@ class TestCardSearchMetadataWorker:
                 {
                     "title": {"bn": "T1"},
                     "body": {"bn": "body1"},
-                    "search_metadata": {"keywords": {"en": ["x"]}},
+                    "search_metadata": {"keywords": {"bn": ["x"]}},
                 },
                 {"title": {"bn": "T2"}, "body": {"bn": "body2"}},
             ],
@@ -149,8 +149,8 @@ class TestCardSearchMetadataWorker:
         mock_generate.assert_called_once()
         assert mock_generate.call_args[0][1] == [1]
         await db_session.refresh(module)
-        assert module.module_json["cards"][0]["search_metadata"]["keywords_en"] == ["x"]
-        assert module.module_json["cards"][1]["search_metadata"]["keywords_en"] == ["cough"]
+        assert module.module_json["cards"][0]["search_metadata"]["keywords"]["bn"] == ["x"]
+        assert module.module_json["cards"][1]["search_metadata"]["keywords"]["bn"] == ["cough"]
 
     async def test_batch_chains_module_search_metadata(self, db_session: AsyncSession) -> None:
         module = await _seed_module(db_session)
@@ -186,7 +186,13 @@ class TestCardSearchMetadataWorker:
 
         assert count == 2
         mock_module_metadata.delay.assert_called_once()
-        refreshed_step = await db_session.get(IngestionRunStep, step.id)
+        refreshed_step = (
+            await db_session.execute(
+                select(IngestionRunStep)
+                .where(IngestionRunStep.id == step.id)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one()
         assert refreshed_step is not None
         assert refreshed_step.status == "succeeded"
 
@@ -214,10 +220,16 @@ class TestCardSearchMetadataWorker:
 
         assert count == 2
         await db_session.refresh(module)
-        assert module.module_json["cards"][0]["search_metadata"]["keywords_en"] == ["cough"]
+        assert module.module_json["cards"][0]["search_metadata"]["keywords"]["bn"] == ["cough"]
         assert "search_metadata" not in module.module_json["cards"][1]
         mock_module_metadata.delay.assert_called_once()
-        refreshed_step = await db_session.get(IngestionRunStep, step.id)
+        refreshed_step = (
+            await db_session.execute(
+                select(IngestionRunStep)
+                .where(IngestionRunStep.id == step.id)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one()
         assert refreshed_step is not None
         assert refreshed_step.status == "succeeded"
         output = refreshed_step.output_summary_jsonb or {}
@@ -268,5 +280,5 @@ class TestCardSearchMetadataWorker:
 
         assert count == 2
         await db_session.refresh(module)
-        assert module.module_json["cards"][0]["search_metadata"]["keywords_en"] == ["cough"]
+        assert module.module_json["cards"][0]["search_metadata"]["keywords"]["bn"] == ["cough"]
         mock_module_metadata.delay.assert_not_called()
