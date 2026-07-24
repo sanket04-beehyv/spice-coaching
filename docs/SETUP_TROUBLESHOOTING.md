@@ -34,7 +34,6 @@ Local development uses permissive defaults (`APP_ENV=development`, `SPICE_AUTH_E
 |---|---|
 | `APP_ENV` | `staging` or `production` |
 | `INTERNAL_TOKEN` | Must not be `dev-internal-token` |
-| `OPENAI_API_KEY` | Required when `AI_PROVIDER=openai` |
 | `GOOGLE_API_KEY` or Vertex credentials | Required when `AI_PROVIDER=google` without Vertex |
 
 Set `APP_ENV=development` only on trusted local machines. Never deploy with `APP_ENV=development` to a shared or internet-facing host.
@@ -71,9 +70,9 @@ Set `APP_ENV=development` only on trusted local machines. Never deploy with `APP
 **Fix Applied**
 - Healthchecks now use a zero-dependency Python probe (no shell quoting):
   ```yaml
-  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/medtronics-api/health')"]
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/medtronics-api/ready')"]
   ```
-- Applied consistently to both `platform-api` and `ai-runtime`.
+- `platform-api` probes `/ready`; `ai-runtime` probes `/health`. Applied consistently with the Python urllib pattern.
 
 **How to Verify**
 - `docker compose up`.
@@ -208,7 +207,7 @@ alembic -c infra/alembic.ini upgrade head
 docker compose build --no-cache platform-api ai-runtime migrate
 docker compose up
 docker compose ps
-curl -fsS http://localhost:18000/medtronics-api/health
+curl -fsS http://localhost:18000/medtronics-api/ready
 curl -fsS http://localhost:18001/health
 ```
 - `platform-api` and `ai-runtime` should report `(healthy)` within ~30 seconds.
@@ -244,6 +243,6 @@ Wait until:
 
 ## Quick Validation Checklist
 
-- `http://localhost:8000/medtronics-api/health` returns OK.
+- `http://localhost:8000/medtronics-api/ready` returns OK.
 - `http://localhost:8001/health` returns OK.
 - `http://localhost:8000/docs` loads OpenAPI docs.

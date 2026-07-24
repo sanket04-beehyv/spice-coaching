@@ -243,7 +243,7 @@ async def digital_help_module_usage(
     ),
     session: AsyncSession = Depends(get_db),
 ) -> DigitalHelpModuleUsageResponse:
-    """Rank modules by digital_help_used query volume for a tenant."""
+    """Rank modules by digital_help_used query volume for a tenant (keyed on module_id)."""
     tenant_id = resolve_tenant_id_for_dashboard(request, tenant_id)
     try:
         return await DashboardAnalyticsService(

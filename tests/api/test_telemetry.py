@@ -127,7 +127,6 @@ class TestTelemetryIngest:
                 "platform_service.api.telemetry.partition_for_dedup",
                 side_effect=_pass_through_dedup,
             ),
-            patch("platform_service.api.telemetry.get_clickhouse_client", return_value=ch_mock),
             patch("platform_service.api.telemetry.process_module_event_task") as celery_mock,
             patch.object(
                 get_settings(),
@@ -145,21 +144,13 @@ class TestTelemetryIngest:
         rows = ch_mock.insert_coaching_events.await_args.args[0]
         assert rows[0][_TIMESTAMP_UTC_COLUMN_INDEX] == body["events"][0]["timestamp_local"]
 
-    async def test_quiz_mode_only_enqueues_module_quiz_attempted(
-        self, app: FastAPI, client: AsyncClient
-    ) -> None:
+    async def test_quiz_mode_only_enqueues_module_quiz_attempted(self, client: AsyncClient) -> None:
         redis_mock = AsyncMock()
         redis_mock.aclose = AsyncMock()
-        pipe_mock = MagicMock()
-        pipe_mock.rpush = MagicMock()
-        pipe_mock.ltrim = MagicMock()
-        pipe_mock.execute = AsyncMock(return_value=[])
-        redis_mock.pipeline = MagicMock(return_value=pipe_mock)
         module_id = str(uuid4())
         quiz_id = str(uuid4())
         delivered_id = str(uuid4())
         quiz_event_id = str(uuid4())
-        ch_mock = app.dependency_overrides[get_clickhouse_client]()
         body = {
             "events": [
                 {
@@ -194,7 +185,6 @@ class TestTelemetryIngest:
                 "platform_service.api.telemetry.partition_for_dedup",
                 side_effect=_pass_through_dedup,
             ),
-            patch("platform_service.api.telemetry.get_clickhouse_client", return_value=ch_mock),
             patch("platform_service.api.telemetry.process_module_event_task") as celery_mock,
             patch.object(
                 get_settings(),
@@ -233,3 +223,136 @@ class TestTelemetryIngest:
 
         assert resp.status_code == 200
         assert resp.json()["duplicates"] == [dup_id]
+
+
+class TestModuleRequestedIngest:
+    async def test_enqueues_when_module_id_present(self, app: FastAPI, client: AsyncClient) -> None:
+        redis_mock = AsyncMock()
+        redis_mock.aclose = AsyncMock()
+        module_id = str(uuid4())
+        event_id = str(uuid4())
+        body = {
+            "events": [
+                {
+                    "id": event_id,
+                    "event_family": EventFamily.COACHING.value,
+                    "event_type": CoachingEventType.MODULE_REQUESTED.value,
+                    "module_id": module_id,
+                    "payload_json": {"reason": "Need refresher"},
+                    "event_date": date.today().isoformat(),
+                    "timestamp_local": 1_700_000_000,
+                }
+            ],
+            "sdk_version": "test-sdk",
+            "chw_id": 42,
+        }
+
+        async def _pass_through_dedup(_redis, events):  # type: ignore[no-untyped-def]
+            return events, []
+
+        with (
+            patch("platform_service.api.telemetry.get_redis_client", return_value=redis_mock),
+            patch(
+                "platform_service.api.telemetry.partition_for_dedup",
+                side_effect=_pass_through_dedup,
+            ),
+            patch("platform_service.api.telemetry.process_module_event_task") as module_celery,
+            patch("platform_service.api.telemetry.process_training_request_event_task") as training_celery,
+            patch.object(
+                get_settings(),
+                "telemetry_behavioural_gap_state_enabled",
+                False,
+            ),
+        ):
+            resp = await client.post(platform_path("/telemetry/events"), json=body)
+
+        assert resp.status_code == 200
+        assert resp.json()["accepted"] == [event_id]
+        module_celery.delay.assert_not_called()
+        training_celery.delay.assert_called_once()
+        job = training_celery.delay.call_args.args[0]
+        assert job["event_id"] == event_id
+        assert job["event_type"] == CoachingEventType.MODULE_REQUESTED.value
+        assert job["module_id"] == module_id
+        assert job["requested_module_name"] is None
+        assert job["reason"] == "Need refresher"
+        ch_mock = app.dependency_overrides[get_clickhouse_client]()
+        ch_mock.insert_coaching_events.assert_awaited_once()
+
+    async def test_enqueues_when_only_requested_module_name(self, client: AsyncClient) -> None:
+        redis_mock = AsyncMock()
+        redis_mock.aclose = AsyncMock()
+        event_id = str(uuid4())
+        body = {
+            "events": [
+                {
+                    "id": event_id,
+                    "event_family": EventFamily.COACHING.value,
+                    "event_type": CoachingEventType.MODULE_REQUESTED.value,
+                    "payload_json": {"requested_module_name": "  Custom Module  "},
+                    "event_date": date.today().isoformat(),
+                    "timestamp_local": 1_700_000_000,
+                }
+            ],
+            "sdk_version": "test-sdk",
+            "chw_id": 42,
+        }
+
+        async def _pass_through_dedup(_redis, events):  # type: ignore[no-untyped-def]
+            return events, []
+
+        with (
+            patch("platform_service.api.telemetry.get_redis_client", return_value=redis_mock),
+            patch(
+                "platform_service.api.telemetry.partition_for_dedup",
+                side_effect=_pass_through_dedup,
+            ),
+            patch("platform_service.api.telemetry.process_module_event_task") as module_celery,
+            patch("platform_service.api.telemetry.process_training_request_event_task") as training_celery,
+        ):
+            resp = await client.post(platform_path("/telemetry/events"), json=body)
+
+        assert resp.status_code == 200
+        module_celery.delay.assert_not_called()
+        training_celery.delay.assert_called_once()
+        job = training_celery.delay.call_args.args[0]
+        assert job["module_id"] is None
+        assert job["requested_module_name"] == "Custom Module"
+
+    async def test_skips_enqueue_when_neither_identity(self, client: AsyncClient) -> None:
+        redis_mock = AsyncMock()
+        redis_mock.aclose = AsyncMock()
+        event_id = str(uuid4())
+        body = {
+            "events": [
+                {
+                    "id": event_id,
+                    "event_family": EventFamily.COACHING.value,
+                    "event_type": CoachingEventType.MODULE_REQUESTED.value,
+                    "payload_json": {"reason": "No module"},
+                    "event_date": date.today().isoformat(),
+                    "timestamp_local": 1_700_000_000,
+                }
+            ],
+            "sdk_version": "test-sdk",
+            "chw_id": 42,
+        }
+
+        async def _pass_through_dedup(_redis, events):  # type: ignore[no-untyped-def]
+            return events, []
+
+        with (
+            patch("platform_service.api.telemetry.get_redis_client", return_value=redis_mock),
+            patch(
+                "platform_service.api.telemetry.partition_for_dedup",
+                side_effect=_pass_through_dedup,
+            ),
+            patch("platform_service.api.telemetry.process_module_event_task") as module_celery,
+            patch("platform_service.api.telemetry.process_training_request_event_task") as training_celery,
+        ):
+            resp = await client.post(platform_path("/telemetry/events"), json=body)
+
+        assert resp.status_code == 200
+        assert resp.json()["accepted"] == [event_id]
+        module_celery.delay.assert_not_called()
+        training_celery.delay.assert_not_called()

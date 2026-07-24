@@ -1,10 +1,10 @@
-"""Stage 2-draft (was Stage D) — bilingual card drafter, per candidate.
+"""Stage 2-draft (was Stage D) — locale-keyed card drafter, per candidate.
 
 Per `docs/ARCHITECTURE_RESET.md`:
 
-- Stage 2-draft takes one `module_candidate_draft`, drafts bilingual cards,
-  and persists a `module` row as `lifecycle_status='draft'` with
-  `module_json.cards` populated.
+- Stage 2-draft takes one `module_candidate_draft`, drafts cards in the
+  deployment primary locale, and persists a `module` row as
+  `lifecycle_status='draft'` with `module_json.cards` populated.
 - When a semantically similar **active** module exists (any non-retired row,
   latest version per family), an LLM merges the old and new card sets
   (new wins on conflict), retires the matched row, and writes a new draft
@@ -39,7 +39,9 @@ from platform_service.db.repositories.module_drafter_repository import (
 )
 from platform_service.db.repositories.module_repository import ModuleRepository
 from platform_service.services.card_drafter import CardDrafter
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.draft_pipeline import DraftPipeline
+from platform_service.services.ingestion_cardinality import resolve_for_candidate
 from platform_service.services.published_module_merger import (
     PublishedModuleMerger,
     PublishedModuleMergerError,
@@ -216,10 +218,23 @@ class StageDOrchestrator:
         if not active_rows:
             return None
 
-        existing_payloads = [published_module_to_merge_dict(m) for m in active_rows]
+        active_ids = [row.id for row in active_rows]
+        card_rows = await self._module_repo.list_cards_for_module_ids(active_ids)
+        cards_by_module_id: dict[UUID, list[dict[str, Any]]] = {}
+        for row in card_rows:
+            if row.module_id is None:
+                continue
+            cards_by_module_id.setdefault(row.module_id, []).append(card_row_to_dict(row))
+
+        existing_payloads = [
+            published_module_to_merge_dict(m, cards_by_module_id.get(m.id, [])) for m in active_rows
+        ]
         merge_block_ids = set(valid_block_ids)
         for payload in existing_payloads:
             merge_block_ids |= self._pipeline.block_ids_from_cards(payload.get("cards", []))
+
+        cardinality = await resolve_for_candidate(candidate_dict, self._session)
+        card_min, card_max = cardinality.card_bounds()
 
         try:
             merge_result = await self._published_merger.merge(
@@ -227,6 +242,8 @@ class StageDOrchestrator:
                 new_cards=cards,
                 existing_modules=existing_payloads,
                 valid_block_ids=merge_block_ids,
+                card_min_count=card_min,
+                card_max_count=card_max,
             )
         except PublishedModuleMergerError:
             logger.warning(
@@ -243,8 +260,7 @@ class StageDOrchestrator:
             merge_result.merged_cards,
             candidate_id=candidate_id,
         )
-        settings = get_settings()
-        if len(merged_cards) < settings.card_min_count:
+        if len(merged_cards) < card_min:
             logger.warning(
                 "Stage 2-draft merge for candidate %s dropped below card_min_count; "
                 "falling back to standard create (matched module not retired)",
@@ -318,6 +334,7 @@ class StageDOrchestrator:
             "proposed_title": c.proposed_title,
             "scope_summary": c.scope_summary,
             "description_localized": c.description_localized,
+            "domain": c.domain,
             "source_provenance": c.source_provenance_jsonb,
             "estimated_card_count": c.estimated_card_count,
             "estimated_quiz_count": c.estimated_quiz_count,

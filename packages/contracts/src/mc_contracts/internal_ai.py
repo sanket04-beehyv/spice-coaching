@@ -1,36 +1,27 @@
 """Internal platform → ai-runtime contract.
 
-Platform sends a fully-resolved InferenceRequest.
-AI runtime returns raw output + runtime metadata.
+Platform sends a fully-resolved InferenceRequest with generation_type (role),
+prompt, and content constraints. AI runtime owns model selection and
+generation budgets (max_tokens, temperature) via per-GenerationType profiles,
+and returns raw output plus applied runtime metadata.
 Platform remains responsible for validation, fallback, and telemetry persistence.
 """
 
 from __future__ import annotations
 
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from mc_contracts.enums import GenerationType
 
-AiProvider = Literal["google", "openai"]
+AiProvider = Literal["google"]
 
-OPENAI_TRANSCRIPTION_MAX_BYTES = 25_000_000
 GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES = 20_000_000
-# Base64 expands payload ~4/3; cap string length at the largest inline media limit.
-_MAX_BASE64_CHARS = (max(OPENAI_TRANSCRIPTION_MAX_BYTES, GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES) * 4 + 2) // 3
+# Base64 expands payload ~4/3; cap string length at the inline media limit.
+_MAX_BASE64_CHARS = (GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES * 4 + 2) // 3
 _MAX_IMAGE_ATTACHMENTS = 20
-
-
-class ModelPolicy(BaseModel):
-    """Model id for the inference call.
-
-    Provider routing (google vs openai) is owned by ai-runtime via ``AI_CLOUD_PROVIDER``
-    / ``ai_provider``. Platform selects ``model`` names from its own ``ai_cloud_provider``
-    setting, which must match the ai-runtime deployment.
-    """
-
-    model: str = "gemini-2.5-flash"
 
 
 class PromptSpec(BaseModel):
@@ -38,13 +29,18 @@ class PromptSpec(BaseModel):
     template_version: int
     resolved_system_prompt: str
     resolved_human_message: str
+    prompt_template_db_id: UUID | None = None
 
 
 class GenerationConstraints(BaseModel):
+    """Content constraints owned by platform.
+
+    Model id, max_tokens, and temperature are resolved by ai-runtime from
+    the request's ``generation_type``.
+    """
+
     language: str = ""
     output_format: str = "json"
-    max_tokens: int | None = None
-    temperature: float | None = None
 
 
 class TraceContext(BaseModel):
@@ -81,7 +77,6 @@ class InferenceRequest(BaseModel):
 
     request_id: str
     generation_type: GenerationType
-    model_policy: ModelPolicy
     prompt: PromptSpec
     constraints: GenerationConstraints = Field(default_factory=GenerationConstraints)
     trace_context: TraceContext = Field(default_factory=TraceContext)
@@ -109,6 +104,8 @@ class InferenceResponse(BaseModel):
     generation_type: GenerationType
     provider: AiProvider
     model: str
+    max_tokens: int
+    temperature: float
     raw_text: str
     parsed_json: dict[str, Any] | list[Any] | None = None
     latency_ms: int

@@ -85,29 +85,18 @@ pytestmark = [requires_db]
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    tables = (
-        "TRUNCATE module_quiz_question, module, module_family, "
-        "behavioural_gap, module_candidate_draft, content_block, source_page, "
-        "source_document, ingestion_run_step, ingestion_run, "
-        "llm_call_cache "
-        "RESTART IDENTITY CASCADE"
-    )
-
-    async def _wipe() -> None:
-        await db_session.rollback()
-        await db_session.execute(text(tables))
-        await db_session.commit()
-
-    await _wipe()
     yield
-    await _wipe()
-
-
-@pytest.fixture(autouse=True)
-def _disable_published_merge(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Merge calls ai-runtime; keep integration tests offline."""
-    monkeypatch.setenv("STAGE_D_PUBLISHED_MERGE_ENABLED", "false")
-    get_settings.cache_clear()
+    await db_session.rollback()
+    await db_session.execute(
+        text(
+            "TRUNCATE module_quiz_question, module, module_family, "
+            "behavioural_gap, module_candidate_draft, content_block, source_page, "
+            "source_document, ingestion_run_step, ingestion_run, "
+            "llm_call_cache "
+            "RESTART IDENTITY CASCADE"
+        )
+    )
+    await db_session.commit()
 
 
 @pytest.fixture(autouse=True)
@@ -172,7 +161,7 @@ def _draft_response(*, cards: list[dict] | None = None, insufficient: str | None
 def _card(idx: int = 0) -> dict[str, Any]:
     return {
         "title": {"bn": f"কার্ড {idx}", "en": f"Card {idx}" * 5},
-        "body": {"bn": "মূল বিষয় এবং পরবর্তী পদক্ষেপ। " * 5},
+        "body": {"bn": "মূল বিষয় এবং পরবর্তী পদক্ষেপ। "} * 5,
         "next_action": {"bn": "পরবর্তী পদক্ষেপ নিন।"},
         "source_block_ids": [str(uuid4())],
     }
@@ -205,7 +194,6 @@ async def _seed_source_doc(session: AsyncSession) -> UUID:
         primary_language="en",
         content_domain="clinical",
         assessment_mode="with_quiz",
-        authority_label="BRAC",
         original_storage_path="/tmp/fake.pdf",
     )
     session.add(sd)
@@ -288,6 +276,8 @@ def _make_card_drafter_with_canned_response(cards: list[dict]) -> CardDrafter:
             generation_type=GenerationType.CARD_DRAFTING,
             provider="google",
             model="gemini-2.5-flash",
+            max_tokens=8192,
+            temperature=0.2,
             raw_text="",
             parsed_json={"cards": cards},
             latency_ms=10,
@@ -330,6 +320,8 @@ async def _run_post_publish_inproc(
         generation_type=GenerationType.QUIZ_DRAFTING,
         provider="google",
         model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text=quiz_raw_text or "",
         parsed_json=None if quiz_raw_text is not None else {"questions": quiz_questions or []},
         latency_ms=10,
@@ -352,15 +344,13 @@ async def _run_post_publish_inproc(
             vec = embed_vector if embed_vector is not None else [0.1] * dim
             return [vec]
 
-    with patch(
-        "platform_service.workers.quiz_generation_worker.get_ai_client", return_value=_QuizClientStub()
-    ):
+    with patch("platform_service.workers.quiz_generation_worker.AIRuntimeClient", _QuizClientStub):
         try:
             await generate_quiz_for_module(module_id)
         except Exception:  # noqa: BLE001 — workers must not propagate
             pass
 
-    with patch("platform_service.workers.embedding_worker.get_ai_client", return_value=_EmbedClientStub()):
+    with patch("platform_service.workers.embedding_worker.AIRuntimeClient", _EmbedClientStub):
         try:
             await generate_embedding_for_module(module_id)
         except Exception:  # noqa: BLE001
@@ -371,6 +361,8 @@ async def _run_post_publish_inproc(
         generation_type=GenerationType.MODULE_GAP_CLASSIFICATION,
         provider="google",
         model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text="",
         parsed_json={"associated_gap_codes": [], "rationale": "e2e stub"},
         latency_ms=10,
@@ -384,8 +376,8 @@ async def _run_post_publish_inproc(
             return gap_resp
 
     with patch(
-        "platform_service.services.module_gap_classifier.get_ai_client",
-        return_value=_GapClientStub(),
+        "platform_service.services.module_gap_classifier.AIRuntimeClient",
+        _GapClientStub,
     ):
         try:
             await classify_module_gaps_for_module(module_id)
@@ -455,7 +447,7 @@ class TestHappyPath:
 
 
 class TestOutlineEmptyFailsRun:
-    async def test_no_heading_markers_still_runs_identifier_on_body(
+    async def test_no_heading_markers_fails_run_no_module(
         self,
         db_session: AsyncSession,
         patch_count_pages: Callable[[int], None],
@@ -466,11 +458,14 @@ class TestOutlineEmptyFailsRun:
 
         result, _ = await _run_orchestrator(source_document_id=sd_id, text_pages=text_pages)
 
-        assert result.final_status == "succeeded"
+        assert result.final_status == "failed"
+        modules = (await db_session.execute(select(Module))).scalars().all()
+        assert modules == []
         run = (
             await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
         ).scalar_one()
-        assert run.status == "succeeded"
+        assert run.status == "failed"
+        assert run.error_jsonb["failed_stage"] == "extract"
 
 
 # ─── Scenario 3: Stage C zero candidates ──────────────────────────────────
@@ -544,9 +539,12 @@ class TestStageDPerCandidateFailure:
         )
 
         assert result.final_status == "partially_succeeded"
-        modules = (await db_session.execute(select(Module))).scalars().all()
+        modules = (
+            (await db_session.execute(select(Module).where(Module.lifecycle_status == "published")))
+            .scalars()
+            .all()
+        )
         assert len(modules) == 2
-        assert all(m.lifecycle_status == "draft" for m in modules)
         run = (
             await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
         ).scalar_one()
@@ -683,9 +681,15 @@ class TestEmbeddingWorkerFailureNonBlocking:
         result, _ = await _run_orchestrator(source_document_id=sd_id, text_pages=text_pages)
 
         assert result.final_status == "succeeded"
-        modules = (await db_session.execute(select(Module))).scalars().all()
+        modules = (
+            (await db_session.execute(select(Module).where(Module.lifecycle_status == "published")))
+            .scalars()
+            .all()
+        )
         assert len(modules) >= 1
         m = modules[0]
+
+        # Run embedding worker with the AI-runtime raising.
         await _run_post_publish_inproc(m.id, embed_raises=RuntimeError("Vertex 503"))
 
         await db_session.refresh(m)
@@ -708,7 +712,11 @@ class TestQuizWorkerMalformedJsonNonBlocking:
         result, _ = await _run_orchestrator(source_document_id=sd_id, text_pages=text_pages)
 
         assert result.final_status == "succeeded"
-        modules = (await db_session.execute(select(Module))).scalars().all()
+        modules = (
+            (await db_session.execute(select(Module).where(Module.lifecycle_status == "published")))
+            .scalars()
+            .all()
+        )
         assert len(modules) >= 1
         m = modules[0]
 

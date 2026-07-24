@@ -44,7 +44,6 @@ async def _seed_doc(
         primary_language="bn",
         content_domain="clinical",
         assessment_mode="with_quiz",
-        authority_label="BRAC",
         original_storage_path=storage_path,
         original_filename=original_filename,
     )

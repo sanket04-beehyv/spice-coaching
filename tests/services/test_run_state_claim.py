@@ -22,7 +22,6 @@ async def _seed_source(session: AsyncSession) -> SourceDocument:
         id=uuid4(),
         title="claim-test",
         source_type="pdf",
-        authority_label="test",
         original_storage_path="bucket/key.pdf",
         status="uploaded",
     )

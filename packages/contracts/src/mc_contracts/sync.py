@@ -53,7 +53,6 @@ class SourceDocumentSyncPayload(BaseModel):
     primary_language: str
     content_domain: str
     assessment_mode: str
-    authority_label: str
     version_label: str | None = None
     publication_date: date | None = None
     original_filename: str | None = None
@@ -101,10 +100,26 @@ class ModuleFamilySyncPayload(BaseModel):
     current_published_module_id: UUID | None
 
 
+class AssignedModulePayload(BaseModel):
+    module_id: UUID
+    assigned_at: datetime
+
+
+class RequestedModulePayload(BaseModel):
+    """One CHW training request for offline history on the device."""
+
+    request_id: UUID
+    module_id: UUID | None = None
+    requested_module_name: str | None = None
+    reason: str | None = None
+    submitted_at: datetime
+
+
 class ModulesSyncBundle(BaseModel):
     modules: list[ModuleSyncPayload]
     module_families: list[ModuleFamilySyncPayload]
-    assigned_module_ids: list[UUID] = Field(default_factory=list)
+    assigned_module_ids: list[AssignedModulePayload] = Field(default_factory=list)
+    requested_modules: list[RequestedModulePayload] = Field(default_factory=list)
     server_time_utc: str
 
 

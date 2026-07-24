@@ -1,9 +1,8 @@
 """Post-publish embedding worker.
 
 Per `docs/ARCHITECTURE_RESET.md`. Triggered on module publish (Stage 3
-enqueues a Celery task per `module_id`). Reads the module's card text from
-`module.module_json`, calls ai-runtime `/embed`, and writes the vector to
-`module.embedding`.
+enqueues a Celery task per `module_id`). Reads card text from ``module_card`` rows,
+calls ai-runtime `/embed`, and writes the vector to ``module.embedding``.
 
 The embedding is per-module (not per-card). It serves admin/web semantic
 search inside this repo; the Android repo's runtime grounding flow uses it
@@ -15,6 +14,7 @@ full-text search until a later embedding run succeeds.
 from __future__ import annotations
 
 import logging
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,8 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from platform_service.config import get_settings
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.module import Module
+from platform_service.db.repositories.module_read_repository import ModuleReadRepository
 from platform_service.deps import get_ai_client
 from platform_service.exceptions import EmbeddingDimensionError
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.embedding_vector import assert_embedding_dimension
 from platform_service.services.module_search_text import module_text_for_search
 from platform_service.services.post_publish_step import finish_post_publish_step
@@ -31,9 +33,9 @@ from platform_service.services.post_publish_step import finish_post_publish_step
 logger = logging.getLogger(__name__)
 
 
-def _module_text_for_embedding(module: Module) -> str:
+def _module_text_for_embedding(module: Module, cards: list[dict[str, Any]]) -> str:
     """Backward-compatible alias for :func:`module_text_for_search`."""
-    return module_text_for_search(module)
+    return module_text_for_search(module, cards=cards)
 
 
 async def generate_embedding_for_module(module_id: UUID, *, step_id: UUID | None = None) -> bool:
@@ -54,7 +56,9 @@ async def generate_embedding_for_module(module_id: UUID, *, step_id: UUID | None
                     error={"type": "ModuleNotFound", "message": f"module {module_id} not found"},
                 )
                 return False
-            text_input = _module_text_for_embedding(module)
+            card_rows = await ModuleReadRepository(session).list_cards(module_id)
+            cards = [card_row_to_dict(row) for row in card_rows]
+            text_input = _module_text_for_embedding(module, cards)
             if not text_input.strip():
                 logger.info("Embedding worker: module %s has no text; skipping", module_id)
                 await finish_post_publish_step(

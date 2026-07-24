@@ -69,10 +69,12 @@ class Module(Base):
     thumbnail_storage_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     urgent_publish: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # When true, this module version is FAQ knowledge for chatbot retrieval only
+    # and is excluded from CHW training workflows.
+    chatbot_faqs_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # ── module content (cards inline; no per-card tables) ───────────
-    # Shape: {"cards": [{"title": {"bn": ...}, "body": {"bn": ...}, ...}, ...]}.
-    # Locale keys match deployment_primary_locale.
+    # ── module shell JSON (module-level attachments only; cards in module_card) ──
+    # Shape: {"attachments": [...]} or NULL.
     module_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     # Per-module embedding vector. The migration defines it as vector(N)
@@ -118,9 +120,14 @@ class Module(Base):
     clinically_reviewed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     # ── lifecycle ───────────────────────────────────────────────────────
-    # draft | published | retired
+    # draft | published | retired | deactivated
     lifecycle_status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_reactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deactivated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    reactivated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # When this module-version was retired (admin action). Distinct from
     # `published_at` for the same row — a published module that is later
     # retired carries both timestamps.

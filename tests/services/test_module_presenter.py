@@ -39,7 +39,6 @@ async def _seed_page_with_block(
         primary_language="bn",
         content_domain="clinical",
         assessment_mode="with_quiz",
-        authority_label="BRAC",
         original_storage_path="/tmp/x.pdf",
     )
     session.add(doc)
@@ -80,7 +79,6 @@ async def _seed_second_block_on_new_page(
             primary_language="bn",
             content_domain="clinical",
             assessment_mode="with_quiz",
-            authority_label="BRAC",
             original_storage_path="/tmp/y.pdf",
         )
         session.add(doc)
@@ -241,7 +239,6 @@ class TestCardsWithSourcePages:
             primary_language="bn",
             content_domain="clinical",
             assessment_mode="with_quiz",
-            authority_label="BRAC",
             original_storage_path="/tmp/x.pdf",
         )
         db_session.add(doc)

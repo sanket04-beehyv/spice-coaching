@@ -8,8 +8,7 @@ class ContentDomain(str, enum.Enum):
 
     DIGITAL = "digital"
     CLINICAL = "clinical"
-    CLINICAL_WITH_APP_ACTION = "clinical_with_app_action"
-    SUPERVISOR_UPDATE = "supervisor_update"
+    CLINICAL_WITH_APP_WORKFLOWS = "clinical_with_app_workflows"
 
 
 class AssessmentMode(str, enum.Enum):
@@ -98,6 +97,8 @@ class GenerationType(str, enum.Enum):
     # Grounded coaching Q&A over the published v3.3 module corpus
     # (platform /coaching/rag-query). Replaces the prior IT_HELP misuse.
     COACHING_RAG = "coaching_rag"
+    # Eval harness: LLM-as-judge scoring for RAG golden-dataset runs.
+    RAG_EVAL_JUDGE = "rag_eval_judge"
     # Post-publish: map a drafted module to seeded behavioural_gap registry codes.
     MODULE_GAP_CLASSIFICATION = "module_gap_classification"
     # Post-publish: map a drafted module to assessment-due topic triggers.
@@ -108,6 +109,10 @@ class GenerationType(str, enum.Enum):
     CARD_SEARCH_METADATA = "card_search_metadata"
     # Nightly: synthesize bilingual chat FAQ chips from clustered telemetry.
     CHAT_FAQ_SYNTHESIS = "chat_faq_synthesis"
+    # Admin: short narrative over top-K module training-request demand.
+    MODULE_DEMAND_SUMMARY = "module_demand_summary"
+    # Weekly: synthesize chat feedback digest from positive/negative telemetry.
+    CHAT_FEEDBACK_SUMMARY = "chat_feedback_summary"
 
 
 class SourceDocumentType(str, enum.Enum):
@@ -161,9 +166,14 @@ class CoachingEventType(str, enum.Enum):
     # MODULE_CARD_VIEWED: CHW opened a specific card within a module.
     # MODULE_QUIZ_ATTEMPTED: CHW finished the module quiz; payload carries
     #                       quiz_score_pct (0.0–1.0) and per-question answers.
+    # MODULE_REQUESTED:   CHW requested access to a module (or a free-text
+    #                       custom module name); payload may carry
+    #                       requested_module_name / reason. Routes to
+    #                       process_training_request_event_task (not completion).
     MODULE_DELIVERED = "module_delivered"
     MODULE_CARD_VIEWED = "module_card_viewed"
     MODULE_QUIZ_ATTEMPTED = "module_quiz_attempted"
+    MODULE_REQUESTED = "module_requested"
 
 
 class DigitalEventType(str, enum.Enum):
@@ -173,6 +183,8 @@ class DigitalEventType(str, enum.Enum):
     LOGIN_ATTEMPT = "login_attempt"
     FORM_SUBMIT = "form_submit"
     DIGITAL_HELP_USED = "digital_help_used"
+    CHAT_FEEDBACK_POSITIVE = "chat_feedback_positive"
+    CHAT_FEEDBACK_NEGATIVE = "chat_feedback_negative"
 
 
 # ── Telemetry (ClickHouse coaching_events) value enums ────────────────────────

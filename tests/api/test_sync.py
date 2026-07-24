@@ -94,6 +94,7 @@ class TestSyncRoutes:
         data = resp.json()
         assert data["modules"] == []
         assert data["assigned_module_ids"] == []
+        assert data["requested_modules"] == []
 
 
 class TestPublishedSourceDocuments:
@@ -112,6 +113,7 @@ class TestPublishedSourceDocuments:
         assert len(data["source_documents"]) == 1
         entry = data["source_documents"][0]
         assert entry["source_document_id"] == str(doc.id)
+        assert entry["title"] == doc.title
         assert "cards" not in data
         assert "module_cards" not in data
 

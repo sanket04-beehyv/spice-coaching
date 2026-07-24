@@ -36,10 +36,15 @@ from redis.asyncio import Redis  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
 from platform_service.api.admin_assignments import router as admin_assignments_router
+from platform_service.api.admin_configs import router as admin_configs_router
 from platform_service.api.admin_files import router as admin_files_router  # noqa: E402
 from platform_service.api.admin_ingest import router as admin_ingest_router  # noqa: E402
 from platform_service.api.admin_ingestion_runs import router as admin_ingestion_runs_router  # noqa: E402
+from platform_service.api.admin_module_analytics import router as admin_module_analytics_router
+from platform_service.api.admin_module_demand import router as admin_module_demand_router
 from platform_service.api.admin_modules import router as admin_modules_router  # noqa: E402
+from platform_service.api.admin_prompts import router as admin_prompts_router
+from platform_service.api.admin_source_documents import router as admin_source_documents_router  # noqa: E402
 from platform_service.api.admin_trigger_bindings import router as admin_trigger_bindings_router  # noqa: E402
 from platform_service.api.coaching_rag import router as coaching_rag_router  # noqa: E402
 from platform_service.api.dashboard import router as dashboard_router  # noqa: E402
@@ -105,16 +110,17 @@ def create_app() -> FastAPI:
     api_router.include_router(admin_ingest_router)
     api_router.include_router(admin_files_router)
     api_router.include_router(admin_modules_router)
+    api_router.include_router(admin_module_analytics_router)
     api_router.include_router(admin_trigger_bindings_router)
     api_router.include_router(admin_ingestion_runs_router)
+    api_router.include_router(admin_source_documents_router)
     api_router.include_router(admin_assignments_router)
+    api_router.include_router(admin_module_demand_router)
+    api_router.include_router(admin_configs_router)
+    api_router.include_router(admin_prompts_router)
     api_router.include_router(dashboard_router)
     api_router.include_router(morning_router)
     api_router.include_router(sync_router)
-
-    @api_router.get("/health")
-    async def health() -> dict:
-        return {"status": "ok", "service": settings.app_name}
 
     @api_router.get("/ready")
     async def ready() -> dict:
@@ -151,10 +157,10 @@ def create_app() -> FastAPI:
                 response = await client.get(f"{settings.ai_runtime_base_url.rstrip('/')}/health")
                 response.raise_for_status()
                 body = response.json()
-                if body.get("provider") != settings.ai_cloud_provider:
+                # Provider is owned by ai-runtime; only "google" is supported.
+                if body.get("provider") != "google":
                     logger.warning(
-                        "readiness check failed: ai_runtime provider mismatch (platform=%s ai_runtime=%s)",
-                        settings.ai_cloud_provider,
+                        "readiness check failed: ai_runtime unexpected provider=%s",
                         body.get("provider"),
                     )
                     checks["ai_runtime"] = "error"
@@ -178,15 +184,6 @@ def create_app() -> FastAPI:
         return {"status": "ok", "service": settings.app_name, "checks": checks}
 
     fastapi_app.include_router(api_router)
-
-    @fastapi_app.get("/")
-    async def root() -> dict[str, str]:
-        return {
-            "service": settings.app_name,
-            "api_root": api_prefix,
-            "health": f"{api_prefix}/health",
-            "docs": f"{api_prefix}/docs" if docs_enabled else "",
-        }
 
     return fastapi_app
 

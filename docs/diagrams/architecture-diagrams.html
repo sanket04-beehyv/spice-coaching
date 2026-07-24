@@ -85,7 +85,6 @@ graph LR
     subgraph "External Services"
         SPICE[SPICE Auth Service]
         Vertex[Google Vertex AI / Gemini]
-        OpenAI[OpenAI API]
         MinIO[(MinIO / S3)]
     end
 
@@ -105,7 +104,6 @@ graph LR
     Platform --> CH
     Platform --> MinIO
     AIRuntime --> Vertex
-    AIRuntime -.->|optional| OpenAI
   </div>
 </div>
 
@@ -184,12 +182,10 @@ graph LR
         Router["Internal Routers\n/generate, /embed, /transcribe"]
         Exec["PromptExecutor\nprovider dispatch"]
         Google["GoogleProvider\nVertex / API key"]
-        OpenAI["OpenAIProvider"]
     end
 
     HTTP["Platform HTTP"] --> Router --> Exec
     Exec --> Google
-    Exec -.-> OpenAI
   </div>
 </div>
 

@@ -12,11 +12,10 @@ from platform_service.services.card_drafter import (
     CardDrafter,
     CardDrafterError,
 )
-from platform_service.services.prompts.card_drafter_prompt import (
-    CARD_DRAFTER_TEMPLATE_VERSION,
-    render_human_message,
-    render_system_prompt,
-)
+from platform_service.services.prompt_variables.card_drafter_variables import build_card_drafter_variables
+from platform_service.services.prompts.card_drafter_prompt import _SYSTEM_BASE
+
+pytestmark = pytest.mark.usefixtures("mock_prompt_templates")
 
 
 def _resp(parsed_json: Any = None, raw_text: str = "", error: str | None = None) -> InferenceResponse:
@@ -25,6 +24,8 @@ def _resp(parsed_json: Any = None, raw_text: str = "", error: str | None = None)
         generation_type=GenerationType.CARD_DRAFTING,
         provider="google",
         model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text=raw_text,
         parsed_json=parsed_json,
         latency_ms=200,
@@ -322,28 +323,32 @@ class TestMultiSourceCoverage:
         coverage when the multi-source case applies
     """
 
-    def test_template_version_at_least_2(self) -> None:
-        """v2 introduced the cross-source coverage rule. Reverting to v1
-        re-introduces the failure mode where fused candidates drop the
-        smaller source's content."""
-        assert CARD_DRAFTER_TEMPLATE_VERSION >= 2
+    def test_template_has_cross_source_rule_in_db_template(self) -> None:
+        lowered = _SYSTEM_BASE.lower()
+        assert "cross-source coverage" in lowered
 
     def test_system_prompt_has_symbol_verbalization_rules(self) -> None:
-        from platform_service.services.prompts.card_drafter_prompt import render_system_prompt
         from platform_service.services.prompts.symbol_verbalization import SYMBOL_VERBALIZATION_RULES
 
-        prompt = render_system_prompt(module_type="initial_training", card_min_count=3, card_max_count=7)
-        assert SYMBOL_VERBALIZATION_RULES.strip() in prompt
-        assert "20 থেকে 30" in prompt
-        assert "render mathematical symbols" in prompt.lower()
-        assert "spoken language" in prompt.lower()
-        assert "resolves conflicts with" in prompt.lower()
-        assert "prose and" in prompt.lower()
-        assert "terminology only" in prompt.lower()
+        variables = build_card_drafter_variables(
+            module_type="initial_training",
+            card_min_count=3,
+            card_max_count=7,
+            candidate=_candidate(),
+            cited_blocks=[],
+        )
+        rules = variables["symbol_verbalization_rules"]
+        assert SYMBOL_VERBALIZATION_RULES.strip() in rules
+        assert "20 থেকে 30" in rules
+        assert "blood-pressure pair" in rules.lower()
+        assert "dose fraction" in rules.lower()
+        assert "render mathematical symbols" in rules.lower()
+        assert "spoken language" in rules.lower()
+        assert "resolves conflicts with" in rules.lower()
+        assert "terminology only" in _SYSTEM_BASE.lower()
 
     def test_system_prompt_has_cross_source_rule(self) -> None:
-        prompt = render_system_prompt(module_type="initial_training", card_min_count=3, card_max_count=7)
-        lowered = prompt.lower()
+        lowered = _SYSTEM_BASE.lower()
         assert "cross-source coverage" in lowered
         # The rule must explicitly require per-source citation when blocks
         # span multiple sources.
@@ -373,7 +378,14 @@ class TestMultiSourceCoverage:
                 "content_language": "en",
             },
         ]
-        msg = render_human_message(candidate=_candidate(), cited_blocks=blocks)
+        variables = build_card_drafter_variables(
+            module_type="refresher",
+            card_min_count=3,
+            card_max_count=7,
+            candidate=_candidate(),
+            cited_blocks=blocks,
+        )
+        msg = variables["head_json"] + variables["cited_blocks_body"]
         assert "source=d1" in msg
         assert "source=d2" in msg
         # Multi-source notice surfaces explicitly so the LLM can plan.
@@ -394,7 +406,14 @@ class TestMultiSourceCoverage:
             }
             for i in range(3)
         ]
-        msg = render_human_message(candidate=_candidate(), cited_blocks=blocks)
+        variables = build_card_drafter_variables(
+            module_type="refresher",
+            card_min_count=3,
+            card_max_count=7,
+            candidate=_candidate(),
+            cited_blocks=blocks,
+        )
+        msg = variables["head_json"] + variables["cited_blocks_body"]
         assert "source=d1" in msg
         assert "source=d2" not in msg
         assert "multi-source candidate" not in msg
@@ -422,7 +441,14 @@ class TestMultiSourceCoverage:
                 "content_language": "en",
             }
         ]
-        msg = render_human_message(candidate=_candidate(), cited_blocks=blocks)
+        variables = build_card_drafter_variables(
+            module_type="refresher",
+            card_min_count=3,
+            card_max_count=7,
+            candidate=_candidate(),
+            cited_blocks=blocks,
+        )
+        msg = variables["head_json"] + variables["cited_blocks_body"]
         # Counts should show 5 in d1 and 1 in d2 — the LLM needs to see
         # the imbalance to apply the per-source coverage rule correctly.
         assert "'d1': 5" in msg

@@ -124,12 +124,20 @@ class IdentifyStageRunner:
         source_repo = SourceRepository(self._session)
         source_doc = await source_repo.get_source_document(source_document_id)
         ingestion_instructions_present = bool(source_doc and source_doc.ingestion_instructions)
+        cardinality_present = bool(
+            source_doc
+            and (
+                source_doc.target_cards_per_module is not None
+                or source_doc.target_quizzes_per_module is not None
+            )
+        )
         step = await self._run_state.start_step(
             run_id=run_id,
             stage=STAGE_MODULE_IDENTIFY,
             input_summary={
                 "source_document_ids": [str(source_document_id)],
                 "ingestion_instructions_present": ingestion_instructions_present,
+                "cardinality_targets_present": cardinality_present,
             },
         )
         step_id = step.id  # capture before commit (see Stage A comment)
@@ -158,6 +166,8 @@ class IdentifyStageRunner:
             "chunks_succeeded": stage_c_result.chunks_succeeded,
             "chunks_failed": stage_c_result.chunks_failed,
             "cross_chunk_review_count": stage_c_result.cross_chunk_review_count,
+            "target_cards_per_module_present": stage_c_result.target_cards_per_module_present,
+            "target_quizzes_per_module_present": stage_c_result.target_quizzes_per_module_present,
         }
         await self._run_state.complete_step(step_id, output_summary=summary)
         await self._session.commit()  # persist candidates before D starts

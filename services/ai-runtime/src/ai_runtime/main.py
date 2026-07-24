@@ -4,7 +4,7 @@ Run as:
     uvicorn ai_runtime.main:app --host 0.0.0.0 --port 8001
 
 Stateless: no database, no Redis, no ClickHouse.
-Only dependency: AI provider API keys (Google Gemini, optionally OpenAI).
+Only dependency: AI provider API keys (Google Gemini).
 """
 
 from __future__ import annotations

@@ -27,7 +27,6 @@ are scoped to the authenticated principal's tenant unless an explicit override i
 
 - `GET /admin/modules` — list modules
 - `POST /admin/modules/search` — semantic search
-- `POST /admin/ingest` with `mode=new` — retire published modules before fresh ingest
 
 Device-plane RAG already passes `tenant_id` to `search_by_embedding`; admin endpoints
 mirror that behaviour.

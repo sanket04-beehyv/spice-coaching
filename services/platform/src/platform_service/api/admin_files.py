@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 import anyio
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +24,6 @@ from platform_service.services.object_storage import (
     ObjectStorageError,
     ObjectTooLargeError,
     StoredObject,
-    _normalise_prefix,
     safe_basename,
 )
 from platform_service.services.upload_provenance import build_upload_metadata, record_file_upload
@@ -72,7 +71,7 @@ _SUFFIX_CONTENT_TYPE: dict[str, str] = {
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 router = APIRouter(
-    prefix="/admin/v3/files",
+    prefix="/admin/files",
     tags=["admin-files"],
 )
 
@@ -140,7 +139,6 @@ async def _stream_uploadfile_to_path_capped(
 async def upload_file(
     request: Request,
     file: UploadFile = File(..., description="File to upload to object storage"),
-    prefix: str = Form("uploads", description="Object key prefix inside the configured bucket"),
     storage: ObjectStorageClient = Depends(get_object_storage_client),
     settings: Settings = Depends(get_settings),
     db: AsyncSession = Depends(get_db),
@@ -154,17 +152,6 @@ async def upload_file(
         raise HTTPException(
             status_code=400,
             detail=f"unsupported file type {suffix!r}; accepted: {sorted(_ALLOWED_UPLOAD_SUFFIXES)}",
-        )
-
-    try:
-        normalised_prefix = _normalise_prefix(prefix)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    top = normalised_prefix.split("/", maxsplit=1)[0]
-    if top not in settings.admin_file_allowed_prefix_set:
-        raise HTTPException(
-            status_code=400,
-            detail=f"unsupported prefix {prefix!r}; accepted: {sorted(settings.admin_file_allowed_prefix_set)}",
         )
 
     staging_dir = Path(settings.upload_dir) / "admin_file_staging"
@@ -194,7 +181,7 @@ async def upload_file(
             else:
                 return _file_upload_response_from_row(existing, reused_existing=True)
 
-        object_name = f"{normalised_prefix}/{uuid.uuid4()}_{safe}"
+        object_name = f"{settings.admin_file_upload_prefix}/{uuid.uuid4()}_{safe}"
         content_type = _SUFFIX_CONTENT_TYPE.get(suffix, "application/octet-stream")
         try:
             stored = await storage.put_object_from_local_file(

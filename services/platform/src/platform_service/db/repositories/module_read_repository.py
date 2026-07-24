@@ -5,16 +5,18 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import cast, func, or_, select
+from sqlalchemy import Select, cast, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_behavioural_gap import ModuleBehaviouralGap
+from platform_service.db.models.module_card import ModuleCard
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
+from platform_service.db.module_availability import is_training_module_family
 from platform_service.db.tenant_scope import tenant_scope_filter
-from platform_service.localized import deployment_locales
+from platform_service.localized import deployment_locales, primary_text
 
 
 def _escape_ilike_pattern(value: str) -> str:
@@ -25,7 +27,32 @@ def _escape_ilike_pattern(value: str) -> str:
 class ModuleReadRepository:
     _session: AsyncSession
 
-    async def list_modules(
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    @staticmethod
+    def _activated_at_expr():
+        """Matches dashboard ``getModuleActivatedAt`` coalesce order."""
+        return func.coalesce(
+            Module.last_reactivated_at,
+            Module.first_activated_at,
+            Module.published_at,
+        )
+
+    @staticmethod
+    def _apply_date_range(
+        stmt: Select[tuple[Module]],
+        column,
+        date_from: datetime | None,
+        date_to: datetime | None,
+    ) -> Select[tuple[Module]]:
+        if date_from is not None:
+            stmt = stmt.where(column >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(column <= date_to)
+        return stmt
+
+    def _modules_list_filtered_stmt(
         self,
         *,
         status: str | None = None,
@@ -33,19 +60,27 @@ class ModuleReadRepository:
         has_visibility_window: bool | None = None,
         has_quality_flags: bool | None = None,
         domain: str | None = None,
+        source_document_id: UUID | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        published_from: datetime | None = None,
+        published_to: datetime | None = None,
+        activated_from: datetime | None = None,
+        activated_to: datetime | None = None,
+        deactivated_from: datetime | None = None,
+        deactivated_to: datetime | None = None,
         full_text_query: str | None = None,
         latest_version_only: bool = False,
         tenant_id: UUID | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[Module]:
+    ) -> Select[tuple[Module]]:
+        """Shared filter tree for ``list_modules`` / ``count_modules`` (no order/limit)."""
         stmt = select(Module)
         if tenant_id is not None:
             stmt = stmt.where(tenant_scope_filter(Module.tenant_id, tenant_id))
         if status is not None:
             stmt = stmt.where(Module.lifecycle_status == status)
         else:
-            stmt = stmt.where(Module.lifecycle_status != "retired")
+            stmt = stmt.where(Module.lifecycle_status.notin_(["retired", "deactivated"]))
         if clinically_reviewed is not None:
             stmt = stmt.where(Module.clinically_reviewed == clinically_reviewed)
         if has_visibility_window is True:
@@ -66,6 +101,16 @@ class ModuleReadRepository:
             )
         if domain:
             stmt = stmt.where(Module.domain == domain)
+        if source_document_id is not None:
+            stmt = stmt.where(Module.source_document_ids.contains([source_document_id]))
+        stmt = self._apply_date_range(stmt, Module.created_at, created_from, created_to)
+        stmt = self._apply_date_range(stmt, Module.published_at, published_from, published_to)
+        stmt = self._apply_date_range(
+            stmt, self._activated_at_expr(), activated_from, activated_to
+        )
+        stmt = self._apply_date_range(
+            stmt, Module.last_deactivated_at, deactivated_from, deactivated_to
+        )
         if full_text_query:
             escaped = _escape_ilike_pattern(full_text_query)
             pattern = f"%{escaped}%"
@@ -86,6 +131,50 @@ class ModuleReadRepository:
                 .label("rn"),
             ).subquery()
             stmt = stmt.join(rank_sq, Module.id == rank_sq.c.id).where(rank_sq.c.rn == 1)
+        return stmt
+
+    async def list_modules(
+        self,
+        *,
+        status: str | None = None,
+        clinically_reviewed: bool | None = None,
+        has_visibility_window: bool | None = None,
+        has_quality_flags: bool | None = None,
+        domain: str | None = None,
+        source_document_id: UUID | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        published_from: datetime | None = None,
+        published_to: datetime | None = None,
+        activated_from: datetime | None = None,
+        activated_to: datetime | None = None,
+        deactivated_from: datetime | None = None,
+        deactivated_to: datetime | None = None,
+        full_text_query: str | None = None,
+        latest_version_only: bool = False,
+        tenant_id: UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Module]:
+        stmt = self._modules_list_filtered_stmt(
+            status=status,
+            clinically_reviewed=clinically_reviewed,
+            has_visibility_window=has_visibility_window,
+            has_quality_flags=has_quality_flags,
+            domain=domain,
+            source_document_id=source_document_id,
+            created_from=created_from,
+            created_to=created_to,
+            published_from=published_from,
+            published_to=published_to,
+            activated_from=activated_from,
+            activated_to=activated_to,
+            deactivated_from=deactivated_from,
+            deactivated_to=deactivated_to,
+            full_text_query=full_text_query,
+            latest_version_only=latest_version_only,
+            tenant_id=tenant_id,
+        )
         stmt = (
             stmt.order_by(Module.published_at.desc().nullslast(), Module.created_at.desc())
             .limit(limit)
@@ -94,8 +183,134 @@ class ModuleReadRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def count_modules(
+        self,
+        *,
+        status: str | None = None,
+        clinically_reviewed: bool | None = None,
+        has_visibility_window: bool | None = None,
+        has_quality_flags: bool | None = None,
+        domain: str | None = None,
+        source_document_id: UUID | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        published_from: datetime | None = None,
+        published_to: datetime | None = None,
+        activated_from: datetime | None = None,
+        activated_to: datetime | None = None,
+        deactivated_from: datetime | None = None,
+        deactivated_to: datetime | None = None,
+        full_text_query: str | None = None,
+        latest_version_only: bool = False,
+        tenant_id: UUID | None = None,
+    ) -> int:
+        """Count rows matching the same filters as ``list_modules`` (ignores limit/offset)."""
+        base = self._modules_list_filtered_stmt(
+            status=status,
+            clinically_reviewed=clinically_reviewed,
+            has_visibility_window=has_visibility_window,
+            has_quality_flags=has_quality_flags,
+            domain=domain,
+            source_document_id=source_document_id,
+            created_from=created_from,
+            created_to=created_to,
+            published_from=published_from,
+            published_to=published_to,
+            activated_from=activated_from,
+            activated_to=activated_to,
+            deactivated_from=deactivated_from,
+            deactivated_to=deactivated_to,
+            full_text_query=full_text_query,
+            latest_version_only=latest_version_only,
+            tenant_id=tenant_id,
+        )
+        # maintain_column_froms keeps the latest_version_only JOIN when we
+        # project down to Module.id for counting.
+        id_subq = (
+            base.with_only_columns(Module.id, maintain_column_froms=True)
+            .order_by(None)
+            .subquery()
+        )
+        count_stmt = select(func.count()).select_from(id_subq)
+        result = await self._session.execute(count_stmt)
+        return int(result.scalar_one())
+
+    async def list_module_domains(
+        self,
+        *,
+        status: str | None = None,
+        latest_version_only: bool = True,
+        tenant_id: UUID | None = None,
+    ) -> list[str]:
+        """Distinct module.domain values for admin filter dropdowns (tab-scoped)."""
+        stmt = select(Module.domain)
+        if tenant_id is not None:
+            stmt = stmt.where(tenant_scope_filter(Module.tenant_id, tenant_id))
+        if status is not None:
+            stmt = stmt.where(Module.lifecycle_status == status)
+        else:
+            stmt = stmt.where(Module.lifecycle_status != "retired")
+        if latest_version_only:
+            rank_sq = select(
+                Module.id,
+                func.row_number()
+                .over(
+                    partition_by=Module.module_family_id,
+                    order_by=Module.version.desc(),
+                )
+                .label("rn"),
+            ).subquery()
+            stmt = stmt.join(rank_sq, Module.id == rank_sq.c.id).where(rank_sq.c.rn == 1)
+        stmt = stmt.distinct().order_by(Module.domain.asc())
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_module(self, module_id: UUID) -> Module | None:
         return await self._session.get(Module, module_id)
+
+    async def get_published_module_for_family(
+        self,
+        module_family_id: UUID,
+        *,
+        tenant_id: UUID | None = None,
+    ) -> Module | None:
+        """Return the current published module for a family, or None.
+
+        Returns None for chatbot-FAQ-only modules (not available for CHW training).
+        """
+        family = await self._session.get(ModuleFamily, module_family_id)
+        if family is None or family.current_published_module_id is None:
+            return None
+        module = await self.get_module(family.current_published_module_id)
+        if module is None or module.lifecycle_status != "published" or module.chatbot_faqs_only:
+            return None
+        if tenant_id is not None and module.tenant_id is not None and module.tenant_id != tenant_id:
+            return None
+        return module
+
+    async def map_published_titles_by_family_ids(
+        self,
+        module_family_ids: list[UUID],
+    ) -> dict[UUID, str]:
+        """Return display titles for families that have a current published module."""
+        if not module_family_ids:
+            return {}
+        stmt = (
+            select(ModuleFamily.id, Module.title_localized)
+            .join(Module, Module.id == ModuleFamily.current_published_module_id)
+            .where(
+                ModuleFamily.id.in_(module_family_ids),
+                Module.lifecycle_status == "published",
+                is_training_module_family(),
+            )
+        )
+        rows = (await self._session.execute(stmt)).all()
+        out: dict[UUID, str] = {}
+        for family_id, title_localized in rows:
+            title = primary_text(title_localized)
+            if title:
+                out[family_id] = title
+        return out
 
     async def list_quiz_questions(self, module_id: UUID) -> list[ModuleQuizQuestion]:
         result = await self._session.execute(
@@ -105,6 +320,28 @@ class ModuleReadRepository:
         )
         return list(result.scalars().all())
 
+    async def list_cards(self, module_id: UUID) -> list[ModuleCard]:
+        result = await self._session.execute(
+            select(ModuleCard)
+            .where(ModuleCard.module_id == module_id)
+            .order_by(ModuleCard.card_order.asc(), ModuleCard.id.asc())
+        )
+        return list(result.scalars().all())
+
+    async def list_cards_for_module_ids(self, module_ids: list[UUID]) -> list[ModuleCard]:
+        if not module_ids:
+            return []
+        stmt = (
+            select(ModuleCard)
+            .where(ModuleCard.module_id.in_(module_ids))
+            .order_by(
+                ModuleCard.module_id.asc(),
+                ModuleCard.card_order.asc(),
+                ModuleCard.id.asc(),
+            )
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def list_families_created_since(
         self,
         since: datetime,
@@ -113,7 +350,16 @@ class ModuleReadRepository:
     ) -> list[ModuleFamily]:
         stmt = (
             select(ModuleFamily)
-            .where(ModuleFamily.created_at > since)
+            .where(
+                ModuleFamily.created_at > since,
+                exists(
+                    select(Module.id).where(
+                        Module.module_family_id == ModuleFamily.id,
+                        Module.lifecycle_status == "published",
+                        is_training_module_family(),
+                    )
+                ),
+            )
             .order_by(ModuleFamily.created_at.asc(), ModuleFamily.id.asc())
         )
         if tenant_id is not None:
@@ -132,7 +378,11 @@ class ModuleReadRepository:
     ) -> list[Module]:
         stmt = (
             select(Module)
-            .where(Module.lifecycle_status == "published", Module.updated_at > since)
+            .where(
+                Module.lifecycle_status == "published",
+                Module.updated_at > since,
+                is_training_module_family(),
+            )
             .order_by(Module.updated_at.asc(), Module.id.asc())
         )
         if tenant_id is not None:
@@ -191,6 +441,7 @@ class ModuleReadRepository:
         *,
         query_vector: list[float],
         limit: int = 10,
+        assignable_only: bool = False,
         tenant_id: UUID | None = None,
     ) -> list[tuple[Module, float]]:
         distance = Module.embedding.cosine_distance(list(query_vector)).label("distance")
@@ -200,6 +451,8 @@ class ModuleReadRepository:
             .order_by(distance.asc())
             .limit(limit)
         )
+        if assignable_only:
+            stmt = stmt.where(is_training_module_family())
         if tenant_id is not None:
             stmt = stmt.where(tenant_scope_filter(Module.tenant_id, tenant_id))
         rows = (await self._session.execute(stmt)).all()
@@ -222,10 +475,14 @@ class ModuleReadRepository:
             )
             .exists()
         )
-        stmt = select(Module).where(
-            Module.lifecycle_status == "published",
-            link_exists,
-            tenant_filter,
+        stmt = (
+            select(Module)
+            .where(
+                Module.lifecycle_status == "published",
+                link_exists,
+                tenant_filter,
+                is_training_module_family(),
+            )
         )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
@@ -252,18 +509,25 @@ class ModuleReadRepository:
                 )
                 .label("rn"),
             )
-            .where(Module.lifecycle_status != "retired")
+            .where(
+                Module.lifecycle_status.in_(["draft", "published"]),
+                is_training_module_family(),
+            )
             .subquery()
         )
         stmt = select(Module).join(rank_sq, Module.id == rank_sq.c.id).where(rank_sq.c.rn == 1)
         result = await self._session.execute(stmt)
         modules = list(result.scalars().all())
-        out: list[Module] = []
-        for mod in modules:
-            cards = (mod.module_json or {}).get("cards", [])
-            if isinstance(cards, list) and len(cards) > 0:
-                out.append(mod)
-        return out
+        if not modules:
+            return []
+        module_ids = [mod.id for mod in modules]
+        card_counts_stmt = (
+            select(ModuleCard.module_id, func.count(ModuleCard.id))
+            .where(ModuleCard.module_id.in_(module_ids))
+            .group_by(ModuleCard.module_id)
+        )
+        card_counts = {row[0]: row[1] for row in (await self._session.execute(card_counts_stmt)).all()}
+        return [mod for mod in modules if card_counts.get(mod.id, 0) > 0]
 
     async def family_has_draft_other_than(
         self,
@@ -329,7 +593,7 @@ class ModuleReadRepository:
                 )
                 .label("rn"),
             )
-            .where(Module.lifecycle_status == "published", tenant_filter)
+            .where(Module.lifecycle_status == "published", tenant_filter, is_training_module_family())
             .subquery()
         )
         stmt = (
@@ -349,24 +613,12 @@ class ModuleReadRepository:
         limit: int = 5,
     ) -> list[Module]:
         """Return newest published modules by published_at (desc), optionally tenant scoped."""
-        stmt = select(Module).where(Module.lifecycle_status == "published")
+        stmt = (
+            select(Module)
+            .where(Module.lifecycle_status == "published", is_training_module_family())
+        )
         if tenant_id is not None:
             stmt = stmt.where(tenant_scope_filter(Module.tenant_id, tenant_id))
         stmt = stmt.order_by(Module.published_at.desc().nullslast(), Module.id.asc()).limit(limit)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
-
-    async def count_modules(
-        self,
-        *,
-        status: str | None = None,
-        clinically_reviewed: bool | None = None,
-    ) -> int:
-        stmt = select(func.count(Module.id))
-        if status is not None:
-            stmt = stmt.where(Module.lifecycle_status == status)
-        else:
-            stmt = stmt.where(Module.lifecycle_status != "retired")
-        if clinically_reviewed is not None:
-            stmt = stmt.where(Module.clinically_reviewed == clinically_reviewed)
-        return int((await self._session.execute(stmt)).scalar_one())

@@ -14,8 +14,6 @@ from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceRequest,
-    ModelPolicy,
-    PromptSpec,
     TraceContext,
 )
 from mc_contracts.localized import LocalizedString
@@ -27,12 +25,9 @@ from platform_service.localized import migrate_legacy_suffix_field, primary_text
 from platform_service.services.chat_faq_aggregator import normalize_question, stable_faq_id
 from platform_service.services.chat_faq_clusterer import QuestionCluster
 from platform_service.services.llm_response_resolver import resolve_parsed_dict
-from platform_service.services.prompts.chat_faq_prompt import (
-    CHAT_FAQ_TEMPLATE_ID,
-    CHAT_FAQ_TEMPLATE_VERSION,
-    render_human_message,
-    render_system_prompt,
-)
+from platform_service.services.prompt_registry import CHAT_FAQ_TEMPLATE_ID
+from platform_service.services.prompt_template_service import PromptTemplateService, prompt_spec_from_rendered
+from platform_service.services.prompt_variables.chat_faq_variables import build_chat_faq_variables
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +131,6 @@ class ChatFaqGenerator:
     ) -> None:
         self._settings = settings or get_settings()
         self._client = client or get_ai_client()
-        self._model = self._settings.text_model
         self._target_count = self._settings.chat_faq_target_count
 
     async def synthesize(
@@ -148,22 +142,21 @@ class ChatFaqGenerator:
             return []
 
         selected = clusters[: self._target_count]
+        rendered = await PromptTemplateService().render(
+            None,
+            template_id=CHAT_FAQ_TEMPLATE_ID,
+            variant_key=None,
+            variables=build_chat_faq_variables(
+                target_count=len(selected),
+                clusters_payload=_clusters_payload(selected),
+                deployment_primary_locale=self._settings.deployment_primary_locale,
+                deployment_region_context=self._settings.deployment_region_context,
+            ),
+        )
         request = InferenceRequest(
             request_id=str(uuid.uuid4()),
             generation_type=GenerationType.CHAT_FAQ_SYNTHESIS,
-            model_policy=ModelPolicy(model=self._model),
-            prompt=PromptSpec(
-                template_id=CHAT_FAQ_TEMPLATE_ID,
-                template_version=CHAT_FAQ_TEMPLATE_VERSION,
-                resolved_system_prompt=render_system_prompt(
-                    target_count=len(selected),
-                    deployment_primary_locale=self._settings.deployment_primary_locale,
-                    deployment_region_context=self._settings.deployment_region_context,
-                ),
-                resolved_human_message=render_human_message(
-                    clusters_payload=_clusters_payload(selected),
-                ),
-            ),
+            prompt=prompt_spec_from_rendered(rendered),
             constraints=GenerationConstraints(language="en", output_format="json"),
             trace_context=TraceContext(),
         )

@@ -25,8 +25,7 @@ async def test_transcribe_media_uses_provider_and_model(monkeypatch: pytest.Monk
         executor,
         "_settings",
         SimpleNamespace(
-            ai_provider="openai",
-            openai_transcription_model="gpt-4o-mini-transcribe",
+            ai_provider="google",
             google_transcription_model="gemini-2.5-flash",
         ),
     )
@@ -37,7 +36,7 @@ async def test_transcribe_media_uses_provider_and_model(monkeypatch: pytest.Monk
     provider.transcribe_media.assert_awaited_once_with(
         media_bytes=b"media-bytes",
         mime_type="audio/mpeg",
-        model="gpt-4o-mini-transcribe",
+        model="gemini-2.5-flash",
     )
 
 

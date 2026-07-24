@@ -11,12 +11,17 @@ from datetime import date
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.models.content_block import ContentBlock
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.db.models.source_page import SourcePage
+
+
+def _escape_ilike_pattern(value: str) -> str:
+    """Escape SQL ``LIKE``/``ILIKE`` wildcards in user input."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 class SourceRepository:
@@ -35,7 +40,6 @@ class SourceRepository:
         primary_language: str,
         content_domain: str,
         assessment_mode: str,
-        authority_label: str,
         original_storage_path: str,
         source_document_family_id: UUID | None = None,
         version_label: str | None = None,
@@ -45,6 +49,8 @@ class SourceRepository:
         original_filename: str | None = None,
         uploaded_by: str | None = None,
         ingestion_instructions: str | None = None,
+        target_cards_per_module: int | None = None,
+        target_quizzes_per_module: int | None = None,
         sync_published_visible: bool = False,
     ) -> SourceDocument:
         """Insert a new source_document and return the persisted row."""
@@ -54,7 +60,6 @@ class SourceRepository:
             primary_language=primary_language,
             content_domain=content_domain,
             assessment_mode=assessment_mode,
-            authority_label=authority_label,
             original_storage_path=original_storage_path,
             source_document_family_id=source_document_family_id or uuid4(),
             version_label=version_label,
@@ -64,6 +69,8 @@ class SourceRepository:
             original_filename=original_filename,
             uploaded_by=uploaded_by,
             ingestion_instructions=ingestion_instructions,
+            target_cards_per_module=target_cards_per_module,
+            target_quizzes_per_module=target_quizzes_per_module,
             sync_published_visible=sync_published_visible,
             status="ingesting",
         )
@@ -85,6 +92,72 @@ class SourceRepository:
             )
             .order_by(SourceDocument.ingested_at.desc())
         )
+        return list(result.scalars().all())
+
+    def _source_documents_filtered_stmt(
+        self,
+        *,
+        status: str | None = None,
+        source_types: list[str] | None = None,
+        filename_query: str | None = None,
+    ) -> Select[tuple[SourceDocument]]:
+        """Shared filter tree for ``list_source_documents`` / ``count_source_documents``."""
+        stmt = select(SourceDocument)
+        if status is not None:
+            stmt = stmt.where(SourceDocument.status == status)
+        if source_types:
+            stmt = stmt.where(SourceDocument.source_type.in_(source_types))
+        if filename_query:
+            escaped = _escape_ilike_pattern(filename_query.strip())
+            pattern = f"%{escaped}%"
+            stmt = stmt.where(
+                or_(
+                    SourceDocument.original_filename.ilike(pattern, escape="\\"),
+                    SourceDocument.title.ilike(pattern, escape="\\"),
+                )
+            )
+        return stmt
+
+    async def count_source_documents(
+        self,
+        *,
+        status: str | None = None,
+        source_types: list[str] | None = None,
+        filename_query: str | None = None,
+    ) -> int:
+        """Count source documents matching the same filters as ``list_source_documents``."""
+        base = self._source_documents_filtered_stmt(
+            status=status,
+            source_types=source_types,
+            filename_query=filename_query,
+        )
+        count_stmt = select(func.count()).select_from(
+            base.with_only_columns(SourceDocument.id, maintain_column_froms=True).subquery()
+        )
+        result = await self._session.execute(count_stmt)
+        return int(result.scalar_one())
+
+    async def list_source_documents(
+        self,
+        *,
+        status: str | None = None,
+        source_types: list[str] | None = None,
+        filename_query: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[SourceDocument]:
+        """Return source documents for admin catalog views (newest ingest first)."""
+        stmt = (
+            self._source_documents_filtered_stmt(
+                status=status,
+                source_types=source_types,
+                filename_query=filename_query,
+            )
+            .order_by(SourceDocument.ingested_at.desc(), SourceDocument.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
     async def list_source_documents_by_ids(self, document_ids: list[UUID]) -> list[SourceDocument]:

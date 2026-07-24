@@ -31,6 +31,7 @@ from platform_service.localized import (
     to_localized_string,
 )
 from platform_service.services.card_normalisation import project_runtime_card
+from platform_service.services.module_card_service import ModuleCardService
 from platform_service.services.module_thumbnail_service import resolve_default_module_thumbnail
 
 
@@ -43,6 +44,30 @@ def _slugify(text: str) -> str:
     cleaned = re.sub(r"\s+", "-", (text or "").strip().lower())
     cleaned = re.sub(r"[^\w\-]+", "", cleaned, flags=re.UNICODE)
     return cleaned[:80] or "module"
+
+
+def _cards_for_persistence(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Project runtime fields while preserving ``card_family_id`` when present."""
+    out: list[dict[str, Any]] = []
+    for card in cards:
+        projected = project_runtime_card(card)
+        family_id = card.get("card_family_id")
+        if family_id:
+            projected["card_family_id"] = family_id
+        out.append(projected)
+    return out
+
+
+def _cards_without_search_metadata(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop per-card search_metadata so merged drafts always get fresh enrichment."""
+    cleaned: list[dict[str, Any]] = []
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        stripped = dict(card)
+        stripped.pop("search_metadata", None)
+        cleaned.append(stripped)
+    return cleaned
 
 
 def _first_card_primary_title(cards_payload: list[dict[str, Any]]) -> str:
@@ -107,11 +132,8 @@ class ModuleDrafterRepository:
         validator soft-warning summary. Pipeline never gates on these.
         """
         version = await self._next_version(family.id)
-        # Strip per-card transient fields the LLM included for downstream
-        # use (e.g., `card_family_id`, `field_flags`) but normalise their
-        # keys so the runtime payload is stable.
-        cards_payload = [project_runtime_card(c) for c in cards]
-        module_json: dict[str, Any] = {"cards": cards_payload}
+        cards_payload = _cards_for_persistence(cards)
+        module_json: dict[str, Any] = {}
 
         # Title: first card primary title, else candidate proposed_title.
         proposed_title = candidate.get("proposed_title", "") or ""
@@ -149,6 +171,8 @@ class ModuleDrafterRepository:
         self._session.add(module)
         await self._session.flush()
 
+        await ModuleCardService(self._session).append_cards(module.id, cards_payload)
+
         gap_description = primary_text(title_localized) or proposed_title or ""
         await self._create_and_link_primary_gap(module, description=gap_description)
 
@@ -173,8 +197,8 @@ class ModuleDrafterRepository:
         `supersedes_module_id` to the published module being retired.
         """
         version = await self._next_version(matched_published.module_family_id)
-        cards_payload = [project_runtime_card(c) for c in cards]
-        module_json: dict[str, Any] = {"cards": cards_payload}
+        cards_payload = _cards_for_persistence(_cards_without_search_metadata(cards))
+        module_json: dict[str, Any] = {}
 
         proposed_title = candidate.get("proposed_title", "") or ""
         first_card_title_primary = _first_card_primary_title(cards_payload)
@@ -227,6 +251,8 @@ class ModuleDrafterRepository:
         )
         self._session.add(module)
         await self._session.flush()
+
+        await ModuleCardService(self._session).append_cards(module.id, cards_payload)
 
         await ModuleGapRepository(self._session).copy_links(matched_published.id, module.id)
 

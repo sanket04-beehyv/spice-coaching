@@ -78,21 +78,6 @@ def _align_database_url_with_test_url() -> Iterator[None]:
     yield
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _disable_spice_auth_for_tests(_align_database_url_with_test_url: None) -> Iterator[None]:
-    """Most API/worker tests build minimal apps without SPICE JWT headers."""
-    os.environ["SPICE_AUTH_ENABLED"] = "false"
-    try:
-        get_settings.cache_clear()
-    except Exception:
-        pass
-    yield
-    try:
-        get_settings.cache_clear()
-    except Exception:
-        pass
-
-
 @pytest.fixture(scope="session")
 def test_db_url() -> str:
     url = os.environ.get("DATABASE_URL_TEST")
@@ -178,3 +163,29 @@ async def db_session(test_db_url: str) -> AsyncIterator[AsyncSession]:
         engine = get_engine()
         await engine.dispose()
         reset_engine_caches()
+
+
+@pytest.fixture
+def mock_prompt_templates(monkeypatch: pytest.MonkeyPatch):
+    """Stub DB-backed prompt rendering for unit tests without seeded templates."""
+    from uuid import uuid4
+
+    from platform_service.services.prompt_template_service import PromptTemplateService, RenderedPrompt
+
+    async def _render(
+        self: PromptTemplateService,
+        session: AsyncSession | None,
+        *,
+        template_id: str,
+        variant_key: str | None,
+        variables: dict[str, str],
+    ) -> RenderedPrompt:
+        return RenderedPrompt(
+            template_id=template_id,
+            template_version=1,
+            prompt_template_id=uuid4(),
+            resolved_system_prompt=f"system:{template_id}",
+            resolved_human_message=f"human:{template_id}",
+        )
+
+    monkeypatch.setattr(PromptTemplateService, "render", _render)

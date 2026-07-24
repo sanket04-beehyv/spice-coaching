@@ -19,7 +19,8 @@ from platform_service.db.models.module_behavioural_gap import ModuleBehaviouralG
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
 from platform_service.db.models.source_page import SourcePage
-from platform_service.deps import get_ai_client, get_object_storage_client
+from platform_service.deps import get_object_storage_client
+from platform_service.integrations import ai_runtime_client as arc
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,9 +40,9 @@ _SAMPLE_SEARCH_METADATA = {
     "schema_version": 1,
     "keywords": {"en": ["cough"], "bn": []},
     "search_phrases": {"en": ["child cough"], "bn": []},
-    "synonyms": {"en": {}},
-    "topic_tags": ["respiratory"],
-    "clinical_conditions": [],
+    "synonyms": {"bn": {}},
+    "topic_tags": {"bn": ["respiratory"]},
+    "clinical_conditions": {"bn": []},
     "audience": "chw",
     "rationale": "",
 }
@@ -54,7 +55,12 @@ class TestListModules:
 
         resp = await client.get(platform_path("/admin/modules"))
         assert resp.status_code == 200
-        data = resp.json()
+        body = resp.json()
+        assert body["total_modules"] == 2
+        assert body["total_pages"] == 1
+        assert body["limit"] == 50
+        assert body["offset"] == 0
+        data = body["modules"]
         assert len(data) == 2
         sample = data[0]
         # Summary shape: must NOT include cards or quiz (those are detail-only).
@@ -67,14 +73,14 @@ class TestListModules:
     ) -> None:
         await _seed_module(db_session)
         resp = await client.get(platform_path("/admin/modules"))
-        assert resp.json()[0]["search_metadata"] is None
+        assert resp.json()["modules"][0]["search_metadata"] is None
 
     async def test_search_metadata_round_trips_when_set(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         await _seed_module(db_session, search_metadata_jsonb=_SAMPLE_SEARCH_METADATA)
         resp = await client.get(platform_path("/admin/modules"))
-        assert resp.json()[0]["search_metadata"] == _SAMPLE_SEARCH_METADATA
+        assert resp.json()["modules"][0]["search_metadata"] == _SAMPLE_SEARCH_METADATA
 
     async def test_card_count_reflects_module_json(
         self, client: AsyncClient, db_session: AsyncSession
@@ -90,7 +96,7 @@ class TestListModules:
             },
         )
         resp = await client.get(platform_path("/admin/modules"))
-        assert resp.json()[0]["card_count"] == 3
+        assert resp.json()["modules"][0]["card_count"] == 3
 
     async def test_status_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
         await _seed_module(db_session, title_localized={"bn": "live"})
@@ -100,12 +106,12 @@ class TestListModules:
 
         # Default excludes retired.
         default_resp = await client.get(platform_path("/admin/modules"))
-        titles = {primary_from_response(m) for m in default_resp.json()}
+        titles = {primary_from_response(m) for m in default_resp.json()["modules"]}
         assert "live" in titles and "gone" not in titles
 
         # Explicit retired filter shows only retired.
         retired_resp = await client.get(platform_path("/admin/modules?status=retired"))
-        titles = {primary_from_response(m) for m in retired_resp.json()}
+        titles = {primary_from_response(m) for m in retired_resp.json()["modules"]}
         assert titles == {"gone"}
 
     async def test_clinically_reviewed_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
@@ -113,11 +119,11 @@ class TestListModules:
         await _seed_module(db_session, title_localized={"bn": "pending"}, clinically_reviewed=False)
 
         resp = await client.get(platform_path("/admin/modules?clinically_reviewed=true"))
-        titles = {primary_from_response(m) for m in resp.json()}
+        titles = {primary_from_response(m) for m in resp.json()["modules"]}
         assert titles == {"reviewed"}
 
         resp = await client.get(platform_path("/admin/modules?clinically_reviewed=false"))
-        titles = {primary_from_response(m) for m in resp.json()}
+        titles = {primary_from_response(m) for m in resp.json()["modules"]}
         assert titles == {"pending"}
 
     async def test_full_text_query_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
@@ -125,7 +131,7 @@ class TestListModules:
         await _seed_module(db_session, title_localized={"bn": "Diabetes screening"})
 
         resp = await client.get(platform_path("/admin/modules?q=referral"))
-        titles = {primary_from_response(m) for m in resp.json()}
+        titles = {primary_from_response(m) for m in resp.json()["modules"]}
         assert titles == {"Pregnancy referral"}
 
     async def test_has_visibility_window_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
@@ -138,21 +144,33 @@ class TestListModules:
         await _seed_module(db_session, title_localized={"bn": "no-window"})
 
         resp = await client.get(platform_path("/admin/modules?has_visibility_window=true"))
-        assert {primary_from_response(m) for m in resp.json()} == {"windowed"}
+        assert {primary_from_response(m) for m in resp.json()["modules"]} == {"windowed"}
 
         resp = await client.get(platform_path("/admin/modules?has_visibility_window=false"))
-        assert {primary_from_response(m) for m in resp.json()} == {"no-window"}
+        assert {primary_from_response(m) for m in resp.json()["modules"]} == {"no-window"}
 
     async def test_pagination_limit_offset(self, client: AsyncClient, db_session: AsyncSession) -> None:
         for i in range(5):
             await _seed_module(db_session, title_localized={"bn": f"m{i}"})
 
         resp = await client.get(platform_path("/admin/modules?limit=2&offset=0"))
-        assert len(resp.json()) == 2
+        body = resp.json()
+        assert len(body["modules"]) == 2
+        assert body["total_modules"] == 5
+        assert body["total_pages"] == 3
+        assert body["limit"] == 2
+        assert body["offset"] == 0
+
         resp = await client.get(platform_path("/admin/modules?limit=2&offset=2"))
-        assert len(resp.json()) == 2
+        body = resp.json()
+        assert len(body["modules"]) == 2
+        assert body["total_modules"] == 5
+        assert body["offset"] == 2
+
         resp = await client.get(platform_path("/admin/modules?limit=2&offset=4"))
-        assert len(resp.json()) == 1
+        body = resp.json()
+        assert len(body["modules"]) == 1
+        assert body["total_modules"] == 5
 
     async def test_limit_validation_rejects_zero(self, client: AsyncClient, db_session: AsyncSession) -> None:
         resp = await client.get(platform_path("/admin/modules?limit=0"))
@@ -172,7 +190,7 @@ class TestListModules:
         await _seed_module(db_session, title_localized={"bn": "clean"}, quality_flags_jsonb=None)
 
         resp = await client.get(platform_path("/admin/modules"))
-        rows = {primary_from_response(m): m for m in resp.json()}
+        rows = {primary_from_response(m): m for m in resp.json()["modules"]}
         assert rows["flagged"]["quality_flags"] == flags
         assert rows["clean"]["quality_flags"] is None
 
@@ -187,13 +205,248 @@ class TestListModules:
         await _seed_module(db_session, title_localized={"bn": "clean-empty"}, quality_flags_jsonb={})
 
         resp = await client.get(platform_path("/admin/modules?has_quality_flags=true"))
-        assert {primary_from_response(m) for m in resp.json()} == {"flagged"}
+        assert {primary_from_response(m) for m in resp.json()["modules"]} == {"flagged"}
 
         resp = await client.get(platform_path("/admin/modules?has_quality_flags=false"))
-        assert {primary_from_response(m) for m in resp.json()} == {"clean-null", "clean-empty"}
+        assert {primary_from_response(m) for m in resp.json()["modules"]} == {"clean-null", "clean-empty"}
 
+    async def test_domain_topic_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
+        await _seed_module(db_session, title_localized=loc("rmnch-mod"), domain="rmnch")
+        await _seed_module(db_session, title_localized=loc("ncd-mod"), domain="ncd")
 
-# ─── GET /admin/modules/{id} ───────────────────────────────────────────────
+        resp = await client.get(platform_path("/admin/modules?domain=ncd"))
+        assert {primary_from_response(m) for m in resp.json()["modules"]} == {"ncd-mod"}
+
+    async def test_source_document_ids_in_list_response(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        doc = await _seed_source_document(db_session)
+        await _seed_module(
+            db_session,
+            title_localized=loc("linked-draft"),
+            lifecycle_status="draft",
+            source_document_ids=[doc.id],
+            set_family_pointer=False,
+        )
+
+        resp = await client.get(platform_path("/admin/modules?status=draft"))
+        assert resp.status_code == 200
+        rows = {primary_from_response(m): m for m in resp.json()["modules"]}
+        assert set(rows["linked-draft"]["source_document_ids"]) == {str(doc.id)}
+
+    async def test_source_document_id_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
+        doc_a = await _seed_source_document(db_session, title="doc-a")
+        doc_b = await _seed_source_document(db_session, title="doc-b")
+        await _seed_module(
+            db_session,
+            title_localized=loc("from-doc-a"),
+            lifecycle_status="draft",
+            source_document_ids=[doc_a.id],
+            set_family_pointer=False,
+        )
+        await _seed_module(
+            db_session,
+            title_localized=loc("from-doc-b"),
+            lifecycle_status="draft",
+            source_document_ids=[doc_b.id],
+            set_family_pointer=False,
+        )
+
+        resp = await client.get(platform_path(f"/admin/modules?status=draft&source_document_id={doc_a.id}"))
+        assert resp.status_code == 200
+        assert {primary_from_response(m) for m in resp.json()["modules"]} == {"from-doc-a"}
+
+    async def test_list_module_domains(self, client: AsyncClient, db_session: AsyncSession) -> None:
+        await _seed_module(
+            db_session,
+            title_localized=loc("published-rmnch"),
+            domain="rmnch",
+            lifecycle_status="published",
+        )
+        await _seed_module(
+            db_session,
+            title_localized=loc("draft-ncd"),
+            domain="ncd",
+            lifecycle_status="draft",
+        )
+        await _seed_module(
+            db_session,
+            title_localized=loc("retired-clinical"),
+            domain="clinical",
+            lifecycle_status="retired",
+        )
+
+        resp = await client.get(platform_path("/admin/modules/domains"))
+        assert resp.status_code == 200
+        assert resp.json() == ["ncd", "rmnch"]
+
+        resp = await client.get(platform_path("/admin/modules/domains?status=published"))
+        assert resp.json() == ["rmnch"]
+
+        resp = await client.get(platform_path("/admin/modules/domains?status=draft"))
+        assert resp.json() == ["ncd"]
+
+    async def test_published_date_range_filters_published_at(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        inside = datetime(2025, 3, 15, 12, 0, tzinfo=UTC)
+        outside = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+        await _seed_module(
+            db_session,
+            title_localized=loc("in-range"),
+            lifecycle_status="published",
+            published_at=inside,
+            created_at=datetime(2020, 1, 1, tzinfo=UTC),
+        )
+        await _seed_module(
+            db_session,
+            title_localized=loc("out-of-range"),
+            lifecycle_status="published",
+            published_at=outside,
+            created_at=datetime(2020, 1, 1, tzinfo=UTC),
+        )
+
+        resp = await client.get(
+            platform_path(
+                "/admin/modules?status=published"
+                "&published_from=2025-03-01T00:00:00Z&published_to=2025-03-31T23:59:59Z"
+            )
+        )
+        assert {primary_from_response(m) for m in resp.json()["modules"]} == {"in-range"}
+
+    async def test_created_date_range_filters_created_at(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        inside = datetime(2025, 6, 10, 8, 0, tzinfo=UTC)
+        outside = datetime(2023, 6, 10, 8, 0, tzinfo=UTC)
+        await _seed_module(
+            db_session,
+            title_localized=loc("recent-draft"),
+            lifecycle_status="draft",
+            created_at=inside,
+            published_at=None,
+            set_family_pointer=False,
+        )
+        await _seed_module(
+            db_session,
+            title_localized=loc("old-draft"),
+            lifecycle_status="draft",
+            created_at=outside,
+            published_at=None,
+            set_family_pointer=False,
+        )
+
+        resp = await client.get(
+            platform_path(
+                "/admin/modules?status=draft"
+                "&created_from=2025-06-01T00:00:00Z&created_to=2025-06-30T23:59:59Z"
+            )
+        )
+        assert {primary_from_response(m) for m in resp.json()["modules"]} == {"recent-draft"}
+
+    async def test_combined_domain_and_typed_date_filters(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        when = datetime(2025, 2, 1, 12, 0, tzinfo=UTC)
+        await _seed_module(
+            db_session,
+            title_localized=loc("match"),
+            domain="rmnch",
+            lifecycle_status="published",
+            published_at=when,
+        )
+        await _seed_module(
+            db_session,
+            title_localized=loc("wrong-topic"),
+            domain="ncd",
+            lifecycle_status="published",
+            published_at=when,
+        )
+        await _seed_module(
+            db_session,
+            title_localized=loc("wrong-date"),
+            domain="rmnch",
+            lifecycle_status="published",
+            published_at=datetime(2024, 2, 1, 12, 0, tzinfo=UTC),
+        )
+
+        resp = await client.get(
+            platform_path(
+                "/admin/modules?status=published&domain=rmnch"
+                "&published_from=2025-01-01T00:00:00Z"
+                "&published_to=2025-12-31T23:59:59Z"
+            )
+        )
+        assert {primary_from_response(m) for m in resp.json()["modules"]} == {"match"}
+
+    async def test_multi_typed_date_filters_are_anded(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _seed_module(
+            db_session,
+            title_localized=loc("both"),
+            lifecycle_status="published",
+            created_at=datetime(2025, 1, 10, tzinfo=UTC),
+            published_at=datetime(2025, 2, 10, tzinfo=UTC),
+        )
+        await _seed_module(
+            db_session,
+            title_localized=loc("created-only"),
+            lifecycle_status="published",
+            created_at=datetime(2025, 1, 10, tzinfo=UTC),
+            published_at=datetime(2024, 2, 10, tzinfo=UTC),
+        )
+
+        resp = await client.get(
+            platform_path(
+                "/admin/modules?status=published"
+                "&created_from=2025-01-01T00:00:00Z&created_to=2025-01-31T23:59:59Z"
+                "&published_from=2025-02-01T00:00:00Z&published_to=2025-02-28T23:59:59Z"
+            )
+        )
+        assert {primary_from_response(m) for m in resp.json()["modules"]} == {"both"}
+
+    async def test_activated_date_uses_coalesce(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        m = await _seed_module(
+            db_session,
+            title_localized=loc("reactivated"),
+            lifecycle_status="published",
+            published_at=datetime(2024, 1, 1, tzinfo=UTC),
+            created_at=datetime(2023, 1, 1, tzinfo=UTC),
+        )
+        m.first_activated_at = datetime(2024, 6, 1, tzinfo=UTC)
+        m.last_reactivated_at = datetime(2025, 3, 15, tzinfo=UTC)
+        await db_session.commit()
+
+        outside = await _seed_module(
+            db_session,
+            title_localized=loc("old-activation"),
+            lifecycle_status="published",
+            published_at=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+        outside.first_activated_at = datetime(2024, 1, 15, tzinfo=UTC)
+        await db_session.commit()
+
+        resp = await client.get(
+            platform_path(
+                "/admin/modules?status=published"
+                "&activated_from=2025-03-01T00:00:00Z&activated_to=2025-03-31T23:59:59Z"
+            )
+        )
+        assert {primary_from_response(m) for m in resp.json()["modules"]} == {"reactivated"}
+
+    async def test_invalid_typed_date_range_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        resp = await client.get(
+            platform_path(
+                "/admin/modules?created_from=2025-12-31T00:00:00Z&created_to=2025-01-01T00:00:00Z"
+            )
+        )
+        assert resp.status_code == 422
+        assert "created_from" in resp.json()["detail"]
 
 
 class TestGetModuleDetail:
@@ -271,8 +524,7 @@ class TestGetModuleDetail:
         assert page_ref["page_number"] == 12
         assert page_ref["start_ms"] is None
         assert page_ref["end_ms"] is None
-        assert page_ref["presigned_url"].endswith("#page=12")
-        assert "minio" in page_ref["presigned_url"]
+        assert page_ref["presigned_url"] == f"{_PRESIGNED_URL}#page=12"
         assert page_ref["presigned_expires_seconds"] == get_settings().admin_file_presigned_max_seconds
 
     async def test_source_documents_empty_when_no_linked_docs(
@@ -424,12 +676,13 @@ class TestCreateModule:
             )
         ).scalar_one_or_none()
         assert family is not None
-        assert family.module_code == "নতন-মডউল"
+        assert family.module_code == "new-manual-module"
 
         # Module
         module = (await db_session.execute(select(Module).where(Module.id == new_id))).scalar_one_or_none()
         assert module is not None
         assert module.title_localized["bn"] == "নতুন মডিউল"
+        assert module.title_localized["en"] == "New Manual Module"
         assert module.lifecycle_status == "draft"
         assert module.clinically_reviewed is False
 
@@ -453,7 +706,7 @@ class TestCreateModule:
             await db_session.execute(select(BehaviouralGap).where(BehaviouralGap.id == module.primary_gap_id))
         ).scalar_one_or_none()
         assert gap is not None
-        assert gap.description == "নতুন মডিউল"
+        assert gap.description == "New Manual Module"
         assert gap.gap_code.startswith("module_primary_gap_")
 
         # Gap link
@@ -501,6 +754,54 @@ class TestCreateModule:
         assert module is not None
         assert module.primary_gap_id == gap.id
 
+    async def test_creates_chatbot_faqs_only_module_without_gap(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        resp = await client.post(
+            platform_path("/admin/modules"),
+            json={
+                "title": loc("চ্যাটবট FAQ"),
+                "domain": "clinical",
+                "chatbot_faqs_only": True,
+                "module_json": {"cards": [{"title": loc("FAQ card"), "body": loc("FAQ body")}]},
+            },
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+
+        module = await db_session.get(Module, UUID(body["id"]))
+        assert module is not None
+        assert module.chatbot_faqs_only is True
+        assert module.primary_gap_id is None
+
+        detail = await client.get(platform_path(f"/admin/modules/{body['id']}"))
+        assert detail.status_code == 200
+        assert detail.json()["chatbot_faqs_only"] is True
+
+    async def test_rejects_gap_links_on_chatbot_faqs_only_create(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        gap = BehaviouralGap(
+            gap_code="faq_gap_conflict",
+            description="Gap",
+            domain="clinical",
+            severity_default="moderate",
+            detection_rule_jsonb={},
+            status="active",
+        )
+        db_session.add(gap)
+        await db_session.commit()
+
+        resp = await client.post(
+            platform_path("/admin/modules"),
+            json={
+                "title": loc("FAQ conflict"),
+                "chatbot_faqs_only": True,
+                "behavioural_gap_ids": [str(gap.id)],
+            },
+        )
+        assert resp.status_code == 400
+
 
 # ─── PUT /admin/modules/{id} ───────────────────────────────────────────────
 
@@ -511,7 +812,7 @@ class TestEditModule:
 
         resp = await client.put(
             platform_path(f"/admin/modules/{v1.id}"),
-            json={"title": loc("v2 title")},
+            json={"expected_version": v1.version, "title": loc("v2 title")},
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -521,12 +822,252 @@ class TestEditModule:
         # v2 has its own module id, distinct from v1.
         assert body["id"] != str(v1.id)
 
+    async def test_identical_complete_snapshot_is_noop(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        v1 = await _seed_module(
+            db_session,
+            title_localized={"bn": "stable title"},
+            description_localized={"bn": "stable desc"},
+            clinically_reviewed=True,
+        )
+
+        detail_resp = await client.get(platform_path(f"/admin/modules/{v1.id}"))
+        assert detail_resp.status_code == 200
+        detail = detail_resp.json()
+        snapshot = {
+            "expected_version": detail["version"],
+            "title": detail["title"],
+            "description": detail["description"],
+            "module_json": {
+                "cards": detail["cards"],
+                "attachments": detail.get("attachments") or [],
+                "quiz": detail.get("quiz") or [],
+            },
+            "thumbnail_storage_path": detail.get("thumbnail_storage_path"),
+        }
+
+        first = await client.put(platform_path(f"/admin/modules/{v1.id}"), json=snapshot)
+        assert first.status_code == 200
+        assert first.json()["id"] == str(v1.id)
+        assert first.json()["version"] == v1.version
+
+        second = await client.put(platform_path(f"/admin/modules/{v1.id}"), json=snapshot)
+        assert second.status_code == 200
+        assert second.json() == first.json()
+
+        family_modules = (
+            (await db_session.execute(select(Module).where(Module.module_family_id == v1.module_family_id)))
+            .scalars()
+            .all()
+        )
+        assert len(family_modules) == 1
+        refreshed = await db_session.get(Module, v1.id)
+        assert refreshed is not None
+        assert refreshed.clinically_reviewed is True
+        assert refreshed.version == v1.version
+
+    async def test_fe_shaped_complete_snapshot_with_nested_quiz_is_noop(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Dashboard sends quiz inside module_json and omits chatbot_faqs_only."""
+        v1 = await _seed_module(
+            db_session,
+            title_localized={"bn": "fe title"},
+            description_localized={"bn": "fe desc"},
+        )
+        detail = (await client.get(platform_path(f"/admin/modules/{v1.id}"))).json()
+        snapshot = {
+            "expected_version": detail["version"],
+            "title": detail["title"],
+            "description": detail["description"],
+            "module_json": {
+                "cards": detail["cards"],
+                "quiz": detail.get("quiz") or [],
+            },
+            "thumbnail_storage_path": detail.get("thumbnail_storage_path"),
+        }
+        resp = await client.put(platform_path(f"/admin/modules/{v1.id}"), json=snapshot)
+        assert resp.status_code == 200
+        assert resp.json()["id"] == str(v1.id)
+        assert resp.json()["version"] == v1.version
+
+    async def test_complete_snapshot_with_change_creates_version(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        v1 = await _seed_module(
+            db_session,
+            title_localized={"bn": "before"},
+            description_localized={"bn": "desc"},
+        )
+        detail = (await client.get(platform_path(f"/admin/modules/{v1.id}"))).json()
+        snapshot = {
+            "expected_version": detail["version"],
+            "title": loc("after"),
+            "description": detail["description"],
+            "module_json": {
+                "cards": detail["cards"],
+                "attachments": detail.get("attachments") or [],
+                "quiz": detail.get("quiz") or [],
+            },
+            "thumbnail_storage_path": detail.get("thumbnail_storage_path"),
+        }
+        resp = await client.put(platform_path(f"/admin/modules/{v1.id}"), json=snapshot)
+        assert resp.status_code == 200
+        assert resp.json()["id"] != str(v1.id)
+        assert resp.json()["version"] == 2
+
+    async def test_omitted_content_field_still_creates_version(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        v1 = await _seed_module(db_session, title_localized={"bn": "v1 title"})
+        resp = await client.put(
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={"expected_version": v1.version, "title": loc("v1 title")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["id"] != str(v1.id)
+        assert resp.json()["version"] == 2
+
+    async def test_stale_version_with_identical_content_still_conflicts(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        v1 = await _seed_module(
+            db_session,
+            title_localized={"bn": "stable"},
+            description_localized={"bn": "desc"},
+        )
+        detail = (await client.get(platform_path(f"/admin/modules/{v1.id}"))).json()
+        snapshot = {
+            "expected_version": detail["version"],
+            "title": detail["title"],
+            "description": detail["description"],
+            "module_json": {
+                "cards": detail["cards"],
+                "attachments": detail.get("attachments") or [],
+                "quiz": detail.get("quiz") or [],
+            },
+            "thumbnail_storage_path": detail.get("thumbnail_storage_path"),
+        }
+        bumped = await client.put(
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={
+                **snapshot,
+                "title": loc("changed"),
+            },
+        )
+        assert bumped.status_code == 200
+        v2_id = bumped.json()["id"]
+
+        stale = await client.put(
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={**snapshot, "expected_version": v1.version},
+        )
+        assert stale.status_code == 409
+        detail_body = stale.json()["detail"]
+        assert detail_body["code"] == "module_version_conflict"
+        assert detail_body["latest_module_id"] == v2_id
+
+    async def test_rejects_missing_expected_version(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        v1 = await _seed_module(db_session, title_localized={"bn": "v1 title"})
+
+        resp = await client.put(
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={"title": loc("v2 title")},
+        )
+        assert resp.status_code == 422
+
+    async def test_rejects_wrong_expected_version(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        v1 = await _seed_module(db_session, title_localized={"bn": "v1 title"})
+
+        resp = await client.put(
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={"expected_version": v1.version + 5, "title": loc("stale")},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["code"] == "module_version_conflict"
+        assert detail["expected_version"] == v1.version + 5
+        assert detail["current_version"] == v1.version
+        assert detail["latest_module_id"] == str(v1.id)
+
+    async def test_rejects_edit_of_superseded_tip(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        v1 = await _seed_module(db_session, title_localized={"bn": "v1 title"})
+
+        first = await client.put(
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={"expected_version": v1.version, "title": loc("v2 title")},
+        )
+        assert first.status_code == 200
+        v2_id = first.json()["id"]
+        assert first.json()["version"] == 2
+
+        stale = await client.put(
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={"expected_version": v1.version, "title": loc("fork")},
+        )
+        assert stale.status_code == 409
+        detail = stale.json()["detail"]
+        assert detail["code"] == "module_version_conflict"
+        assert detail["expected_version"] == v1.version
+        assert detail["current_version"] == 2
+        assert detail["latest_module_id"] == v2_id
+
+    async def test_updates_chatbot_faqs_only_on_module(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        v1 = await _seed_module(db_session, title_localized={"bn": "training module"})
+
+        resp = await client.put(
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={"expected_version": v1.version, "chatbot_faqs_only": True},
+        )
+        assert resp.status_code == 200
+
+        v2 = await db_session.get(Module, UUID(resp.json()["id"]))
+        assert v2 is not None
+        assert v2.chatbot_faqs_only is True
+
+    async def test_rejects_gap_links_when_current_module_is_chatbot_faqs_only(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        gap = BehaviouralGap(
+            gap_code="faq_edit_gap_conflict",
+            description="Gap",
+            domain="clinical",
+            severity_default="moderate",
+            detection_rule_jsonb={},
+            status="active",
+        )
+        db_session.add(gap)
+        await db_session.flush()
+        v1 = await _seed_module(
+            db_session,
+            title_localized={"bn": "faq only module"},
+            chatbot_faqs_only=True,
+            primary_gap_id=None,
+        )
+        await db_session.commit()
+
+        resp = await client.put(
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={"expected_version": v1.version, "behavioural_gap_ids": [str(gap.id)]},
+        )
+        assert resp.status_code == 400
+
     async def test_adds_quiz_questions(self, client: AsyncClient, db_session: AsyncSession) -> None:
         v1 = await _seed_module(db_session, title_localized={"bn": "v1 title"})
 
         resp = await client.put(
             platform_path(f"/admin/modules/{v1.id}"),
             json={
+                "expected_version": v1.version,
                 "title": loc("v2 title"),
                 "quiz": [
                     {
@@ -581,6 +1122,7 @@ class TestEditModule:
         resp = await client.put(
             platform_path(f"/admin/modules/{v1.id}"),
             json={
+                "expected_version": v1.version,
                 "title": loc("v2 title"),
                 "quiz": [
                     {
@@ -614,6 +1156,7 @@ class TestEditModule:
         resp = await client.put(
             platform_path(f"/admin/modules/{v1.id}"),
             json={
+                "expected_version": v1.version,
                 "title": loc("v2 title"),
                 "module_json": {
                     "cards": [],
@@ -636,18 +1179,22 @@ class TestEditModule:
         result = await db_session.execute(stmt)
         questions = result.scalars().all()
         assert len(questions) == 1
-        assert questions[0].question_localized["bn"] == "Test question from json"
+        assert questions[0].question_localized["en"] == "Test question from json"
+        assert questions[0].question_localized.get("bn", "") == ""
 
     async def test_returns_404_for_unknown(self, client: AsyncClient) -> None:
         resp = await client.put(
             platform_path(f"/admin/modules/{uuid4()}"),
-            json={"title": loc("noop")},
+            json={"expected_version": 1, "title": loc("noop")},
         )
         assert resp.status_code == 404
 
     async def test_returns_404_for_retired(self, client: AsyncClient, db_session: AsyncSession) -> None:
         m = await _seed_module(db_session, lifecycle_status="retired", set_family_pointer=False)
-        resp = await client.put(platform_path(f"/admin/modules/{m.id}"), json={"title": loc("won't take")})
+        resp = await client.put(
+            platform_path(f"/admin/modules/{m.id}"),
+            json={"expected_version": m.version, "title": loc("won't take")},
+        )
         assert resp.status_code == 404
 
     async def test_put_persists_file_and_youtube_attachments(
@@ -703,7 +1250,8 @@ class TestEditModule:
             ],
         }
         put_resp = await client.put(
-            platform_path(f"/admin/modules/{v1.id}"), json={"module_json": module_json}
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={"expected_version": v1.version, "module_json": module_json},
         )
         assert put_resp.status_code == 200
         new_id = put_resp.json()["id"]
@@ -744,7 +1292,8 @@ class TestEditModule:
             ]
         }
         put_resp = await client.put(
-            platform_path(f"/admin/modules/{v1.id}"), json={"module_json": module_json}
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={"expected_version": v1.version, "module_json": module_json},
         )
         assert put_resp.status_code == 200
         new_id = put_resp.json()["id"]
@@ -780,7 +1329,8 @@ class TestEditModule:
             ]
         }
         put_resp = await client.put(
-            platform_path(f"/admin/modules/{v1.id}"), json={"module_json": module_json}
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={"expected_version": v1.version, "module_json": module_json},
         )
         assert put_resp.status_code == 200
         new_id = put_resp.json()["id"]
@@ -796,7 +1346,10 @@ class TestEditModule:
     ) -> None:
         v1 = await _seed_module(db_session)
         module_json = {"cards": [{"title": loc("কার্ড"), "body": {"bn": {"foo": 1}}}]}
-        resp = await client.put(platform_path(f"/admin/modules/{v1.id}"), json={"module_json": module_json})
+        resp = await client.put(
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={"expected_version": v1.version, "module_json": module_json},
+        )
         assert resp.status_code == 400
         assert resp.json()["detail"]["code"] == "invalid_card_body"
 
@@ -809,15 +1362,18 @@ class TestEditModule:
                 {
                     "kind": "file",
                     "attachment_id": str(uuid4()),
-                    "storage_path": "medtronics-storage/uploads/x.pdf",
-                    "object_name": "uploads/x.pdf",
+                    "storage_path": "medtronics-storage/evil/x.pdf",
+                    "object_name": "evil/x.pdf",
                     "content_type": "application/pdf",
                     "media_kind": "pdf",
                 }
             ],
             "cards": [],
         }
-        resp = await client.put(platform_path(f"/admin/modules/{v1.id}"), json={"module_json": module_json})
+        resp = await client.put(
+            platform_path(f"/admin/modules/{v1.id}"),
+            json={"expected_version": v1.version, "module_json": module_json},
+        )
         assert resp.status_code == 400
         assert resp.json()["detail"]["code"] == "invalid_attachment_object_prefix"
 
@@ -969,12 +1525,13 @@ class TestSemanticSearch:
 
     async def test_query_string_embeds_via_ai_runtime(
         self,
-        app: FastAPI,
         client: AsyncClient,
         db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """When the body sends `query` instead of `query_vector`, the endpoint
-        embeds via ai-runtime and feeds the result into search_by_embedding."""
+        embeds via ai-runtime and feeds the result into search_by_embedding.
+        Mock the AIRuntimeClient.embed call to return a known vector."""
 
         target = await _seed_module(
             db_session, title_localized={"bn": "target"}, embedding=_unit_basis_vector(0)
@@ -982,9 +1539,7 @@ class TestSemanticSearch:
         await _seed_module(db_session, title_localized={"bn": "other"}, embedding=_unit_basis_vector(1))
 
         embed_mock = AsyncMock(return_value=[_unit_basis_vector(0)])
-        stub = MagicMock()
-        stub.embed = embed_mock
-        app.dependency_overrides[get_ai_client] = lambda: stub
+        monkeypatch.setattr(arc.AIRuntimeClient, "embed", embed_mock)
 
         resp = await client.post(
             platform_path("/admin/modules/search"), json={"query": "any text", "limit": 2}

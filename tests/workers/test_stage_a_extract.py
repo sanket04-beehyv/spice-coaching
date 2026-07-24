@@ -64,7 +64,6 @@ async def _seed_source_document(session: AsyncSession) -> UUID:
         primary_language="en",
         content_domain="clinical",
         assessment_mode="with_quiz",
-        authority_label="BRAC",
         original_storage_path="/tmp/x.pdf",
     )
     session.add(sd)
@@ -125,7 +124,6 @@ class TestMediaTranscriptPath:
             primary_language="bn",
             content_domain="clinical",
             assessment_mode="with_quiz",
-            authority_label="BRAC",
             original_storage_path="/tmp/audio.mp3",
         )
         db_session.add(sd)

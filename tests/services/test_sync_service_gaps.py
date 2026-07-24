@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from platform_service.db.models.chw_module_completion import CHWModuleCompletion
 from platform_service.db.models.chw_module_quiz_progress import CHWModuleQuizProgress
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
@@ -117,16 +116,6 @@ async def test_partial_completion_empty_when_all_questions_answered(
     q1, q2 = await _add_quiz_questions(db_session, module=module, count=2)
     await _add_progress(db_session, chw_id=chw_id, module=module, quiz_id=q1.id)
     await _add_progress(db_session, chw_id=chw_id, module=module, quiz_id=q2.id)
-
-    db_session.add(
-        CHWModuleCompletion(
-            chw_id=chw_id,
-            module_family_id=module.module_family_id,
-            latest_attempt_module_id=module.id,
-            latest_attempt_at=datetime.now(UTC),
-        )
-    )
-    await db_session.flush()
 
     repo = ModuleCompletionRepository(db_session)
     await repo.mark_completed(

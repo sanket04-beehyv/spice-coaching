@@ -49,7 +49,6 @@ async def _seed_doc(session: AsyncSession) -> UUID:
         primary_language="bn",
         content_domain="clinical",
         assessment_mode="with_quiz",
-        authority_label="BRAC",
         original_storage_path="/tmp/x.pdf",
     )
     session.add(sd)

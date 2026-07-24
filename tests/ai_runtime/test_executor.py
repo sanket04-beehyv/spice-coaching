@@ -10,27 +10,20 @@ Verifies:
 """
 
 import base64
+import logging
 from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 import pytest
-
-# `ai_runtime.providers.openai` imports `from openai import AsyncOpenAI` at
-# module load. The `openai` SDK is a workspace-level dep installed via
-# `uv sync --all-packages`; if a dev runs `pytest` without it, the bare
-# import would error during collection — skip the whole module instead.
-pytest.importorskip("openai")
-
-from ai_runtime.providers.base import BaseProvider, ProviderImage  # noqa: E402
-from ai_runtime.services.prompt_executor import PromptExecutor  # noqa: E402
-from mc_contracts.enums import GenerationType  # noqa: E402
-from mc_contracts.internal_ai import (  # noqa: E402
+from ai_runtime.providers.base import BaseProvider, ProviderImage
+from ai_runtime.services.prompt_executor import PromptExecutor
+from mc_contracts.enums import GenerationType
+from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceImage,
     InferenceRequest,
-    ModelPolicy,
     PromptSpec,
 )
 
@@ -106,7 +99,6 @@ def _make_request(
     return InferenceRequest(
         request_id="req-1",
         generation_type=generation_type,
-        model_policy=ModelPolicy(model="gemini-2.5-flash"),
         prompt=PromptSpec(
             template_id="t-1",
             template_version=1,
@@ -115,6 +107,23 @@ def _make_request(
         ),
         constraints=GenerationConstraints(language="bn", output_format=output_format),
         image_attachments=image_attachments or [],
+    )
+
+
+def _executor_settings(
+    *,
+    json_parse_retries: int = 0,
+    log_llm_responses: bool = False,
+    log_llm_response_max_chars: int = 8000,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        ai_provider="google",
+        default_inference_model="gemini-2.5-flash",
+        default_max_tokens=8192,
+        default_temperature=0.2,
+        json_parse_retries=json_parse_retries,
+        log_llm_responses=log_llm_responses,
+        log_llm_response_max_chars=log_llm_response_max_chars,
     )
 
 
@@ -298,33 +307,93 @@ class TestErrorPaths:
             return_value=stub_provider,
         ):
             executor = PromptExecutor()
-            executor._settings = SimpleNamespace(
-                ai_provider="google",
-                default_max_tokens=8192,
-                default_temperature=0.2,
-                json_parse_retries=0,
-            )
+            executor._settings = _executor_settings()
             response = await executor.execute(_make_request())
         assert response.parsed_json is None
         assert response.error == "failed to parse JSON from provider output"
         assert response.raw_text == "not valid json at all"
 
     @pytest.mark.asyncio
-    async def test_execute_uses_configured_provider_not_request_model_only(
+    async def test_execute_uses_configured_provider_and_generation_profile(
         self, stub_provider: _StubProvider
     ) -> None:
-        """Provider routing is ai-runtime config; model comes from the request."""
+        """Provider routing is ai-runtime config; model/budgets come from profiles."""
         with patch(
             "ai_runtime.services.prompt_executor._get_provider",
             return_value=stub_provider,
         ) as get_provider:
             executor = PromptExecutor()
-            executor._settings = SimpleNamespace(
-                ai_provider="google",
-                default_max_tokens=8192,
-                default_temperature=0.2,
-                json_parse_retries=0,
-            )
+            executor._settings = _executor_settings()
             response = await executor.execute(_make_request())
         get_provider.assert_called_once_with("google")
         assert response.provider == "google"
+        assert response.model == "gemini-2.5-flash"
+        assert response.max_tokens == 8192
+        assert response.temperature == 0.2
+        assert stub_provider.generate_calls[0]["model"] == "gemini-2.5-flash"
+        assert stub_provider.generate_calls[0]["max_tokens"] == 8192
+        assert stub_provider.generate_calls[0]["temperature"] == 0.2
+
+
+# ── LLM response logging ─────────────────────────────────────────────────
+
+
+class TestLlmResponseLogging:
+    @pytest.mark.asyncio
+    async def test_json_parse_failure_logs_raw_text(
+        self,
+        stub_provider: _StubProvider,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        stub_provider.raw_text = "not valid json at all"
+        with patch(
+            "ai_runtime.services.prompt_executor._get_provider",
+            return_value=stub_provider,
+        ):
+            executor = PromptExecutor()
+            executor._settings = _executor_settings(log_llm_responses=False)
+            with caplog.at_level(logging.WARNING, logger="ai_runtime.services.llm_response_logging"):
+                response = await executor.execute(_make_request())
+        assert response.error == "failed to parse JSON from provider output"
+        assert any(
+            "reason=parse_failure" in rec.message and "not valid json at all" in rec.message
+            for rec in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_log_llm_responses_flag_logs_success(
+        self,
+        stub_provider: _StubProvider,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        stub_provider.raw_text = '{"ok": true}'
+        with patch(
+            "ai_runtime.services.prompt_executor._get_provider",
+            return_value=stub_provider,
+        ):
+            executor = PromptExecutor()
+            executor._settings = _executor_settings(log_llm_responses=True)
+            with caplog.at_level(logging.INFO, logger="ai_runtime.services.llm_response_logging"):
+                response = await executor.execute(_make_request())
+        assert response.error is None
+        assert any("reason=debug" in rec.message and '{"ok": true}' in rec.message for rec in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_log_llm_response_truncation(
+        self,
+        stub_provider: _StubProvider,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        stub_provider.raw_text = "x" * 100
+        with patch(
+            "ai_runtime.services.prompt_executor._get_provider",
+            return_value=stub_provider,
+        ):
+            executor = PromptExecutor()
+            executor._settings = _executor_settings(
+                log_llm_responses=True,
+                log_llm_response_max_chars=20,
+            )
+            with caplog.at_level(logging.INFO, logger="ai_runtime.services.llm_response_logging"):
+                await executor.execute(_make_request())
+        assert any("truncated, total_len=100" in rec.message for rec in caplog.records)

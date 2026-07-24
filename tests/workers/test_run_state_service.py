@@ -45,7 +45,6 @@ async def _seed_run(session: AsyncSession) -> tuple[RunStateService, object]:
         primary_language="en",
         content_domain="clinical",
         assessment_mode="with_quiz",
-        authority_label="BRAC",
         original_storage_path="/tmp/x.pdf",
     )
     session.add(sd)
@@ -223,7 +222,6 @@ class TestFusionRunLookup:
             primary_language="en",
             content_domain="clinical",
             assessment_mode="with_quiz",
-            authority_label="BRAC",
             original_storage_path="/tmp/a.pdf",
         )
         sd2 = SourceDocument(
@@ -232,7 +230,6 @@ class TestFusionRunLookup:
             primary_language="en",
             content_domain="clinical",
             assessment_mode="with_quiz",
-            authority_label="BRAC",
             original_storage_path="/tmp/b.pdf",
         )
         db_session.add_all([sd1, sd2])

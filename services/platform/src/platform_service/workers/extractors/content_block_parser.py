@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from platform_service.services.llm_text_utils import is_fence_line
+from platform_service.services.plain_text import block_content_to_plain_text
 from platform_service.services.token_estimation import estimate_token_count
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
@@ -61,6 +62,10 @@ def _is_table_separator(line: str) -> bool:
     return bool(_TABLE_SEPARATOR_RE.match(line))
 
 
+def _plain_block(*, block_type: str, content_text: str) -> str:
+    return block_content_to_plain_text(block_type=block_type, content_text=content_text)
+
+
 def parse_page_blocks(markdown: str) -> list[ParsedBlock]:
     """Walk a page's markdown and emit ContentBlock rows.
 
@@ -78,42 +83,43 @@ def parse_page_blocks(markdown: str) -> list[ParsedBlock]:
     pending_table: list[str] = []
     pending_callout: list[str] = []
 
+    def _append_block(*, block_type: str, content_text: str, heading_path: list[str]) -> None:
+        blocks.append(
+            ParsedBlock(
+                block_order=len(blocks),
+                block_type=block_type,
+                content_text=_plain_block(block_type=block_type, content_text=content_text),
+                heading_path=heading_path,
+            )
+        )
+
     def _flush_paragraph() -> None:
         nonlocal pending_para
         if pending_para:
-            blocks.append(
-                ParsedBlock(
-                    block_order=len(blocks),
-                    block_type="paragraph",
-                    content_text=" ".join(pending_para).strip(),
-                    heading_path=[t for _, t in heading_stack],
-                )
+            _append_block(
+                block_type="paragraph",
+                content_text=" ".join(pending_para).strip(),
+                heading_path=[t for _, t in heading_stack],
             )
             pending_para = []
 
     def _flush_list() -> None:
         nonlocal pending_list
         if pending_list:
-            blocks.append(
-                ParsedBlock(
-                    block_order=len(blocks),
-                    block_type="list",
-                    content_text="\n".join(pending_list).strip(),
-                    heading_path=[t for _, t in heading_stack],
-                )
+            _append_block(
+                block_type="list",
+                content_text="\n".join(pending_list).strip(),
+                heading_path=[t for _, t in heading_stack],
             )
             pending_list = []
 
     def _flush_table() -> None:
         nonlocal pending_table
         if pending_table:
-            blocks.append(
-                ParsedBlock(
-                    block_order=len(blocks),
-                    block_type="table",
-                    content_text="\n".join(pending_table).strip(),
-                    heading_path=[t for _, t in heading_stack],
-                )
+            _append_block(
+                block_type="table",
+                content_text="\n".join(pending_table).strip(),
+                heading_path=[t for _, t in heading_stack],
             )
             pending_table = []
 
@@ -122,13 +128,10 @@ def parse_page_blocks(markdown: str) -> list[ParsedBlock]:
         if pending_callout:
             # Strip leading "> " from each line for storage
             stripped = [re.sub(r"^\s*>\s?", "", line) for line in pending_callout]
-            blocks.append(
-                ParsedBlock(
-                    block_order=len(blocks),
-                    block_type="callout",
-                    content_text="\n".join(stripped).strip(),
-                    heading_path=[t for _, t in heading_stack],
-                )
+            _append_block(
+                block_type="callout",
+                content_text="\n".join(stripped).strip(),
+                heading_path=[t for _, t in heading_stack],
             )
             pending_callout = []
 
@@ -158,18 +161,15 @@ def parse_page_blocks(markdown: str) -> list[ParsedBlock]:
         if m:
             _flush_all()
             level = len(m.group(1))
-            text = m.group(2).strip()
+            text = _plain_block(block_type="heading", content_text=m.group(2).strip())
             # Pop heading_stack to depth < this level
             while heading_stack and heading_stack[-1][0] >= level:
                 heading_stack.pop()
             heading_stack.append((level, text))
-            blocks.append(
-                ParsedBlock(
-                    block_order=len(blocks),
-                    block_type="heading",
-                    content_text=text,
-                    heading_path=[t for _, t in heading_stack[:-1]],  # exclude self
-                )
+            _append_block(
+                block_type="heading",
+                content_text=text,
+                heading_path=[t for _, t in heading_stack[:-1]],  # exclude self
             )
             continue
 
@@ -184,13 +184,10 @@ def parse_page_blocks(markdown: str) -> list[ParsedBlock]:
         # Image line → figure
         if _IMAGE_LINE_RE.match(line):
             _flush_all()
-            blocks.append(
-                ParsedBlock(
-                    block_order=len(blocks),
-                    block_type="figure",
-                    content_text=line.strip(),
-                    heading_path=[t for _, t in heading_stack],
-                )
+            _append_block(
+                block_type="figure",
+                content_text=line.strip(),
+                heading_path=[t for _, t in heading_stack],
             )
             continue
 

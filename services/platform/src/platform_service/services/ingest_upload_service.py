@@ -1,8 +1,7 @@
 """Ingest upload orchestration — MinIO staging, provenance, source_document creation.
 
-Owns the shared path for ``POST /admin/ingest`` (batch) and
-``POST /admin/ingest/stream`` (single-file SSE). API routes validate HTTP
-form params and enqueue Celery / SSE; this service handles bytes + DB rows.
+Owns the shared path for ``POST /admin/ingest``. API routes validate HTTP
+form params and enqueue Celery; this service handles bytes + DB rows.
 """
 
 from __future__ import annotations
@@ -18,16 +17,13 @@ from typing import Any
 import anyio
 from fastapi import UploadFile
 from mc_contracts.enums import AssessmentMode, ContentDomain
-from mc_contracts.internal_ai import GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES, OPENAI_TRANSCRIPTION_MAX_BYTES
-from sqlalchemy import update
+from mc_contracts.internal_ai import GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.config import Settings, get_settings
-from platform_service.db.models.module import Module
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.db.repositories.file_upload_repository import FileUploadRepository
 from platform_service.db.repositories.source_repository import SourceRepository
-from platform_service.db.tenant_scope import tenant_scope_filter
 from platform_service.services.attribution_audit import record_attribution_event
 from platform_service.services.file_digest import sha256_hex_file
 from platform_service.services.ingest_errors import IngestValidationError
@@ -80,11 +76,10 @@ class IngestedSourceResult:
 class IngestUploadParams:
     content_domain: str
     assessment_mode: str
-    authority_label: str
-    primary_language: str
     uploaded_by: str
-    retired_ids: list[uuid.UUID]
     ingestion_instructions: str | None = None
+    target_cards_per_module: int | None = None
+    target_quizzes_per_module: int | None = None
 
 
 @dataclass(frozen=True)
@@ -132,9 +127,8 @@ class IngestUploadService:
     @staticmethod
     def media_upload_limit_bytes(provider: str) -> int:
         """Return the strict provider inline transcription limit."""
-        return (
-            OPENAI_TRANSCRIPTION_MAX_BYTES if provider == "openai" else GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES
-        )
+        _ = provider
+        return GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES
 
     @staticmethod
     def validate_file_count(files: list[UploadFile]) -> None:
@@ -144,11 +138,6 @@ class IngestUploadService:
             raise IngestValidationError(
                 f"at most {MAX_INGEST_FILES} files per request; got {len(files)}",
             )
-
-    @staticmethod
-    def validate_mode(mode: str) -> None:
-        if mode not in ("append", "new"):
-            raise IngestValidationError(f"invalid mode {mode!r}; must be 'append' or 'new'")
 
     @staticmethod
     def validate_ingest_metadata(*, content_domain: str, assessment_mode: str) -> None:
@@ -162,6 +151,32 @@ class IngestUploadService:
                 f"invalid assessment_mode {assessment_mode!r}; "
                 f"must be one of: {sorted(_ALLOWED_ASSESSMENT_MODES)}",
             )
+
+    def validate_cardinality_targets(
+        self,
+        *,
+        target_cards_per_module: int | None,
+        target_quizzes_per_module: int | None,
+    ) -> None:
+        """Validate optional fixed card/quiz counts against deployment bounds."""
+        if target_cards_per_module is not None:
+            lo = self._settings.card_min_count
+            hi = self._settings.card_max_count
+            if not (lo <= target_cards_per_module <= hi):
+                raise IngestValidationError(
+                    f"cards_per_module must be between {lo} and {hi} (inclusive); "
+                    f"got {target_cards_per_module}",
+                    status_code=422,
+                )
+        if target_quizzes_per_module is not None:
+            lo = self._settings.quiz_min_questions
+            hi = self._settings.quiz_max_questions
+            if not (lo <= target_quizzes_per_module <= hi):
+                raise IngestValidationError(
+                    f"quizzes_per_module must be between {lo} and {hi} (inclusive); "
+                    f"got {target_quizzes_per_module}",
+                    status_code=422,
+                )
 
     @staticmethod
     def resolve_titles_for_files(titles_json: str | None, files: list[UploadFile]) -> list[str]:
@@ -286,32 +301,6 @@ class IngestUploadService:
             )
         return IngestUploadService.source_type_from_suffix(suffix)
 
-    async def retire_published_modules_if_new(
-        self,
-        mode: str,
-        *,
-        tenant_id: uuid.UUID | None = None,
-    ) -> tuple[int, list[uuid.UUID]]:
-        """Retire published modules for the active tenant when ``mode=='new'``."""
-        if mode != "new":
-            return 0, []
-        stmt = (
-            update(Module)
-            .where(Module.lifecycle_status == "published")
-            .values(lifecycle_status="retired")
-            .returning(Module.id)
-        )
-        if tenant_id is not None:
-            stmt = stmt.where(tenant_scope_filter(Module.tenant_id, tenant_id))
-        result = await self._db.execute(stmt)
-        retired_ids = list(result.scalars().all())
-        logger.info(
-            "Ingest mode=new: retired %d published module(s) before fresh ingestion (tenant_id=%s)",
-            len(retired_ids),
-            tenant_id,
-        )
-        return len(retired_ids), retired_ids
-
     async def ingest_uploaded_files(
         self,
         *,
@@ -397,15 +386,16 @@ class IngestUploadService:
             doc = await source_repo.create_source_document(
                 title=title,
                 source_type=source_type,
-                primary_language=params.primary_language,
+                primary_language=self._settings.deployment_primary_locale,
                 content_domain=params.content_domain,
                 assessment_mode=params.assessment_mode,
-                authority_label=params.authority_label,
                 original_storage_path=storage_path,
                 content_sha256=content_sha256,
                 original_filename=original_filename,
                 uploaded_by=params.uploaded_by,
                 ingestion_instructions=params.ingestion_instructions,
+                target_cards_per_module=params.target_cards_per_module,
+                target_quizzes_per_module=params.target_quizzes_per_module,
                 sync_published_visible=sync_published_visible,
             )
             audit_payload: dict[str, Any] = {
@@ -413,10 +403,12 @@ class IngestUploadService:
                 "source_type": source_type,
                 "sync_published_visible": sync_published_visible,
             }
-            if params.retired_ids:
-                audit_payload["retired_module_ids"] = [str(mid) for mid in params.retired_ids]
             if params.ingestion_instructions is not None:
                 audit_payload["ingestion_instructions"] = params.ingestion_instructions
+            if params.target_cards_per_module is not None:
+                audit_payload["target_cards_per_module"] = params.target_cards_per_module
+            if params.target_quizzes_per_module is not None:
+                audit_payload["target_quizzes_per_module"] = params.target_quizzes_per_module
             await record_attribution_event(
                 self._db,
                 event_type="ingest_started",
@@ -445,7 +437,7 @@ class IngestUploadService:
         staging_dir = Path(self._settings.upload_dir) / "ingest_staging"
         staging_dir.mkdir(parents=True, exist_ok=True)
         staging_path = staging_dir / f".ingest-{uuid.uuid4()}.part"
-        max_media_bytes = self.media_upload_limit_bytes(self._settings.ai_cloud_provider)
+        max_media_bytes = self.media_upload_limit_bytes("google")
         await stream_upload_to_path(
             file,
             staging_path,

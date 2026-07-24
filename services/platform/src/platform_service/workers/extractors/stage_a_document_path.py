@@ -9,6 +9,7 @@ from uuid import UUID
 
 from platform_service.config import get_settings
 from platform_service.workers.extractors.calibration import sample_calibration_for_document
+from platform_service.workers.extractors.extraction_markdown import persist_markdown_content
 from platform_service.workers.extractors.quality_heuristic import score_page
 from platform_service.workers.extractors.stage_a_outline_assembler import (
     assemble_outline_from_persisted_pages,
@@ -41,7 +42,7 @@ async def _persist_page(
     await host._repo.create_source_page(
         source_document_id=source_document_id,
         page_number=page_number,
-        markdown_content=markdown,
+        markdown_content=persist_markdown_content(markdown),
         extraction_method=method,
         extraction_quality_score=score.composite_score,
         page_image_path=image_path,

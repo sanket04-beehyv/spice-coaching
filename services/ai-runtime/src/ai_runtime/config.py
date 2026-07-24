@@ -10,7 +10,8 @@ from mc_foundation.config import BaseAppSettings
 from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import SettingsConfigDict
 
-_PLACEHOLDER_VALUES = frozenset({"replace-with-strong-internal-token"})
+_PLACEHOLDER_VALUES = frozenset({"replace-with-strong-internal-token", "dev-internal-token", "default=key"})
+_DEPLOYED_ENVS = frozenset({"production", "staging"})
 
 
 class Settings(BaseAppSettings):
@@ -29,9 +30,9 @@ class Settings(BaseAppSettings):
 
     # ── AI Provider ───────────────────────────────────────────────────────────
     # Single source of truth for generate / embed / transcribe routing.
-    # Accepts ai_provider or ai_cloud_provider env (platform uses the latter name).
+    # Accepts ai_provider or legacy ai_cloud_provider env alias.
     ai_provider: AiProvider = Field(
-        default="openai",
+        default="google",
         validation_alias=AliasChoices("ai_provider", "ai_cloud_provider"),
     )
 
@@ -48,15 +49,9 @@ class Settings(BaseAppSettings):
     # needed). Standard pattern for passing GCP credentials in container
     # deployments where mounting a JSON file isn't ergonomic.
     google_service_account_base64: SecretStr | None = None
-    google_inference_model: str = "gemini-2.5-flash"
     google_embedding_model: str = "gemini-embedding-001"
     google_embedding_dimension: int = 768
 
-    # OpenAI — set via OPENAI_API_KEY; no default (see docker-compose.yml).
-    openai_api_key: SecretStr = SecretStr("")
-    openai_inference_model: str = "gpt-4o-mini"
-    openai_embedding_model: str = "text-embedding-3-small"
-    openai_transcription_model: str = "gpt-4o-mini-transcribe"
     google_transcription_model: str = "gemini-2.5-flash"
 
     # Target pgvector corpus dimension; the canonical truncation point lives in
@@ -66,19 +61,26 @@ class Settings(BaseAppSettings):
     embedding_dimension: int = 768
 
     # ── Generation defaults ───────────────────────────────────────────────────
-    # 8192 gives Stage C (large corpus → multi-candidate JSON) and Stage D
-    # (full card+quiz JSON with translations) headroom. Per-call overrides
-    # via InferenceRequest.constraints.max_tokens still apply.
+    # Used as fallback when a GenerationType is missing from GENERATION_PROFILES
+    # (tests assert the map is complete). Per-type budgets live in
+    # ``ai_runtime.generation_profiles``.
+    default_inference_model: str = "gemini-2.5-flash"
     default_max_tokens: int = 8192
     default_temperature: float = 0.2
     json_parse_retries: int = 1
+    # Log every successful LLM response body at INFO when true. Parse failures
+    # are always logged at WARNING regardless of this flag.
+    log_llm_responses: bool = True
+    # Truncate logged LLM bodies beyond this length (full text still returned in
+    # InferenceResponse.raw_text).
+    log_llm_response_max_chars: int = 20000
     # Per-provider SDK HTTP timeout (seconds). Keep below platform httpx timeout
     # so ai-runtime fails fast instead of holding the upstream connection.
     provider_timeout_seconds: float = 590.0
 
     @model_validator(mode="after")
     def _validate_production_safety(self) -> Self:
-        if self.app_env != "production":
+        if self.app_env not in _DEPLOYED_ENVS:
             return self
         errors: list[str] = []
         internal_token = self.internal_token.get_secret_value().strip()
@@ -86,12 +88,9 @@ class Settings(BaseAppSettings):
             errors.append("INTERNAL_TOKEN must be configured in production")
         if len(internal_token) < 32 or internal_token in _PLACEHOLDER_VALUES:
             errors.append("INTERNAL_TOKEN must be at least 32 chars and not a placeholder")
-        if self.ai_provider == "openai" and not self.openai_api_key.get_secret_value().strip():
-            errors.append("OPENAI_API_KEY is required in production when AI provider is openai")
-        if (
-            self.ai_provider == "google"
-            and not self.google_use_vertex
-            and not self.google_api_key.get_secret_value().strip()
+        google_api_key = self.google_api_key.get_secret_value().strip()
+        if self.ai_provider == "google" and not self.google_use_vertex and (
+            not google_api_key or google_api_key in _PLACEHOLDER_VALUES
         ):
             errors.append("GOOGLE_API_KEY or Vertex credentials are required in production")
         if errors:

@@ -15,8 +15,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.models.module import Module
+from platform_service.db.models.module_card import ModuleCard
+from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
 from platform_service.db.repositories.source_repository import SourceRepository
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.card_provenance import (
     BlockProvenanceRow,
     CardProvenanceContext,
@@ -36,7 +39,9 @@ __all__ = [
     "BlockProvenanceRow",
     "CardProvenanceContext",
     "_presigned_url_at_page",
+    "card_payload",
     "cards_with_source_pages",
+    "get_card_counts",
     "get_quiz_counts",
     "quiz_payload",
     "render_card_provenance",
@@ -55,6 +60,7 @@ async def summary_from_module(
     card_count: int,
     quiz_count: int,
     storage: ObjectStorageClient | None = None,
+    family: ModuleFamily | None = None,
 ) -> ModuleSummary:
     thumb_path = module.thumbnail_storage_path
     thumb_url: str | None = None
@@ -79,12 +85,24 @@ async def summary_from_module(
         estimated_minutes=module.estimated_minutes,
         published_at=module.published_at,
         created_at=module.created_at,
+        first_activated_at=module.first_activated_at,
+        last_deactivated_at=module.last_deactivated_at,
+        last_reactivated_at=module.last_reactivated_at,
         quality_flags=module.quality_flags_jsonb,
         search_metadata=module.search_metadata_jsonb,
+        chatbot_faqs_only=module.chatbot_faqs_only,
         thumbnail_storage_path=thumb_path,
         thumbnail_presigned_url=thumb_url,
         thumbnail_presigned_expires_seconds=thumb_expires,
+        source_document_ids=(
+            [str(doc_id) for doc_id in (module.source_document_ids or [])]
+            or None
+        ),
     )
+
+
+def card_payload(rows: list[ModuleCard]) -> list[dict[str, Any]]:
+    return [card_row_to_dict(row) for row in rows]
 
 
 async def cards_with_source_pages(
@@ -168,6 +186,18 @@ async def source_documents_for_module(
             )
         )
     return refs
+
+
+async def get_card_counts(session: AsyncSession, module_ids: list[UUID]) -> dict[UUID, int]:
+    if not module_ids:
+        return {}
+    stmt = (
+        select(ModuleCard.module_id, func.count(ModuleCard.id))
+        .where(ModuleCard.module_id.in_(module_ids))
+        .group_by(ModuleCard.module_id)
+    )
+    result = await session.execute(stmt)
+    return {r[0]: r[1] for r in result.all()}
 
 
 async def get_quiz_counts(session: AsyncSession, module_ids: list[UUID]) -> dict[UUID, int]:

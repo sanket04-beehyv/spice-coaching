@@ -46,7 +46,7 @@ MicroCoaching is a **Python monorepo** that powers AI-assisted health coaching f
 | Architecture style | Monorepo microservices — layered MVC inside platform |
 | Deployable units | `platform-api`, `platform-celery-worker`, `platform-celery-beat`, `ai-runtime`, `migrate` (one-shot) |
 | Data stores | PostgreSQL + pgvector, Redis, ClickHouse, MinIO |
-| External dependencies | Google Vertex/Gemini (primary), OpenAI (optional), SPICE auth-service (production), MinIO/S3 |
+| External dependencies | Google Vertex/Gemini, SPICE auth-service (production), MinIO/S3 |
 
 ---
 
@@ -70,7 +70,6 @@ graph LR
     subgraph "External Services"
         SPICE[SPICE Auth Service]
         Vertex[Google Vertex AI / Gemini]
-        OpenAI[OpenAI API]
         MinIO[(MinIO / S3)]
     end
 
@@ -90,7 +89,6 @@ graph LR
     Platform --> CH
     Platform --> MinIO
     AIRuntime --> Vertex
-    AIRuntime -.->|optional| OpenAI
 ```
 
 ### External Dependencies
@@ -99,7 +97,6 @@ graph LR
 |--------|---------|---------|------------|
 | **SPICE auth-service** | platform-api | JWT validation, admin vs device authorization planes | `POST {SPICE_AUTH_BASE_URL}/authenticate` |
 | **Google Vertex AI / Gemini** | ai-runtime | Inference, vision, transcription, embeddings | SDK via ADC or API key |
-| **OpenAI** | ai-runtime | Alternate provider (inference + embeddings) | API key |
 | **MinIO / S3** | platform-api, workers | Source documents, thumbnails, admin file assets | S3-compatible API |
 | **Analytics dashboard** (separate repo) | Browser | Program-manager analytics UI | Calls platform dashboard routes |
 
@@ -130,7 +127,7 @@ graph LR
 | Cache / queue broker | Redis 7 | Celery broker | Job queue, rate-limit state | Lightweight; no Celery result backend by design |
 | Task queue | Celery | platform workers | Ingest pipeline, post-publish, telemetry drain | Mature Python async job orchestration |
 | Object storage | MinIO | S3-compatible | PDFs, thumbnails, ingest artifacts | Presigned URLs for device offline access |
-| AI providers | google-genai, openai | ai-runtime only | LLM inference and embeddings | Provider SDKs isolated in stateless service |
+| AI providers | google-genai | ai-runtime only | LLM inference and embeddings | Provider SDK isolated in stateless service |
 | Auth | SPICE middleware | platform | External IdP integration | Enterprise SSO; admin/device plane split |
 | Observability | python-json-logger, request IDs | mc_foundation | Structured logs, correlation | Shared across services |
 | CI | GitHub Actions | `.github/workflows/ci.yml` | Lint, security scan, typecheck, tests | Gates on `main` and `dev` |
@@ -208,7 +205,7 @@ graph TD
 #### 4.4 — ai-runtime
 
 - **Purpose**: Stateless LLM provider execution — generation, embedding, transcription.
-- **Technology**: Python 3.12, FastAPI, google-genai / openai SDKs.
+- **Technology**: Python 3.12, FastAPI, google-genai SDK.
 - **Exposes**: Internal HTTP on port 8001 (`/internal/generate/*`, `/internal/embed`, `/internal/transcribe`, `/health`).
 - **Depends on**: AI provider credentials only — **no PostgreSQL, Redis, or ClickHouse**.
 - **Entry point**: `services/ai-runtime/src/ai_runtime/main.py`
@@ -277,9 +274,9 @@ All paths are relative to `API_ROOT_PATH` (default `/medtronics-api`).
 | `/telemetry` | Device | `POST /events` |
 | `/sync` | Device | `GET /modules`, `/triggers`, `/gaps`, `/config`; presign batches |
 | `/morning` | Device | `GET /cards` |
-| `/admin` | Admin | `/ingest`, `/modules`, `/trigger-bindings`, `/fusion`, `/v3/files` |
+| `/admin` | Admin | `/ingest`, `/modules`, `/trigger-bindings`, `/fusion`, `/files` |
 | `/dashboard` | Admin | `/supervisor/{chw_id}`, `/district/{upazila_id}`, `/llm-quality` |
-| — | Ops | `/health`, `/ready` |
+| — | Ops | `/ready` |
 
 Full contract: [`README.md`](../README.md#canonical-endpoint-contract).
 
@@ -293,12 +290,10 @@ graph LR
         Router["Internal Routers\n/generate, /embed, /transcribe"]
         Exec["PromptExecutor\nprovider dispatch"]
         Google["GoogleProvider\nVertex / API key"]
-        OpenAI["OpenAIProvider"]
     end
 
     HTTP["Platform HTTP"] --> Router --> Exec
     Exec --> Google
-    Exec -.-> OpenAI
 ```
 
 #### Key Modules
@@ -307,7 +302,7 @@ graph LR
 |--------|----------------|-----------|
 | API | Internal endpoints | `api/internal_generate.py`, `api/internal_embed.py`, `api/internal_transcribe.py` |
 | Services | Provider orchestration | `services/prompt_executor.py` |
-| Providers | SDK adapters | `providers/google_provider.py`, `providers/openai_provider.py` |
+| Providers | SDK adapters | `providers/google_provider.py` |
 | Config | Provider selection, model defaults | `config.py` |
 
 #### Internal API
@@ -598,9 +593,17 @@ Configuration is **environment-variable driven** via Pydantic Settings (`platfor
 |----------|---------|
 | `AI_RUNTIME_BASE_URL` | ai-runtime HTTP base |
 | `AI_RUNTIME_TOKEN` | `X-Internal-Token` for internal calls |
-| `AI_CLOUD_PROVIDER` | `google` or `openai` — must match ai-runtime |
-| `GOOGLE_INFERENCE_MODEL`, `GOOGLE_EMBEDDING_MODEL`, etc. | Model policy forwarded in InferenceRequest |
 | `EMBEDDING_DIMENSION` | pgvector dimension (must match ai-runtime) |
+
+Platform does **not** select inference models. ai-runtime owns model id and
+generation budgets (`max_tokens`, `temperature`) via `generation_profiles`
+keyed by `generation_type`; platform only sends the role plus prompt/content
+constraints on `InferenceRequest`.
+
+**Deploy order:** restart/deploy **ai-runtime** before **platform** when
+cutting over (shared monorepo contracts). Stage C (`module_identification`)
+defaults to `max_tokens=12000` in code (not the former compose `32768`
+override).
 
 **Platform — auth:**
 
@@ -618,7 +621,6 @@ Configuration is **environment-variable driven** via Pydantic Settings (`platfor
 | `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION` | Vertex config |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Service account JSON path |
 | `GOOGLE_API_KEY` / `GEMINI_API_KEY` | Developer API fallback |
-| `OPENAI_API_KEY` | OpenAI provider |
 | `INTERNAL_TOKEN` | Validates platform requests |
 
 ---
@@ -637,7 +639,7 @@ Configuration is **environment-variable driven** via Pydantic Settings (`platfor
 - ⚠️ Extra network hop and operational surface (two services to deploy/monitor)
 - ⚠️ Platform must assemble fully-resolved `InferenceRequest` objects (more contract surface)
 
-**Alternatives considered**: Monolith with inline SDK calls — rejected to prevent platform from importing `google.generativeai` / `openai` (see `docs/PROJECT_NAVIGATION.md`).
+**Alternatives considered**: Monolith with inline SDK calls — rejected to prevent platform from importing `google.generativeai` (see `.cursor/rules/repo-overview.mdc`).
 
 ### 9.2 — Module-Centric Model (Not Scenario-Centric)
 
@@ -720,7 +722,7 @@ Headers: `Authorization: Bearer <jwt>`, optional `client` (`web` for admin, `mob
 
 - **Logging**: `mc_foundation.logging.setup_logging` — JSON logs in production (`log_json=true` in compose).
 - **Request correlation**: `RequestIdMiddleware` on both services.
-- **Health**: `/health` (liveness), `/ready` (platform dependency matrix).
+- **Health**: `/ready` (platform dependency matrix); ai-runtime `/health` (liveness).
 - **Metrics/tracing**: No dedicated APM integration detected in codebase — relies on structured logs.
 
 ### Configuration Management
@@ -733,7 +735,7 @@ Headers: `Authorization: Bearer <jwt>`, optional `client` (`web` for admin, `mob
 
 ## Appendix A — Dependency Graph
 
-Allowed import boundaries (enforced by convention and documented in `docs/PROJECT_NAVIGATION.md`):
+Allowed import boundaries (enforced by convention and `.cursor/rules/repo-overview.mdc`):
 
 ```mermaid
 graph LR
@@ -798,7 +800,7 @@ coaching-platform/
 │       └── src/ai_runtime/
 │           ├── main.py             # Stateless FastAPI app
 │           ├── api/                # internal_generate, embed, transcribe
-│           ├── providers/          # Google, OpenAI adapters
+│           ├── providers/          # Google adapter
 │           └── services/           # prompt_executor
 │
 ├── infra/

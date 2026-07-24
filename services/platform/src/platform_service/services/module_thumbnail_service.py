@@ -17,14 +17,6 @@ from platform_service.services.object_storage import (
     looks_like_object_storage_storage_path,
 )
 
-_ALLOWED_THUMBNAIL_PREFIXES: frozenset[str] = frozenset(
-    {
-        "ingest/thumbnails/",
-        "module-thumbnails/",
-        "uploads/",
-    }
-)
-
 _ALLOWED_THUMBNAIL_SUFFIXES: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 
 
@@ -77,10 +69,12 @@ async def validate_module_thumbnail_storage_path(
         )
 
     object_name = _object_name_from_storage_path(path, bucket_name=bucket_name)
-    if not any(object_name.startswith(prefix) for prefix in _ALLOWED_THUMBNAIL_PREFIXES):
+    allowed_prefixes = settings.admin_file_allowed_prefix_set
+    top = object_name.split("/", maxsplit=1)[0]
+    if top not in allowed_prefixes or "/" not in object_name:
         raise ValidationError(
             "invalid_thumbnail_object_prefix",
-            f"object_name must start with one of: {sorted(_ALLOWED_THUMBNAIL_PREFIXES)}",
+            f"object_name must start with one of {sorted(allowed_prefixes)!r}/",
         )
 
     suffix = Path(object_name).suffix.lower()

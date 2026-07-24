@@ -39,28 +39,23 @@ from platform_service.config import get_settings
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
+from platform_service.services.prompt_variables.quiz_generation_variables import (
+    build_quiz_generation_variables,
+)
 from platform_service.workers.quiz_generation_worker import (
+    _clamp_quiz_size,
     _format_card_block,
     _target_quiz_size,
     generate_quiz_for_module,
-    render_system_prompt,
 )
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import requires_db
 
+pytestmark = pytest.mark.usefixtures("mock_prompt_templates")
+
 # ─── Pure unit: target quiz size + card block formatter ────────────────────
-
-
-def _card_block(card: dict[str, Any], idx: int) -> str:
-    settings = get_settings()
-    return _format_card_block(
-        card,
-        idx,
-        primary_locale=settings.deployment_primary_locale,
-        settings=settings,
-    )
 
 
 class TestTargetQuizSize:
@@ -84,9 +79,19 @@ class TestTargetQuizSize:
         assert _target_quiz_size(0) == s.quiz_min_questions
 
 
+class TestClampQuizSize:
+    def test_clamps_above_max(self) -> None:
+        s = get_settings()
+        assert _clamp_quiz_size(s.quiz_max_questions + 5, settings=s) == s.quiz_max_questions
+
+    def test_clamps_below_min(self) -> None:
+        s = get_settings()
+        assert _clamp_quiz_size(1, settings=s) == s.quiz_min_questions
+
+
 class TestFormatCardBlock:
     def test_includes_only_populated_fields(self) -> None:
-        block = _card_block({"title": {"bn": "T"}, "body": {"bn": "B"}}, idx=1)
+        block = _format_card_block({"title": {"bn": "T"}, "body": {"bn": "B"}}, idx=1)
         assert "### Card 1" in block
         assert "Title (bn): T" in block
         assert "Body (bn): B" in block
@@ -95,7 +100,7 @@ class TestFormatCardBlock:
         assert "Rationale" not in block
 
     def test_includes_all_optional_fields_in_order(self) -> None:
-        block = _card_block(
+        block = _format_card_block(
             {
                 "title": {"bn": "t"},
                 "body": {"bn": "b"},
@@ -111,27 +116,32 @@ class TestFormatCardBlock:
         positions = [
             block.index("Title (bn)"),
             block.index("Body (bn)"),
-            block.index("Next Action (bn)"),
-            block.index("Previous Practice (bn)"),
-            block.index("Current Practice (bn)"),
-            block.index("Rationale For Change (bn)"),
+            block.index("Next action (bn)"),
+            block.index("Previous practice (bn)"),
+            block.index("Current practice (bn)"),
+            block.index("Rationale (bn)"),
         ]
         assert positions == sorted(positions)
 
     def test_card_index_in_header(self) -> None:
-        assert "### Card 7" in _card_block({"title": {"bn": "x"}}, idx=7)
+        assert "### Card 7" in _format_card_block({"title": {"bn": "x"}}, idx=7)
 
     def test_empty_card_only_emits_header(self) -> None:
-        block = _card_block({}, idx=1)
+        block = _format_card_block({}, idx=1)
         assert block.strip() == "### Card 1"
 
 
 class TestRenderSystemPrompt:
     def test_forbids_card_citations_in_explanations(self) -> None:
-        prompt = render_system_prompt()
-        assert "cite which card" not in prompt.lower()
-        assert "do not mention card numbers" in prompt.lower()
-        assert "no card references" in prompt.lower()
+        settings = get_settings()
+        variables = build_quiz_generation_variables(
+            module_title="Sample",
+            domain="anc",
+            quiz_size=3,
+            cards_block="",
+            settings=settings,
+        )
+        assert "no card references" in variables["explanation_field_schema"].lower()
 
 
 # ─── DB-backed setup ────────────────────────────────────────────────────────
@@ -189,6 +199,8 @@ def _llm_response(payload: Any, *, error: str | None = None) -> InferenceRespons
         generation_type=GenerationType.QUIZ_DRAFTING,
         provider="google",
         model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text="" if payload is None else (payload if isinstance(payload, str) else ""),
         parsed_json=payload if not isinstance(payload, str) else None,
         latency_ms=200,
@@ -220,11 +232,7 @@ def mock_generate(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         async def generate(self, request: InferenceRequest) -> InferenceResponse:
             return await gen_mock(request)
 
-    stub = _StubClient()
-    monkeypatch.setattr(
-        "platform_service.workers.quiz_generation_worker.get_ai_client",
-        lambda: stub,
-    )
+    monkeypatch.setattr("platform_service.workers.quiz_generation_worker.AIRuntimeClient", _StubClient)
     return gen_mock
 
 
@@ -329,6 +337,7 @@ class TestHappyPath:
         row = result.scalar_one()
         assert row.explanation_localized is not None
         assert "কার্ড" not in row.explanation_localized["bn"]
+        assert "Card" not in row.explanation_localized["en"]
 
 
 # ─── Idempotent retry ───────────────────────────────────────────────────────
@@ -413,6 +422,8 @@ class TestLlmOutputShapes:
             generation_type=GenerationType.QUIZ_DRAFTING,
             provider="google",
             model="gemini-2.5-flash",
+            max_tokens=8192,
+            temperature=0.2,
             raw_text="this is not json{{{",
             parsed_json=None,
             latency_ms=10,
@@ -433,6 +444,8 @@ class TestLlmOutputShapes:
             generation_type=GenerationType.QUIZ_DRAFTING,
             provider="google",
             model="gemini-2.5-flash",
+            max_tokens=8192,
+            temperature=0.2,
             raw_text=json.dumps({"questions": [_valid_question(0)]}),
             parsed_json=None,
             latency_ms=10,
@@ -454,6 +467,8 @@ class TestLlmOutputShapes:
             generation_type=GenerationType.QUIZ_DRAFTING,
             provider="google",
             model="gemini-2.5-flash",
+            max_tokens=8192,
+            temperature=0.2,
             raw_text="42",
             parsed_json=None,
             latency_ms=10,

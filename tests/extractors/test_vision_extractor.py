@@ -25,6 +25,8 @@ def _make_mock_response(
         generation_type=GenerationType.VISION_EXTRACTION,
         provider="google",
         model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text=raw_text,
         parsed_json=None,
         latency_ms=200,
@@ -71,11 +73,14 @@ class TestVisionExtractorRequest:
         assert att.label == "page_3"
 
     @pytest.mark.asyncio
-    async def test_request_uses_configured_vision_model(self, mock_client: AsyncMock) -> None:
-        extractor = VisionExtractor(client=mock_client, model="gemini-2.5-pro")
+    async def test_request_does_not_send_model_policy(self, mock_client: AsyncMock) -> None:
+        """Model selection is owned by ai-runtime generation profiles."""
+        extractor = VisionExtractor(client=mock_client)
         await extractor.extract_page(page_image_bytes=b"x")
         sent: InferenceRequest = mock_client.generate.call_args.args[0]
-        assert sent.model_policy.model == "gemini-2.5-pro"
+        assert not hasattr(sent, "model_policy") or getattr(sent, "model_policy", None) is None
+        assert "model_policy" not in sent.model_dump()
+        assert sent.generation_type == GenerationType.VISION_EXTRACTION
 
     @pytest.mark.asyncio
     async def test_request_passes_trace_context(self, mock_client: AsyncMock) -> None:
@@ -155,6 +160,20 @@ class TestArbitraryAdaptersStillWork:
         result = await extractor.extract_page(page_image_bytes=b"x")
         assert result.markdown == "from stub"
         assert captured["req"].generation_type == GenerationType.VISION_EXTRACTION
+
+
+class TestVisionHtmlNormalization:
+    @pytest.mark.asyncio
+    async def test_extract_normalizes_html_markup(self) -> None:
+        html_body = "<b>Bold heading</b><br><ul><li>First item</li><li>Second item</li></ul>"
+        client = AsyncMock()
+        client.generate = AsyncMock(return_value=_make_mock_response(raw_text=html_body))
+        extractor = VisionExtractor(client=client)
+        result = await extractor.extract_page(page_image_bytes=b"x", page_label="page_1")
+        assert "<" not in result.markdown
+        assert "**Bold heading**" in result.markdown
+        assert "- First item" in result.markdown
+        assert "- Second item" in result.markdown
 
 
 # ─── JSON envelope unwrap (Layer 2 — regression for the bug we caught) ─────

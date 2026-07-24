@@ -7,10 +7,13 @@ Routing:
 - `telemetry_behavioural_gap_state_enabled` (default false) selects operational state:
   - **false (quiz mode):** only `MODULE_QUIZ_ATTEMPTED` → `process_module_event_task`
     (per-quiz-question state in `chw_quiz_question_state`).
-  - **true (gap mode):** `event_type` ∈ MODULE_* (W-10 v3.3 module-pipeline flow) →
+  - **true (gap mode):** `event_type` ∈ MODULE_* pipeline set (W-10 v3.3) →
     enqueue `process_module_event_task` (module completion + gap state); plus
     `event_type` == SPICE_ACTION_OBSERVED (gap observation from
     `payload_json.behavioural_gap_id`).
+- `MODULE_REQUESTED` → enqueue `process_training_request_event_task` when
+  `module_id` or non-empty `payload_json.requested_module_name` is present
+  (independent of the gap-state flag; does not use the completion worker).
 
 W-10 hardening (additive on top of the original handler):
 1. Dedup by event_id via Redis SET-NX with 24h TTL — duplicates from SDK
@@ -33,7 +36,7 @@ from mc_contracts.enums import CoachingEventType
 from mc_contracts.telemetry import TelemetryAckResponse, TelemetryBatch, TelemetryEvent
 
 from platform_service.auth.spice_identity import require_chw_id_for_telemetry
-from platform_service.celery_tasks import process_module_event_task
+from platform_service.celery_tasks import process_module_event_task, process_training_request_event_task
 from platform_service.config import get_settings
 from platform_service.deps import get_clickhouse_client, get_redis_client
 from platform_service.services.telemetry_buffer import enqueue_rows
@@ -51,6 +54,7 @@ def _resolve_telemetry_chw_id(request: Request, batch: TelemetryBatch) -> int:
 
 # v3.3 module-pipeline event types (W-10). Anything in this set is routed
 # to `process_module_event_task` instead of the scenario-level path.
+# MODULE_REQUESTED is intentionally excluded (dedicated training-request task).
 _MODULE_EVENT_TYPES: frozenset[str] = frozenset(
     {
         CoachingEventType.MODULE_DELIVERED.value,
@@ -73,6 +77,23 @@ def _resolve_timestamp_utc(e: TelemetryEvent) -> int:
     if e.timestamp_utc is not None:
         return e.timestamp_utc
     return e.timestamp_local
+
+
+def _requested_module_name_from_payload(payload: dict | None) -> str | None:
+    raw = (payload or {}).get("requested_module_name")
+    if not isinstance(raw, str):
+        return None
+    name = raw.strip()
+    return name or None
+
+
+def _reason_from_payload(payload: dict | None) -> str | None:
+    raw = (payload or {}).get("reason")
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        return str(raw)
+    return raw
 
 
 def _event_to_row(
@@ -139,8 +160,10 @@ async def ingest_events(
     coaching_events: list[list] = []
     coaching_event_ids: list[str | None] = []
     # gap_jobs removed in the architecture reset (legacy scenario telemetry
-    # path is gone); module_jobs is the only enqueue surface now.
+    # path is gone); module_jobs is the completion/gap enqueue surface.
+    # training_request_jobs handles MODULE_REQUESTED separately.
     module_jobs: list[dict] = []
+    training_request_jobs: list[dict] = []
 
     synced_at_ms = int(time.time() * 1000)
     request_id = getattr(request.state, "request_id", None)
@@ -167,7 +190,28 @@ async def ingest_events(
 
             event_type_value = _as_ch_value(event.event_type)
 
-            if gap_state_enabled:
+            if event_type_value == CoachingEventType.MODULE_REQUESTED.value:
+                requested_name = _requested_module_name_from_payload(event.payload_json)
+                if event.module_id is not None or requested_name:
+                    training_job: dict = {
+                        "chw_id": chw_id,
+                        "tenant_id": batch.tenant_id,
+                        "event_id": event.id,
+                        "event_type": event_type_value,
+                        "module_id": str(event.module_id) if event.module_id is not None else None,
+                        "requested_module_name": requested_name,
+                        "reason": _reason_from_payload(event.payload_json),
+                        "payload_json": event.payload_json or {},
+                    }
+                    if request_id:
+                        training_job["request_id"] = request_id
+                    training_request_jobs.append(training_job)
+                else:
+                    logger.warning(
+                        "module_requested missing module_id and requested_module_name event_id=%s",
+                        event.id,
+                    )
+            elif gap_state_enabled:
                 # W-10 module-pipeline path (gap mode). The legacy v3.0 scenario-level
                 # gap-update path was deleted in the architecture reset (the
                 # underlying scenario / chw_gap_profile tables are gone).
@@ -234,10 +278,12 @@ async def ingest_events(
 
     # Enqueue Celery jobs only for events that made it past validation. We
     # enqueue regardless of the ClickHouse outcome — the ClickHouse layer
-    # is for analytics; the gap/completion state is the operational truth
-    # and shouldn't be held hostage to a ClickHouse outage.
+    # is for analytics; operational state shouldn't be held hostage to a
+    # ClickHouse outage.
     for j in module_jobs:
         process_module_event_task.delay(j)
+    for j in training_request_jobs:
+        process_training_request_event_task.delay(j)
 
     return TelemetryAckResponse(
         accepted=accepted,

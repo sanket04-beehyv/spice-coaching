@@ -27,33 +27,9 @@ from typing import Any
 
 from mc_foundation.locale import locale_display_name
 
-from platform_service.config import get_settings
 from platform_service.services.prompts.symbol_verbalization import (
     render_locale_map_field_schema,
-    render_symbol_verbalization_rules,
 )
-
-CARD_DRAFTER_TEMPLATE_ID = "v33-stage-d-card-drafter"
-# v2: added cross-source coverage rule. When the candidate's cited blocks
-# span multiple source_document_ids (a fused candidate from Stage 2b —
-# clinical training manual + digital workflow guide), the card set MUST
-# cite blocks from EACH source so the fused module's cards reflect the
-# CHW activity from both angles. Without this rule the LLM defaulted to
-# the larger pile and produced clinical-only cards for a fused module
-# titled "X Counselling and Digital Service Delivery" (Family Planning
-# experiment, 2026-05-09: 47 BRAC + 10 UHIS blocks → 5 cards, 0 citing
-# UHIS). Cache entries from v1 will not be reused.
-# v3: comparator/range verbalization for Bangla TTS. PROMPT_SYMBOL + UHIS
-# fixture ingests (2026-06): age ranges verbalized correctly (`20 to 30`,
-# `18 বছরের কম`), but symbol-style thresholds (`BP≥140/90`) still slipped
-# through — rules target `>=`, `<=`, and `-` ranges. Cache entries from v2
-# will not be reused.
-# v4: reconcile "verbatim" ground rules with symbol verbalization — prose
-# verbatim, digits preserved, symbols verbalized. Cache entries from v3 will
-# not be reused.
-# v6: monolingual deployment — primary locale only; no mirror/AI-translate rules.
-CARD_DRAFTER_TEMPLATE_VERSION = 6
-
 
 _SYSTEM_BASE = """\
 You are drafting learning cards for community health workers (CHWs)
@@ -64,6 +40,8 @@ GROUND RULES (apply to every card):
   into one card.
 - Card content must come from the cited content_blocks below. Do NOT invent
   clinical content. If a sub-topic has no source coverage, drop the card.
+- Write card text as plain sentences. Do NOT use markdown formatting (no headings
+  like `##`, no bullet lists, no tables, no blockquotes, no code fences).
 - Content ({primary_locale_label} — keys under title / body / etc.) must use the
   EXACT vocabulary and tone of the cited blocks in that language where available
   — these are the training-manual phrasings the CHW already learned. Do NOT
@@ -257,47 +235,6 @@ def _module_type_rules_for(
     if module_type == "content_update":
         return _CONTENT_UPDATE_RULES.format(primary_locale_label=primary_label)
     return _REFRESHER_RULES
-
-
-def render_system_prompt(
-    *,
-    module_type: str,
-    card_min_count: int,
-    card_max_count: int,
-    deployment_primary_locale: str | None = None,
-    deployment_region_context: str | None = None,
-) -> str:
-    """Render the per-module-type system prompt."""
-    settings = get_settings()
-    primary_locale = deployment_primary_locale or settings.deployment_primary_locale
-    region_context = deployment_region_context or settings.deployment_region_context
-    primary_label = locale_display_name(primary_locale)
-
-    title_schema = render_locale_map_field_schema(
-        "title",
-        primary_locale=primary_locale,
-        primary_required=True,
-    )
-
-    module_rules = _module_type_rules_for(module_type, primary_locale=primary_locale)
-    if module_type in ("initial_training", "refresher", "digital_proficiency"):
-        module_rules = module_rules.format(card_min_count=card_min_count, card_max_count=card_max_count)
-
-    return _SYSTEM_BASE.format(
-        deployment_region_context=region_context,
-        primary_locale_label=primary_label,
-        card_min_count=card_min_count,
-        card_max_count=card_max_count,
-        module_type_rules=module_rules,
-        title_field_schema=title_schema,
-        body_field_schema=_body_field_schema_for(
-            module_type,
-            primary_locale=primary_locale,
-        ),
-        symbol_verbalization_rules=render_symbol_verbalization_rules(
-            primary_locale=primary_locale,
-        ),
-    )
 
 
 def render_human_message(

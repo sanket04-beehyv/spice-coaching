@@ -156,7 +156,7 @@ async def sync_modules(
     ),
     user_id: int | None = Query(
         default=None,
-        description="When provided, include module IDs assigned to this user.",
+        description="When provided, include assigned_module_ids and requested_modules for this user.",
     ),
     tenant_id: UUID | None = Query(
         default=None,
@@ -164,7 +164,11 @@ async def sync_modules(
     ),
     db: AsyncSession = Depends(get_db),
 ) -> ModulesSyncBundle:
-    """Return published modules updated after `since` (plus their quiz payloads)."""
+    """Return published modules updated after `since` (plus their quiz payloads).
+
+    When ``user_id`` is provided, also returns ``assigned_module_ids`` and the
+    CHW's full ``requested_modules`` history (known module IDs and free-text names).
+    """
     if since.tzinfo is None:
         since = since.replace(tzinfo=UTC)
 

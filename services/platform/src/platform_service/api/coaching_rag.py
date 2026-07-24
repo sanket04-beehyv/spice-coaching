@@ -33,6 +33,3 @@ async def rag_query(
         return await CoachingRagService(session, ai, storage).query(body, tenant_id=effective_tenant)
     except CoachingRagError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-
-
-__all__ = ["router"]

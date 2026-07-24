@@ -69,12 +69,36 @@ def process_module_event_task(payload: dict) -> None:
 
 
 @celery_app.task(
+    name="platform.process_training_request_event",
+    autoretry_for=(OperationalError, DBAPIError),
+    max_retries=3,
+    default_retry_delay=60,
+)
+def process_training_request_event_task(payload: dict) -> None:
+    """Create a CHW training request from a ``module_requested`` telemetry event.
+
+    Thin Celery wrapper around ``process_training_request_event_job``. Enqueued
+    from ``api/telemetry.py`` independently of the module-completion path.
+    """
+    from platform_service.workers.training_request_event_worker import (
+        process_training_request_event_job,
+    )
+
+    _run(process_training_request_event_job(payload))
+
+
+@celery_app.task(
     name="platform.generate_module_quiz",
     autoretry_for=CELERY_TRANSIENT_ERRORS,
     max_retries=2,
     default_retry_delay=120,
 )
-def generate_module_quiz_task(module_id: str, step_id: str | None = None) -> None:
+def generate_module_quiz_task(
+    module_id: str,
+    step_id: str | None = None,
+    *,
+    quiz_size: int | None = None,
+) -> None:
     """Post-publish quiz generation. Enqueued by Stage 3 on module publish.
 
     Failure is non-blocking — the module stays published with zero quiz
@@ -86,7 +110,7 @@ def generate_module_quiz_task(module_id: str, step_id: str | None = None) -> Non
     from platform_service.workers.quiz_generation_worker import generate_quiz_for_module
 
     parsed_step_id = UUID(step_id) if step_id else None
-    _run(generate_quiz_for_module(UUID(module_id), step_id=parsed_step_id))
+    _run(generate_quiz_for_module(UUID(module_id), step_id=parsed_step_id, quiz_size=quiz_size))
 
 
 @celery_app.task(
@@ -236,21 +260,6 @@ def run_ingest_batch_task(payload: dict) -> None:
     _run(run_ingest_batch_job(payload))
 
 
-@celery_app.task(
-    name="platform.run_cross_source_fusion",
-    autoretry_for=(OperationalError, DBAPIError, *CELERY_TRANSIENT_ERRORS),
-    max_retries=2,
-    default_retry_delay=120,
-    soft_time_limit=_INGEST_SOFT_TIME_LIMIT,
-    time_limit=_INGEST_TIME_LIMIT,
-)
-def run_cross_source_fusion_task(payload: dict) -> None:
-    """Stage 2b → publish for POST /admin/fusion."""
-    from platform_service.workers.ingest_worker import run_cross_source_fusion_job
-
-    _run(run_cross_source_fusion_job(payload))
-
-
 @celery_app.task(name="platform.drain_telemetry_buffer")
 def drain_telemetry_buffer_task() -> None:
     """Retry buffered ClickHouse telemetry rows after ingest outages."""
@@ -270,3 +279,33 @@ def aggregate_chat_faqs_task() -> None:
     from platform_service.workers.chat_faq_worker import aggregate_chat_faqs_job
 
     _run(aggregate_chat_faqs_job())
+
+
+@celery_app.task(
+    name="platform.refresh_module_demand_summary",
+    autoretry_for=(OperationalError, DBAPIError, *CELERY_TRANSIENT_ERRORS),
+    max_retries=2,
+    default_retry_delay=300,
+)
+def refresh_module_demand_summary_task() -> None:
+    """Daily refresh of the cached admin module-demand summary snapshot."""
+    from platform_service.workers.module_demand_summary_worker import (
+        refresh_module_demand_summaries_job,
+    )
+
+    _run(refresh_module_demand_summaries_job())
+
+
+@celery_app.task(
+    name="platform.aggregate_chat_feedback_summary",
+    autoretry_for=(OperationalError, DBAPIError, *CELERY_TRANSIENT_ERRORS),
+    max_retries=2,
+    default_retry_delay=300,
+)
+def aggregate_chat_feedback_summary_task() -> None:
+    """Weekly refresh of per-tenant chat feedback summaries from telemetry."""
+    from platform_service.workers.chat_feedback_summary_worker import (
+        aggregate_chat_feedback_summary_job,
+    )
+
+    _run(aggregate_chat_feedback_summary_job())

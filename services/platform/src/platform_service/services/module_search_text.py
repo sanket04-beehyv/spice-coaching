@@ -53,6 +53,33 @@ def _list_values_from_localized_map(localized: dict[str, Any] | None) -> list[st
     return parts
 
 
+def _synonym_text_from_localized_map(synonyms_map: dict[str, Any] | None) -> list[str]:
+    """Flatten abbrev and expansion strings from all locale synonym maps."""
+    if not isinstance(synonyms_map, dict):
+        return []
+    parts: list[str] = []
+    seen: set[str] = set()
+
+    def _add(value: str | None) -> None:
+        if not value:
+            return
+        text = value.strip()
+        if not text or text in seen:
+            return
+        seen.add(text)
+        parts.append(text)
+
+    for locale_map in synonyms_map.values():
+        if not isinstance(locale_map, dict):
+            continue
+        for abbrev, expanded in locale_map.items():
+            if isinstance(abbrev, str):
+                _add(abbrev)
+            if isinstance(expanded, str):
+                _add(expanded)
+    return parts
+
+
 def card_metadata_text_for_search(metadata: dict[str, Any] | None) -> list[str]:
     """Extract per-card lexical metadata fields for BM25 / embedding indexing."""
     if not metadata:
@@ -77,13 +104,8 @@ def card_metadata_text_for_search(metadata: dict[str, Any] | None) -> list[str]:
             for item in _list_values_from_localized_map(raw):
                 _add(item)
 
-    synonyms = metadata.get("synonyms_en")
-    if isinstance(synonyms, dict):
-        for abbrev, expanded in synonyms.items():
-            if isinstance(abbrev, str):
-                _add(abbrev)
-            if isinstance(expanded, str):
-                _add(expanded)
+    for item in _synonym_text_from_localized_map(migrated.get("synonyms")):
+        _add(item)
 
     return parts
 
@@ -112,26 +134,18 @@ def metadata_text_for_search(metadata: dict[str, Any] | None) -> list[str]:
             for item in _list_values_from_localized_map(raw):
                 _add(item)
 
-    for key in ("topic_tags", "clinical_conditions"):
-        raw = metadata.get(key)
-        if not isinstance(raw, list):
-            continue
-        for item in raw:
-            if isinstance(item, str):
-                _add(item)
-
-    synonyms = metadata.get("synonyms_en")
-    if isinstance(synonyms, dict):
-        for abbrev, expanded in synonyms.items():
-            if isinstance(abbrev, str):
-                _add(abbrev)
-            if isinstance(expanded, str):
-                _add(expanded)
+    for item in _synonym_text_from_localized_map(migrated.get("synonyms")):
+        _add(item)
 
     return parts
 
 
-def module_text_for_search(module: Module, *, settings: Settings | None = None) -> str:
+def module_text_for_search(
+    module: Module,
+    *,
+    cards: list[dict[str, Any]] | None = None,
+    settings: Settings | None = None,
+) -> str:
     """Concatenate the module's title and card text into a single search input.
 
     Order: title → description → search metadata → each card's localized fields
@@ -142,9 +156,9 @@ def module_text_for_search(module: Module, *, settings: Settings | None = None) 
     parts.extend(_localized_values(module.title_localized, settings=s))
     parts.extend(_localized_values(module.description_localized, settings=s))
     parts.extend(metadata_text_for_search(module.search_metadata_jsonb))
-    cards = (module.module_json or {}).get("cards", [])
+    card_dicts = cards if cards is not None else []
     primary = deployment_locales(s)
-    for card in cards:
+    for card in card_dicts:
         if not isinstance(card, dict):
             continue
         migrated_card = migrate_legacy_card(dict(card), primary=primary)

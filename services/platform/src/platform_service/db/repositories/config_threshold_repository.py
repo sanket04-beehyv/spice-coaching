@@ -51,3 +51,23 @@ class ConfigThresholdRepository:
     async def list_all(self) -> list[ConfigThreshold]:
         stmt = select(ConfigThreshold)
         return list((await self.session.execute(stmt)).scalars().all())
+
+    async def get_by_key(self, key: str) -> ConfigThreshold | None:
+        stmt = select(ConfigThreshold).where(ConfigThreshold.key == key)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def update_config(
+        self,
+        config: ConfigThreshold,
+        value_json: Any,
+        title: str | None = None,
+        description: str | None = None,
+    ) -> ConfigThreshold:
+        config.value_json = value_json
+        if title is not None:
+            config.title = title
+        if description is not None:
+            config.description = description
+        config.version += 1
+        await self.session.flush()
+        return config

@@ -20,11 +20,8 @@ from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceRequest,
     InferenceResponse,
-    ModelPolicy,
-    PromptSpec,
     TraceContext,
 )
-from mc_foundation.locale import locale_display_name
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.config import Settings, get_settings
@@ -39,6 +36,7 @@ from platform_service.localized import (
     primary_text,
 )
 from platform_service.services.card_body_text import card_body_plain_text
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.coaching_rag_errors import CoachingRagError
 from platform_service.services.embedding_vector import assert_embedding_dimension
 from platform_service.services.llm_text_utils import strip_json_fence
@@ -48,6 +46,9 @@ from platform_service.services.object_storage import (
     ObjectStorageError,
     looks_like_object_storage_storage_path,
 )
+from platform_service.services.prompt_registry import COACHING_RAG_TEMPLATE_ID
+from platform_service.services.prompt_template_service import PromptTemplateService, prompt_spec_from_rendered
+from platform_service.services.prompt_variables.coaching_rag_variables import build_coaching_rag_variables
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,18 @@ class CoachingRagService:
             )
 
         per_mod = max(800, settings.coaching_rag_context_max_chars // max(1, len(pairs)))
-        context = self._build_retrieval_context(pairs, per_module_budget=per_mod)
+        module_ids = [m.id for m, _ in pairs]
+        card_rows = await ModuleRepository(self._session).list_cards_for_module_ids(module_ids)
+        cards_by_module: dict[UUID, list[dict[str, Any]]] = {}
+        for row in card_rows:
+            if row.module_id is None:
+                continue
+            cards_by_module.setdefault(row.module_id, []).append(card_row_to_dict(row))
+        context = self._build_retrieval_context(
+            pairs,
+            per_module_budget=per_mod,
+            cards_by_module=cards_by_module,
+        )
         resp = await self._generate_answer(body, context)
         if resp.error:
             raise CoachingRagError(f"ai-runtime error: {resp.error}")
@@ -136,21 +148,22 @@ class CoachingRagService:
                 answer=answer,
                 retrieved_modules=retrieved_hits,
                 source_documents=[],
-                model=resp.model or settings.text_model,
+                model=resp.model,
                 cited_module_ids=[],
                 suggested_questions=suggested_questions,
             )
 
         attributions = await self._build_attribution(
-            pairs,
             cited_ids=cited_ids,
             ttl=ttl,
+            cards_by_module=cards_by_module,
+            tenant_id=tenant_id,
         )
         return CoachingRagResponse(
             answer=answer,
             retrieved_modules=retrieved_hits,
             source_documents=attributions,
-            model=resp.model or settings.text_model,
+            model=resp.model,
             cited_module_ids=cited_ids,
             suggested_questions=suggested_questions,
         )
@@ -162,9 +175,12 @@ class CoachingRagService:
         except EmbeddingDimensionError as exc:
             raise CoachingRagError(str(exc)) from exc
 
-    def _cards_text_for_module(self, module: Module, budget_chars: int) -> str:
-        mj = module.module_json or {}
-        cards = mj.get("cards") or []
+    def _cards_text_for_module(
+        self,
+        module: Module,
+        cards: list[dict[str, Any]],
+        budget_chars: int,
+    ) -> str:
         primary_locale = deployment_locales(self._settings)
         lines: list[str] = []
         used = 0
@@ -195,11 +211,16 @@ class CoachingRagService:
         pairs: list[tuple[Module, float]],
         *,
         per_module_budget: int,
+        cards_by_module: dict[UUID, list[dict[str, Any]]],
     ) -> str:
         primary_locale = deployment_locales(self._settings)
         blocks: list[str] = []
         for mod, dist in pairs:
-            cards_blob = self._cards_text_for_module(mod, per_module_budget)
+            cards_blob = self._cards_text_for_module(
+                mod,
+                cards_by_module.get(mod.id, []),
+                per_module_budget,
+            )
             title_primary = primary_text(mod.title_localized, settings=self._settings) or ""
             blocks.append(
                 f"[[[ MODULE_BLOCK module_id={mod.id} cosine_distance={dist:.6f} ]]]\n"
@@ -222,39 +243,24 @@ class CoachingRagService:
                 f"response_language must be one of {supported!r}, got {lang!r}",
                 status_code=400,
             )
-        lang_label = locale_display_name(lang)
-        system = (
-            "You are a clinical / CHW training assistant. Answer ONLY using the MODULE_BLOCK excerpts. "
-            "If the context is insufficient, say so explicitly. Respond with a single JSON object, no markdown fences, keys:\n"
-            '- "answer": string (primary language: '
-            f"{lang_label}"
-            ")\n"
-            '- "cited_module_ids": array of UUID strings — only modules you relied on from the MODULE_BLOCK headers\n'
-            '- "suggested_questions": array of 3–5 strings — follow-up questions a CHW might ask next; '
-            "each MUST be fully answerable solely from the CARD_CONTENT inside the MODULE_BLOCK excerpts "
-            "(not general medical knowledge or content absent from the excerpts); "
-            "do not repeat or lightly rephrase the current user question; "
-            f"primary language: {lang_label}; return fewer items or [] if context is insufficient\n"
-            '- "confidence": optional string "high"|"medium"|"low"\n'
-        )
-        human = (
-            f"USER_QUESTION ({lang}):\n{body.question}\n\nRETRIEVAL_CONTEXT:\n{context}\nReturn JSON only."
+        rendered = await PromptTemplateService().render(
+            self._session,
+            template_id=COACHING_RAG_TEMPLATE_ID,
+            variant_key=None,
+            variables=build_coaching_rag_variables(
+                question=body.question,
+                context=context,
+                lang=lang,
+                settings=settings,
+            ),
         )
         req = InferenceRequest(
             request_id=str(uuid.uuid4()),
             generation_type=GenerationType.COACHING_RAG,
-            model_policy=ModelPolicy(model=settings.text_model),
-            prompt=PromptSpec(
-                template_id="coaching_rag_v1",
-                template_version=1,
-                resolved_system_prompt=system,
-                resolved_human_message=human,
-            ),
+            prompt=prompt_spec_from_rendered(rendered),
             constraints=GenerationConstraints(
                 language=lang,
                 output_format="json",
-                max_tokens=2048,
-                temperature=0.2,
             ),
             trace_context=TraceContext(),
             context={"question": body.question},
@@ -298,23 +304,30 @@ class CoachingRagService:
 
     async def _build_attribution(
         self,
-        pairs: list[tuple[Module, float]],
         *,
         cited_ids: list[UUID],
         ttl: int,
+        cards_by_module: dict[UUID, list[dict[str, Any]]],
+        tenant_id: UUID | None = None,
     ) -> list[SourceAttribution]:
         settings = self._settings
-        modules_by_id = {m.id: m for m, _ in pairs}
-        seed_ids = self._attribution_seed_module_ids(
-            cited_ids=cited_ids,
-            retrieved_module_ids=[m.id for m, _ in pairs],
-        )
-        doc_id_set, module_ids_per_doc = self._collect_source_document_links(
-            pairs,
-            link_filter_module_ids=set(cited_ids),
-        )
-        seed_modules = [modules_by_id[mid] for mid in seed_ids if mid in modules_by_id]
-        block_ids = self._block_ids_from_modules(seed_modules)
+        module_repo = ModuleRepository(self._session)
+        cited_modules = await module_repo.list_modules_by_ids(cited_ids, tenant_id=tenant_id)
+        resolved_ids = {m.id for m in cited_modules}
+        for mid in cited_ids:
+            if mid not in resolved_ids:
+                logger.warning("Cited module_id %s could not be resolved for attribution", mid)
+
+        missing_card_ids = [m.id for m in cited_modules if m.id not in cards_by_module]
+        if missing_card_ids:
+            card_rows = await module_repo.list_cards_for_module_ids(missing_card_ids)
+            for row in card_rows:
+                if row.module_id is None:
+                    continue
+                cards_by_module.setdefault(row.module_id, []).append(card_row_to_dict(row))
+
+        doc_id_set, module_ids_per_doc = self._collect_source_document_links(cited_modules)
+        block_ids = self._block_ids_from_modules(cited_modules, cards_by_module)
 
         source_repo = SourceRepository(self._session)
         block_rows = await source_repo.list_block_provenance_by_ids(block_ids)
@@ -382,37 +395,27 @@ class CoachingRagService:
         return attributions
 
     @staticmethod
-    def _attribution_seed_module_ids(
-        *,
-        cited_ids: list[UUID],
-        retrieved_module_ids: list[UUID],
-    ) -> list[UUID]:
-        return cited_ids if cited_ids else retrieved_module_ids
-
-    @staticmethod
     def _collect_source_document_links(
-        pairs: list[tuple[Module, float]],
-        *,
-        link_filter_module_ids: set[UUID] | None,
+        modules: list[Module],
     ) -> tuple[set[UUID], dict[UUID, list[UUID]]]:
         doc_id_set: set[UUID] = set()
         module_ids_per_doc: dict[UUID, list[UUID]] = {}
-        for mod, _dist in pairs:
+        for mod in modules:
             if not mod.source_document_ids:
                 continue
             for did in mod.source_document_ids:
                 doc_id_set.add(did)
-                if link_filter_module_ids is not None and mod.id not in link_filter_module_ids:
-                    continue
                 module_ids_per_doc.setdefault(did, []).append(mod.id)
         return doc_id_set, module_ids_per_doc
 
     @staticmethod
-    def _block_ids_from_modules(modules: list[Module]) -> list[UUID]:
+    def _block_ids_from_modules(
+        modules: list[Module],
+        cards_by_module: dict[UUID, list[dict[str, Any]]],
+    ) -> list[UUID]:
         ids: list[UUID] = []
         for mod in modules:
-            mj = mod.module_json or {}
-            for card in mj.get("cards") or []:
+            for card in cards_by_module.get(mod.id, []):
                 if not isinstance(card, dict):
                     continue
                 for raw in card.get("source_block_ids") or []:

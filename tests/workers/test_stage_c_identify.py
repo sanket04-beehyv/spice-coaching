@@ -79,7 +79,6 @@ async def _seed_source_doc_with_outline(
         primary_language="en",
         content_domain="clinical",
         assessment_mode="with_quiz",
-        authority_label="BRAC",
         original_storage_path="/tmp/x.pdf",
         outline_method="markdown_parser",
         outline_jsonb={"sections": sections or [{"heading": "Sec 1"}]},
@@ -119,8 +118,15 @@ async def _seed_run(session: AsyncSession, source_document_id: UUID) -> Ingestio
     return run
 
 
-def _llm_candidate(block_ids: list[UUID], *, title: str = "T", cards: int = 5, quiz: int = 4) -> dict:
-    return {
+def _llm_candidate(
+    block_ids: list[UUID],
+    *,
+    title: str = "T",
+    cards: int = 5,
+    quiz: int = 4,
+    domain: str | None = None,
+) -> dict:
+    out = {
         "proposed_title": title,
         "scope_summary": "Summary of the topic.",
         "source_provenance": [
@@ -134,6 +140,9 @@ def _llm_candidate(block_ids: list[UUID], *, title: str = "T", cards: int = 5, q
         "estimated_quiz_count": quiz,
         "proposed_module_type": "refresher",
     }
+    if domain is not None:
+        out["domain"] = domain
+    return out
 
 
 def _identifier_mock(candidates: list[dict]) -> MagicMock:
@@ -277,10 +286,8 @@ class TestIngestionInstructionsPassedToIdentifier:
         await orch.run(ingestion_run_id=run.id, source_document_ids=[sd.id])
 
         rows = (
-            (
-                await db_session.execute(
-                    select(ModuleCandidateDraft).where(ModuleCandidateDraft.ingestion_run_id == run.id)
-                )
+            await db_session.execute(
+                select(ModuleCandidateDraft).where(ModuleCandidateDraft.ingestion_run_id == run.id)
             )
             .scalars()
             .all()
@@ -349,6 +356,26 @@ class TestNoGapContextLoaded:
         # Architecture-reset: behavioural_gap_code is NULL on every emitted
         # candidate (Stage 2 prompt no longer reasons about gaps).
         assert rows[0].behavioural_gap_code is None
+
+    async def test_persisted_candidate_carries_domain_from_stage_c(self, db_session: AsyncSession) -> None:
+        sd, blocks = await _seed_source_doc_with_outline(db_session)
+        run = await _seed_run(db_session, sd.id)
+        ident = _identifier_mock([_llm_candidate([blocks[0].id], domain="family_planning")])
+
+        orch = StageCOrchestrator(db_session, identifier=ident)
+        await orch.run(ingestion_run_id=run.id, source_document_ids=[sd.id])
+
+        rows = (
+            (
+                await db_session.execute(
+                    select(ModuleCandidateDraft).where(ModuleCandidateDraft.ingestion_run_id == run.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].domain == "family_planning"
 
 
 # ─── Identifier failure path ──────────────────────────────────────────────
@@ -446,7 +473,6 @@ class TestEnsureContentBlocks:
             primary_language="en",
             content_domain="clinical",
             assessment_mode="with_quiz",
-            authority_label="BRAC",
             original_storage_path="/tmp/x.pdf",
             outline_method="markdown_parser",
             outline_jsonb={"sections": [{"heading": "Sec"}]},
@@ -493,3 +519,45 @@ class TestEnsureContentBlocks:
             .all()
         )
         assert len(after) >= 1
+
+    async def test_content_blocks_store_plain_text(self, db_session: AsyncSession) -> None:
+        sd = SourceDocument(
+            title="t",
+            source_type="pdf",
+            primary_language="en",
+            content_domain="clinical",
+            assessment_mode="with_quiz",
+            original_storage_path="/tmp/x.pdf",
+            outline_method="markdown_parser",
+            outline_jsonb={"sections": [{"heading": "Sec"}]},
+        )
+        db_session.add(sd)
+        await db_session.flush()
+        sp = SourcePage(
+            source_document_id=sd.id,
+            page_number=1,
+            markdown_content="# Heading\n\n**Bold** body with - not a list item.",
+            extraction_method="text",
+            extraction_quality_score=0.9,
+        )
+        db_session.add(sp)
+        await db_session.flush()
+        await db_session.commit()
+
+        run = await _seed_run(db_session, sd.id)
+        ident = _identifier_mock([])
+        orch = StageCOrchestrator(db_session, identifier=ident)
+        await orch.run(ingestion_run_id=run.id, source_document_ids=[sd.id])
+
+        blocks = (
+            (
+                await db_session.execute(
+                    select(ContentBlock).join(SourcePage).where(SourcePage.source_document_id == sd.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        paragraph = next(b for b in blocks if b.block_type == "paragraph")
+        assert paragraph.content_text == "Bold body with - not a list item."
+        assert "**" not in paragraph.content_text

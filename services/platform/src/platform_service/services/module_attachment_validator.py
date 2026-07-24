@@ -119,14 +119,14 @@ def _validate_file_ref(
     att: ModuleAttachmentFileRef,
     *,
     location: str,
-    allowed_prefix: str,
+    allowed_prefixes: frozenset[str],
 ) -> ModuleAttachmentFileRef:
-    prefix = allowed_prefix.strip().strip("/")
     object_name = att.object_name.strip().lstrip("/")
-    if not object_name.startswith(f"{prefix}/"):
+    top = object_name.split("/", maxsplit=1)[0]
+    if top not in allowed_prefixes or "/" not in object_name:
         raise ValidationError(
             "invalid_attachment_object_prefix",
-            f"{location}: object_name must start with {prefix!r}/",
+            f"{location}: object_name must start with one of {sorted(allowed_prefixes)!r}/",
         )
 
     suffix = Path(object_name).suffix.lower()
@@ -173,7 +173,7 @@ async def validate_module_attachments(
         return None
 
     out = copy.deepcopy(module_json)
-    allowed_prefix = settings.module_attachment_allowed_prefix
+    allowed_prefixes = settings.admin_file_allowed_prefix_set
     seen_ids: set[str] = set()
 
     module_attachments = out.get("attachments")
@@ -197,7 +197,7 @@ async def validate_module_attachments(
             raise ValidationError("duplicate_attachment_id", f"{location}: duplicate attachment_id")
         seen_ids.add(att.attachment_id)
         if isinstance(att, ModuleAttachmentFileRef):
-            att = _validate_file_ref(att, location=location, allowed_prefix=allowed_prefix)
+            att = _validate_file_ref(att, location=location, allowed_prefixes=allowed_prefixes)
             if storage is not None:
                 try:
                     await storage.stat_object(att.object_name)
@@ -246,7 +246,7 @@ async def validate_module_attachments(
                 raise ValidationError("duplicate_attachment_id", f"{location}: duplicate attachment_id")
             seen_ids.add(att.attachment_id)
             if isinstance(att, ModuleAttachmentFileRef):
-                att = _validate_file_ref(att, location=location, allowed_prefix=allowed_prefix)
+                att = _validate_file_ref(att, location=location, allowed_prefixes=allowed_prefixes)
                 if storage is not None:
                     try:
                         await storage.stat_object(att.object_name)

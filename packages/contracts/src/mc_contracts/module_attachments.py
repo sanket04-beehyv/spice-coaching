@@ -1,6 +1,6 @@
 """Module attachment refs stored inline in ``module.module_json``.
 
-Files are uploaded via ``POST /admin/v3/files`` (MinIO); this DTO holds the
+Files are uploaded via ``POST /admin/files`` (MinIO); this DTO holds the
 object path reference. YouTube links store a normalized URL only (no MinIO).
 """
 

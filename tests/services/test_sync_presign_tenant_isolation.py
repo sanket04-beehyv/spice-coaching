@@ -47,7 +47,6 @@ async def _seed_source_document(session: AsyncSession) -> SourceDocument:
         primary_language="bn",
         content_domain="clinical",
         assessment_mode="read_only",
-        authority_label="test",
         original_storage_path=_STORAGE_PATH,
         thumbnail_storage_path=_THUMB_PATH,
         status="ingested",

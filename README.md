@@ -86,11 +86,11 @@ coaching-platform/
 
 ### API root
 
-Platform API routes are served under **`/medtronics-api`** (configurable via `API_ROOT_PATH`). Paths below are relative to that root; the full URL is `{api_root_path}` + path (e.g. `GET /medtronics-api/health`, `POST /medtronics-api/coaching/counselling`).
+Platform API routes are served under **`/medtronics-api`** (configurable via `API_ROOT_PATH`). Paths below are relative to that root; the full URL is `{api_root_path}` + path (e.g. `GET /medtronics-api/ready`, `POST /medtronics-api/coaching/counselling`).
 
 ### Authentication
 
-When `SPICE_AUTH_ENABLED=true`, platform-api validates every request (except paths listed in `SPICE_AUTH_EXEMPT_PATHS`, default `health,ready`) by calling SPICE auth-service `POST {SPICE_AUTH_BASE_URL}/authenticate` with the caller's headers:
+When `SPICE_AUTH_ENABLED=true`, platform-api validates every request (except paths listed in `SPICE_AUTH_EXEMPT_PATHS`, default `ready`) by calling SPICE auth-service `POST {SPICE_AUTH_BASE_URL}/authenticate` with the caller's headers:
 
 - `Authorization: Bearer <jwt>` (required)
 - `client` (optional; defaults to `SPICE_AUTH_DEFAULT_CLIENT`, typically `mob` for the Android app)
@@ -133,6 +133,7 @@ v3.3 is **module-centric** (not scenario-centric). Device sync uses `/sync/*`; a
 `GET /sync/modules?since=<ISO-8601>&user_id=<int>`
 - Returns published modules (with quiz payloads) updated after `since`
 - When `user_id` is provided, also returns `assigned_module_ids` for that user (individual, po_sk, geographical, and group rules); when omitted or when the user has no assignments, `assigned_module_ids` is empty
+- When `user_id` is provided, also returns `requested_modules` — the CHW's full training-request history (`module_id` and/or free-text `requested_module_name`, optional `reason`, `submitted_at`); when omitted, `requested_modules` is empty
 
 `GET /sync/triggers?since=<ISO-8601>`
 - Returns trigger definitions updated after `since`
@@ -162,38 +163,34 @@ v3.3 is **module-centric** (not scenario-centric). Device sync uses `/sync/*`; a
 - Returns prioritized module IDs for morning review
 - Uses the configured `morning_cards_max` threshold
 
+Module training requests (CHW self-service access) are accepted via `POST /telemetry/events` with `event_type=module_requested` (top-level `module_id` and/or `payload_json.requested_module_name`, optional `payload_json.reason`). See `docs/TELEMETRY_CONTRACT.md`.
+
 #### Admin-facing
 
 `POST /admin/ingest`
 - Uploads one or more source files (multipart field `files`, max 10) to MinIO synchronously, then enqueues the v3.3 pipeline (A→B→C→D) per file on `platform-celery-worker`
-- Form fields: optional `titles` (JSON array, one title per file in order; if omitted, each title is the file’s basename stem), optional `override_duplicates` (JSON array of booleans, one per file — when `true`, re-ingest even if the file’s `content_sha256` matches an already-`ingested` `source_document`), optional `sync_published_visible` (JSON array of booleans, one per file — when `true`, the source document may appear in `GET /sync/source-documents/published`; default all `false`), optional `ingestion_instructions` (batch-wide steering text for Stage C module identification; sanitized at ingest), `fuse_sources` (default `false` — when `true`, runs cross-source fusion after all pipelines finish; requires ≥2 successfully ingested files), `skip_merge` (default `false` — when `true`, Stage D always creates new modules and does not merge into existing ones), plus `content_domain`, `assessment_mode`, `authority_label`, `primary_language`, `mode` (`append` | `new`)
+- Form fields: optional `titles` (JSON array, one title per file in order; if omitted, each title is the file’s basename stem), optional `override_duplicates` (JSON array of booleans, one per file — when `true`, re-ingest even if the file’s `content_sha256` matches an already-`ingested` `source_document`), optional `sync_published_visible` (JSON array of booleans, one per file — when `true`, the source document may appear in `GET /sync/source-documents/published`; default all `false`), optional `ingestion_instructions` (batch-wide steering text for Stage C module identification; sanitized at ingest), optional `cards_per_module` and `quizzes_per_module` (fixed card/quiz counts per module for this ingest; must fall within deployment bounds), `fuse_sources` (default `false` — when `true`, runs cross-source fusion after all pipelines finish; requires ≥2 successfully ingested files), `skip_merge` (default `false` — when `true`, Stage D always creates new modules and does not merge into existing ones), plus `content_domain`, `assessment_mode`; primary language is always the deployment primary locale
 - Duplicate detection uses SHA256 of file bytes against `source_document` rows with `status='ingested'` only (`failed` / `ingesting` do not block)
 - Returns `202` with `status: batch_queued`, `sources[]` (each with `source_document_id`, `poll_url`, etc.), and optionally `skipped_duplicates[]` when some files were blocked; returns `409` with `detail.code=duplicate_content` when every file is blocked; poll `GET /admin/ingest/by-document/{id}` for progress
-
-`POST /admin/ingest/stream`
-- Same upload/pipeline as batch ingest but streams SSE progress events for a single file (supports the same form fields, including `skip_merge`, `override_duplicate` — boolean, default `false` — `sync_published_visible` — boolean, default `false` — and optional `ingestion_instructions`)
-- Returns `409` with `detail.code=duplicate_content` when the file matches an already-ingested `source_document` and `override_duplicate` is not set
 
 `GET /admin/ingest/by-document/{source_document_id}`
 - Polls the most recent ingestion run for a source document (steps + candidates). Response may include `run_kind`, `current_activity` (e.g. published-module merge or cross-source fusion in progress), `published_module_merge` on completed `card_draft` steps, and a nested `cross_source_fusion` block when batch fusion is running for this document.
 
-`GET /admin/ingest/{run_id}`
-- Polls a specific ingestion run by id (same optional `run_kind`, `current_activity`, and step-level merge fields as by-document poll)
+`POST /admin/files`
+- Upload an admin file asset (MinIO)
 
-`POST /admin/fusion`
-- Enqueues cross-source fusion over ≥2 completed source documents on the Celery worker (Stage 2b → publish)
-
-`POST /admin/v3/files` and `GET /admin/v3/files`
-- Upload and list admin file assets (v3 file plane)
-
-`POST /admin/v3/files/presigned-url`
+`GET /admin/files/presigned-url`
 - Presigned GET for an admin file object
 
 `POST /admin/modules` and `GET /admin/modules`
-- Create and list published modules
+- Create and list published modules. List returns a paginated envelope:
+  `{ modules, total_modules, total_pages, limit, offset }`
+
+`GET /admin/modules/domains`
+- Distinct `module.domain` values for admin filter dropdowns; optional `status` matches the modules list tabs
 
 `GET /admin/modules/{module_id}`, `PUT /admin/modules/{module_id}`, `DELETE /admin/modules/{module_id}`
-- Module CRUD
+- Module CRUD. `PUT` requires `expected_version` (the version of the module row being edited). If that version is stale or another writer already created a newer family tip, returns `409` with `detail.code=module_version_conflict` (`expected_version`, `current_version`, `latest_module_id`); client must `GET` the latest module and retry. When the body is a **complete content snapshot** (`title`, `description`, `module_json`, `thumbnail_storage_path`, plus quiz as top-level `quiz` or nested `module_json.quiz`) and matches the tip, `PUT` is a no-op and returns the existing `id` / `version` (no new draft). `chatbot_faqs_only`, gap ids, and `editor_id` are ignored for equality. Omitted content fields still create a new version.
 
 `GET /admin/modules/search`
 - Search modules by title/content filters
@@ -206,6 +203,19 @@ v3.3 is **module-centric** (not scenario-centric). Device sync uses `/sync/*`; a
 
 `GET /admin/ingestion-runs` and `GET /admin/ingestion-runs/{run_id}`
 - List and inspect ingestion runs
+
+`GET /admin/source-documents`
+- List source documents for admin catalog views (ingest dropdowns, video upload table). Optional `status` (`ingesting` | `ingested` | `failed`; default `ingested`), optional `source_type` (`pdf` | `pptx` | `docx` | `audio` | `video`; repeat and/or comma-separate for multiple), optional `q` (case-insensitive substring on `original_filename` or `title`); supports `limit` (default 50, max 200) and `offset` (default 0). Returns a paginated envelope: `{ source_documents, total_source_documents, total_pages, limit, offset }`
+
+`GET /admin/module-demand/summary`
+- LLM narrative plus top-K form + chatbot (`digital_help_used`, keyed on `module_id`) demand, split into available (assign / open draft) and unavailable (create); K from config key `module_demand_top_k`. Served from a daily-precomputed snapshot (Celery beat `platform.refresh_module_demand_summary`), with a live-build fallback on cache miss
+
+`GET /admin/module-demand/modules/{module_id}/requestors`
+- Form requestors for a module (source `form` in V1), with `already_assigned` from individual assignments
+
+`POST /admin/module-demand/modules/{module_id}/assign`
+- Bulk individual assign from the demand flow (served from the assignments router); records `module_demand_assigned` attribution audit
+
 
 #### Dashboard-facing
 
@@ -221,13 +231,11 @@ Current state:
 - these routes are part of the canonical API surface
 - `GET /dashboard/supervisor/{chw_id}` reads from the ClickHouse `chw_daily_summary` materialized view (see `infra/clickhouse/init.sql`)
 - `GET /dashboard/llm-quality` queries ClickHouse when `llm_daily_summary` exists in the deployment
-- `GET /dashboard/digital-help-modules` ranks modules by `digital_help_used` event volume over `period_days` (default 30), enriched with module titles from PostgreSQL; supports `limit` (default 20) and `offset` (default 0) pagination with `total_modules` in the response
+- `GET /dashboard/digital-help-modules` ranks modules by `digital_help_used` event volume over `period_days` (default 30), keyed on concrete `module_id` (events without `module_id` ignored; no family roll-up), enriched with module titles from PostgreSQL; supports `limit` (default 20) and `offset` (default 0) pagination with `total_modules` in the response
+- Admin module demand (`GET /admin/module-demand/summary`) soft-fails chatbot CH merge so form demand still returns
 - `GET /dashboard/district/{upazila_id}` still returns `501 Not Implemented` until implemented
 
 #### Operational
-
-`GET /health`
-- Basic liveness endpoint
 
 `GET /ready`
 - Readiness probe: PostgreSQL, Redis, ClickHouse, ai-runtime (including provider alignment), and object storage
@@ -267,7 +275,7 @@ Current state:
 
 ### Sync
 
-1. SDK calls `GET /sync/modules?since=...` for published modules and quizzes (optional `user_id` for `assigned_module_ids`)
+1. SDK calls `GET /sync/modules?since=...` for published modules and quizzes (optional `user_id` for `assigned_module_ids` and `requested_modules`)
 2. SDK calls `GET /sync/triggers?since=...` and `GET /sync/gaps?chw_id=...&since=...` as needed
 3. SDK calls `GET /sync/chat-faqs?since=...` for bilingual FAQ suggestion chips (clustered + LLM-synthesized nightly)
 4. SDK calls `GET /sync/config` for threshold/config values
@@ -383,7 +391,6 @@ Quick verification:
 
 ```bash
 docker compose ps
-curl -fsS http://localhost:8000/medtronics-api/health
 curl -fsS http://localhost:8000/medtronics-api/ready
 curl -fsS http://localhost:8001/health
 ```

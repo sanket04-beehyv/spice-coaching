@@ -98,7 +98,7 @@ once we see real reviewer feedback.
 ## Operations checklist
 
 1. **Postgres migration**: `alembic upgrade head` will apply `0006_v33_module_pass_threshold` (additive, nullable column — safe for live tables).
-2. **Field-flags consumer**: the SDK already receives `field_flags_jsonb` via `/sync/v3/modules` (added in W-9). No new contract — reviewer surface already shows it.
+2. **Field-flags consumer**: the SDK already receives `field_flags_jsonb` via `/sync/modules` (added in W-9). No new contract — reviewer surface already shows it.
 3. **No new env vars or external dependencies.**
 
 ---

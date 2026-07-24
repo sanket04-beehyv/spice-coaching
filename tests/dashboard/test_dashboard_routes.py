@@ -10,7 +10,10 @@ import pytest
 import pytest_asyncio
 from fastapi import APIRouter, FastAPI
 from httpx import ASGITransport, AsyncClient
-from mc_contracts.dashboard import DigitalHelpModuleUsageItem, DigitalHelpModuleUsageResponse
+from mc_contracts.dashboard import (
+    DigitalHelpModuleUsageItem,
+    DigitalHelpModuleUsageResponse,
+)
 from platform_service.api.dashboard import router as dashboard_router
 from platform_service.config import get_settings
 from platform_service.deps import get_clickhouse_client, get_db
@@ -21,9 +24,7 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest_asyncio.fixture
-async def app(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FastAPI]:
-    monkeypatch.setenv("SPICE_AUTH_ENABLED", "false")
-    get_settings.cache_clear()
+async def app() -> AsyncIterator[FastAPI]:
     app_obj = FastAPI()
     api_router = APIRouter(prefix=get_settings().api_root_path_normalized)
     api_router.include_router(dashboard_router)
@@ -70,14 +71,14 @@ class TestDigitalHelpModuleUsageRoute:
             offset=0,
             modules=[
                 DigitalHelpModuleUsageItem(
-                    module_family_id=family_a,
                     module_id=module_a_id,
+                    module_family_id=family_a,
                     query_count=10,
                     title={"bn": "Module A", "en": "Module A EN"},
                 ),
                 DigitalHelpModuleUsageItem(
-                    module_family_id=family_b,
                     module_id=module_b_id,
+                    module_family_id=family_b,
                     query_count=3,
                     title={"bn": "Module B"},
                 ),

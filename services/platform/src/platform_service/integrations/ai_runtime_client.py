@@ -40,7 +40,7 @@ class AIRuntimeClient:
     ) -> None:
         settings = get_settings()
         self._base_url = (base_url or settings.ai_runtime_base_url).rstrip("/")
-        self._token = token or settings.ai_runtime_token.get_secret_value()
+        self._token = token or settings.ai_runtime_token
         self._timeout = timeout or settings.ai_runtime_timeout_seconds
         self._transcribe_timeout = transcribe_timeout or settings.ai_runtime_transcribe_timeout_seconds
         self._client = httpx.AsyncClient(timeout=self._timeout)

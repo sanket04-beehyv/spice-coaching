@@ -46,10 +46,9 @@ async def generate(
         )
 
     logger.info(
-        "generate request_id=%s type=%s provider=%s model=%s",
+        "generate request_id=%s type=%s provider=%s",
         body.request_id,
         gt.value,
         get_settings().ai_provider,
-        body.model_policy.model,
     )
     return await _executor.execute(body)

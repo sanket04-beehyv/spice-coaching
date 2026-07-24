@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.repositories.source_repository import SourceRepository
 from platform_service.workers.extractors.calibration import CalibrationDecision
+from platform_service.workers.extractors.extraction_markdown import persist_markdown_content
 from platform_service.workers.extractors.stage_a_outline_assembler import assemble_outline_from_page_pairs
 from platform_service.workers.extractors.text_extractor import ExtractedPage
 from platform_service.workers.stage_a_types import StageAResult
@@ -39,7 +40,7 @@ async def run_media_transcript_path(
         await repo.create_source_page(
             source_document_id=source_document_id,
             page_number=page.page_number,
-            markdown_content=page.markdown,
+            markdown_content=persist_markdown_content(page.markdown),
             extraction_method="transcript",
             extraction_quality_score=(
                 page.extraction_quality_score if page.extraction_quality_score is not None else 0.85
@@ -58,7 +59,7 @@ async def run_media_transcript_path(
         calibration=calibration.to_jsonb(),
     )
 
-    page_pairs = [(p.page_number, p.markdown) for p in text_pages]
+    page_pairs = [(p.page_number, persist_markdown_content(p.markdown)) for p in text_pages]
     section_count = await assemble_outline_from_page_pairs(
         repo,
         session,

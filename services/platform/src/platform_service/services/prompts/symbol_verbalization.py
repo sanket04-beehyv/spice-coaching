@@ -14,10 +14,16 @@ NUMERICAL VALUES AND SYMBOL NOTATION (resolves conflicts with "verbatim" rules):
   NOT raw symbol characters when verbalization is required below.
 - Preserve every digit and unit from the source (BP 140/90, 8 g/dL, 2 tablets)
   across languages — do NOT change numeric values.
-- Render mathematical symbols (`>=`, `<=`, `≧`, `≦`, `>`, `<`, `-` ranges, `±`, `%`)
-  in natural spoken language, not as literal characters — even when the source block
-  uses symbol notation (e.g. `Hb < 8 g/dL` -> verbalize "<" as "less than" /
-  equivalent in the target locale while keeping `8 g/dL`).
+- Render mathematical symbols (`>=`, `<=`, `≧`, `≦`, `>`, `<`, `-` ranges, `/`, `±`, `%`)
+  in natural spoken language, not as literal characters — even when the source block uses
+  symbol notation.
+- For `/`, choose phrasing from clinical context — do NOT default to "divided by":
+  - Blood-pressure / vital-sign pairs (`BP 140/90 mmHg`) -> "over" (e.g. `140 over 90 mmHg`)
+  - Medication doses (`1/2 tablet`, `1/4 tab`) -> spoken fraction (e.g. `half a tablet`)
+  - Rates or visit cadence when `/` means "per" (`visits/month`) -> "per"
+  - When unsure, follow the source block's spoken clinical usage; never leave a bare `/`
+- Examples: `Hb < 8 g/dL` -> verbalize "<" as "less than" / equivalent in the target
+  locale while keeping `8 g/dL`.
 """
 
 
@@ -50,6 +56,25 @@ def render_locale_map_field_schema(
     lines = [f'      "{field_name}": {{']
     lines.append(f'        "{primary_locale}": "{value_type}{req} — {primary_label}{desc_suffix}",')
     lines.append("      },")
+    return "\n".join(lines)
+
+
+def render_locale_synonym_map_field_schema(
+    field_name: str,
+    *,
+    primary_locale: str,
+    max_items: int,
+    description: str = "",
+) -> str:
+    """Render a JSON-schema fragment for one locale-keyed synonym abbrev map."""
+    primary_label = locale_display_name(primary_locale)
+    desc_suffix = f"; {description}" if description else ""
+    lines = [f'  "{field_name}": {{']
+    lines.append(
+        f'    "{primary_locale}": {{"ABBREV": "expanded form"}} '
+        f"(≤ {max_items} — {primary_label}{desc_suffix}),"
+    )
+    lines.append("  },")
     return "\n".join(lines)
 
 

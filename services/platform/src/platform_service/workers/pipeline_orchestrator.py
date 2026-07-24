@@ -24,7 +24,7 @@ are small enough that parallelism doesn't matter yet).
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -157,7 +157,7 @@ class PipelineOrchestrator:
         """
         resolved_primary_language = primary_language or get_settings().deployment_primary_locale
         result_box: list[PipelineResult] = []
-        async for _ in drive_pipeline(
+        await drive_pipeline(
             self,
             source_document_id=source_document_id,
             source_path=source_path,
@@ -167,52 +167,9 @@ class PipelineOrchestrator:
             resume=resume,
             skip_merge=skip_merge,
             staged_sessions=staged_sessions,
-            emit_events=False,
             result_box=result_box,
-        ):
-            pass
+        )
         return result_box[0]
-
-    async def run_generator(
-        self,
-        *,
-        source_document_id: UUID,
-        source_path: str | Path,
-        source_type: str,
-        primary_language: str | None = None,
-        triggered_by: UUID | None = None,
-        resume: bool = True,
-        skip_merge: bool = False,
-        staged_sessions: bool = False,
-    ) -> AsyncGenerator[dict[str, Any], None]:
-        """Like run(), but yields SSE-style progress dicts at each stage transition.
-
-        Each yielded dict has at minimum:
-          {"event": <str>, "run_id": <str>, ...}
-
-        Events emitted:
-          run_started       — initial run row created
-          stage_started     — a stage has begun
-          stage_succeeded   — a stage completed successfully
-          stage_skipped     — a stage was skipped (resume)
-          stage_failed      — a stage failed
-          pipeline_complete — final event with full PipelineResult summary
-        """
-        resolved_primary_language = primary_language or get_settings().deployment_primary_locale
-        async for event in drive_pipeline(
-            self,
-            source_document_id=source_document_id,
-            source_path=source_path,
-            source_type=source_type,
-            primary_language=resolved_primary_language,
-            triggered_by=triggered_by,
-            resume=resume,
-            skip_merge=skip_merge,
-            staged_sessions=staged_sessions,
-            emit_events=True,
-            result_box=None,
-        ):
-            yield event
 
     # ── Stage runners ───────────────────────────────────────────────────
 

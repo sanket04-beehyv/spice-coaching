@@ -87,7 +87,7 @@ These fields disambiguate *which content* an event refers to. Set on `coaching` 
 | `module_family_id` | string (UUID) \| null | Stable across module versions. Use this for cross-version analytics aggregation. |
 | `module_id` | string (UUID) \| null | Identifies the specific module version (`module.id` row). Use when a single version's metrics matter. |
 | `module_version` | int \| null | Version number on the family. Useful as a discriminator when `module_id` isn't sent. |
-| `card_family_id` | string (UUID) \| null | For per-card analytics. Use the family id from `module_quiz_question.question_family_id`'s sibling on cards. **Cards have no stable per-version id**; if you need positional info send `card_order` in `payload_json`. |
+| `card_family_id` | string (UUID) \| null | For per-card analytics. Send the persisted `card_family_id` from the sync bundle card payload (relational `module_card` table). Optional positional detail: `card_order` in `payload_json`. |
 | `quiz_id` | string (UUID) \| null | `module_quiz_question.id` for the question being answered on `module_quiz_attempted`. |
 | `quiz_score_pct` | float `[0.0, 1.0]` \| null | **Required on `module_quiz_attempted`.** Range 0.0–1.0, NOT 0–100. Pydantic enforces. |
 
@@ -127,27 +127,33 @@ What the ingest endpoint does with each event (`api/telemetry.py:ingest_events`)
 batch arrives
   ├─ dedup on `id` via Redis SET-NX (24h TTL)         ← duplicates returned in `duplicates` ack
   └─ for each first-seen event:
-       ├─ event_family == "digital"
-       │    └─ append to digital_events insert batch
-       ├─ else
-       │    └─ append to coaching_events insert batch
+       ├─ append to coaching_events insert batch
        │
-       ├─ if event_type == "quiz_answered" AND module_id present AND outcome present
-       │    └─ enqueue process_gap_update_task     (legacy v3.0 scenario path)
+       ├─ if event_type == "module_requested"
+       │      AND (module_id present OR non-empty payload_json.requested_module_name)
+       │    └─ enqueue process_training_request_event_task
+       │         (creates chw_training_request + individual assignment; no learning points)
        │
-       └─ if event_type ∈ {module_delivered, module_card_viewed,
-                           module_quiz_attempted}
-                AND module_family_id present
-            └─ enqueue process_module_event_task   (v3.3 module path)
+       ├─ if gap mode AND event_type ∈ {module_delivered, module_card_viewed,
+       │                           module_quiz_attempted} AND module_id present
+       │    └─ enqueue process_module_event_task   (v3.3 module path)
+       │
+       ├─ if gap mode AND event_type == spice_action_observed
+       │    └─ enqueue process_module_event_task
+       │
+       └─ if quiz mode AND event_type == module_quiz_attempted AND module_id present
+            └─ enqueue process_module_event_task
 ClickHouse inserts (best-effort):
-  └─ on failure → push rows to Redis retry queue, return them in `buffered` ack (202)
+  └─ on failure → push rows to Redis retry queue, return them in `buffered` ack
 ```
 
-**Celery jobs are NOT gated on the ClickHouse insert succeeding** — completion state is operational truth and shouldn't be held hostage to an analytics outage.
+**Celery jobs are NOT gated on the ClickHouse insert succeeding** — operational state (completion / training requests) shouldn't be held hostage to an analytics outage.
+
+Invalid modules and duplicate training requests are **no-ops** inside `process_training_request_event_task` (logged); the ingest ACK still lists the event as accepted.
 
 ### CHW learning points (Postgres)
 
-For CHWs identified by batch-level `chw_id`, the same `process_module_event_task` worker inserts rows into **`chw_learning_point_event`** (one row per scored telemetry `id`, with a **`points`** delta) when it accepts these `event_type` values: **`module_delivered`**, **`module_card_viewed`**, **`module_quiz_attempted`**, and **`spice_action_observed`**. The CHW's total is **`SUM(points)`** for that `chw_id` (indexed). Point amounts are configurable in platform settings (`learning_points_*`); **`module_quiz_attempted`** adds a score-based bonus from `quiz_score_pct` (0.0–1.0).
+For CHWs identified by batch-level `chw_id`, the same `process_module_event_task` worker inserts rows into **`chw_learning_point_event`** (one row per scored telemetry `id`, with a **`points`** delta) when it accepts these `event_type` values: **`module_delivered`**, **`module_card_viewed`**, **`module_quiz_attempted`**, and **`spice_action_observed`**. The CHW's total is **`SUM(points)`** for that `chw_id` (indexed). Point amounts are configurable in platform settings (`learning_points_*`); **`module_quiz_attempted`** adds a score-based bonus from `quiz_score_pct` (0.0–1.0). **`module_requested` does not award learning points.**
 
 Idempotency is enforced by the **`event_id` primary key** on `chw_learning_point_event`: re-sending the same telemetry UUID does not insert again, so totals do not double-count — **the SDK must keep `id` stable across retries** (consistent with Redis ingest dedup).
 
@@ -162,7 +168,7 @@ Idempotency is enforced by the **`event_id` primary key** on `chw_learning_point
 | `card_skipped` | CHW dismissed without reading | coaching_events |
 | `audio_played` | Audio narration played | coaching_events |
 | `quiz_started` | Legacy quiz opened | coaching_events |
-| `quiz_answered` | Legacy quiz answer submitted | coaching_events + `process_gap_update_task` (if outcome+module_id present) |
+| `quiz_answered` | Legacy quiz answer submitted | coaching_events |
 | `counselling_used` | Counselling card invoked | coaching_events |
 | `spice_action_observed` | **SPICE workflow event observed via lifecycle hook — assessment submitted, referral submitted, vital threshold crossed, etc.** Use `payload_json.kind` to discriminate (`assessment_submitted` / `referral_submitted` / etc.). One enum value covers all SPICE-workflow observations so future variants don't need enum changes. | coaching_events + `process_module_event_task` (gap state + **learning points**) |
 | `risk_flag_observed` | Rule engine surfaced a risk flag | coaching_events |
@@ -172,6 +178,7 @@ Idempotency is enforced by the **`event_id` primary key** on `chw_learning_point
 | **`module_delivered`** | v3.3 module surfaced in morning rotation | coaching_events + `process_module_event_task` (**learning points**) |
 | **`module_card_viewed`** | v3.3 card opened within a module | coaching_events + `process_module_event_task` (**learning points**) |
 | **`module_quiz_attempted`** | v3.3 module quiz finished (carries `quiz_score_pct`) | coaching_events + `process_module_event_task` (completion + gap + **learning points**) |
+| **`module_requested`** | CHW requested access to a published module (`module_id`) and/or a free-text custom name (`payload_json.requested_module_name`); optional `payload_json.reason` | coaching_events + `process_training_request_event_task` (training request + assignment; **no** learning points / gap) |
 
 ### `digital` family — `DigitalEventType`
 
@@ -239,6 +246,47 @@ Postgres module completion (`chw_module_quiz_progress` / `chw_module_completion`
   "event_date": "2026-04-28",
   "timestamp_local": 1714305900,
   "timestamp_utc": 1714283700
+}
+```
+
+### `module_requested`
+
+CHW requests access to a training module. Provide either top-level `module_id` (published module) or `payload_json.requested_module_name` (free-text custom request), or both. Optional `payload_json.reason`.
+
+Ingest always writes the row to ClickHouse. When at least one identity field is present, it enqueues `process_training_request_event_task`, which creates `chw_training_request` and (for a valid published `module_id`) an individual `chw_module_assignment`. Invalid / duplicate requests are logged no-ops after ACK.
+
+Accepted requests appear on the next `GET /sync/modules?user_id=...` under `requested_modules` (full history for that CHW, separate from `assigned_module_ids`). Custom-name-only requests are included even though they do not create an assignment.
+
+```json
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "event_schema_version": 1,
+  "session_id": "sess-550e8400-e29b",
+  "event_family": "coaching",
+  "event_type": "module_requested",
+  "module_id": "8a4b2c19-1234-5678-9abc-def012345678",
+  "payload_json": {
+    "reason": "Need refresher before field visits"
+  },
+  "event_date": "2026-04-28",
+  "timestamp_local": 1714306000,
+  "timestamp_utc": 1714283800
+}
+```
+
+Free-text-only example (no `module_id`):
+
+```json
+{
+  "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+  "event_family": "coaching",
+  "event_type": "module_requested",
+  "payload_json": {
+    "requested_module_name": "Diabetes Counseling Refresh",
+    "reason": "Need support for new patient cases"
+  },
+  "event_date": "2026-04-28",
+  "timestamp_local": 1714306100
 }
 ```
 

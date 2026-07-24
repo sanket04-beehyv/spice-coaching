@@ -14,7 +14,6 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from mc_contracts.internal_ai import (
     GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES,
-    OPENAI_TRANSCRIPTION_MAX_BYTES,
     TranscribeRequest,
     TranscribeResponse,
 )
@@ -47,7 +46,8 @@ _SUPPORTED_TRANSCRIPTION_MIME_TYPES = frozenset(
 
 
 def _provider_media_limit_bytes(provider: str) -> int:
-    return OPENAI_TRANSCRIPTION_MAX_BYTES if provider == "openai" else GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES
+    _ = provider
+    return GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES
 
 
 def _provider_error_status(exc: Exception) -> int:

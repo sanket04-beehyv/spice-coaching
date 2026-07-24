@@ -38,8 +38,14 @@ class SupervisorDashboardResponse(BaseModel):
 
 
 class DigitalHelpModuleUsageItem(BaseModel):
-    module_family_id: UUID
-    module_id: UUID | None = None
+    """One ranked module by digital_help_used event volume.
+
+    Ranked by concrete ``module_id`` (not family) so demand/usage is never
+    collapsed across module versions.
+    """
+
+    module_id: UUID
+    module_family_id: UUID | None = None
     query_count: int
     title: LocalizedString | None = None
 

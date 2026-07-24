@@ -102,8 +102,8 @@ async def authz_app(mock_spice_client: SpiceAuthClient) -> AsyncIterator[AsyncCl
     app.add_middleware(SpiceAuthorizationMiddleware)
     app.add_middleware(SpiceAuthMiddleware, client=mock_spice_client)
 
-    @app.get(f"{API_ROOT}/health")
-    async def health() -> dict[str, str]:
+    @app.get(f"{API_ROOT}/ready")
+    async def ready() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get(f"{API_ROOT}/coaching/probe")

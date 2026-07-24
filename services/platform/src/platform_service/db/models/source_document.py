@@ -2,15 +2,14 @@
 
 Per Data Model v3.3 §3.1. Replaces the v1 `documents` table semantically (the old
 `Document` model remains during the deprecation window). Carries content_domain
-+ assessment_mode + authority_label (free text), calibration result for
-Stage A, and outline_method tag for Stage B.
++ assessment_mode, calibration result for Stage A, and outline_method tag for Stage B.
 """
 
 import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, Date, DateTime, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Integer, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,12 +29,10 @@ class SourceDocument(Base):
     source_type: Mapped[str] = mapped_column(Text, nullable=False)
     # bn | en | bn_en_mixed
     primary_language: Mapped[str] = mapped_column(Text, nullable=False, default="bn")
-    # Enum stored as text: digital | clinical | clinical_with_app_action | supervisor_update
+    # Enum stored as text: digital | clinical | clinical_with_app_workflows
     content_domain: Mapped[str] = mapped_column(Text, nullable=False, default="clinical")
     # with_quiz | read_only — read_only skips post-publish quiz generation
     assessment_mode: Mapped[str] = mapped_column(Text, nullable=False, default="with_quiz")
-    # Free-form, e.g. "UHIS RMNCH" / "BRAC SK FP&MH Manual" / "BRAC Bangladesh Supervisor Update April 2026"
-    authority_label: Mapped[str] = mapped_column(Text, nullable=False)
     version_label: Mapped[str | None] = mapped_column(Text, nullable=True)
     publication_date: Mapped[datetime | None] = mapped_column(Date, nullable=True)
     original_storage_path: Mapped[str] = mapped_column(Text, nullable=False)
@@ -57,6 +54,10 @@ class SourceDocument(Base):
 
     # Optional admin steering text for Stage C module identification (sanitized at ingest).
     ingestion_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Optional fixed card/quiz counts per module (set at ingest; null = deployment defaults).
+    target_cards_per_module: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_quizzes_per_module: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # When true, document may appear in GET /sync/source-documents/published.
     sync_published_visible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

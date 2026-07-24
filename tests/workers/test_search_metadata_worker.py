@@ -52,11 +52,11 @@ class TestSearchMetadataWorker:
         module = await _seed_module(db_session)
         metadata = {
             "schema_version": 1,
-            "keywords": {"bn": ["cough"], "en": []},
-            "search_phrases": {"bn": ["child cough"], "en": []},
-            "synonyms": {"en": {}},
-            "topic_tags": ["respiratory"],
-            "clinical_conditions": [],
+            "keywords": {"bn": ["cough"]},
+            "search_phrases": {"bn": ["child cough"]},
+            "synonyms": {"bn": {}},
+            "topic_tags": {"bn": ["respiratory"]},
+            "clinical_conditions": {"bn": []},
             "audience": "chw_field_worker",
             "rationale": "ok",
         }
@@ -121,11 +121,11 @@ class TestSearchMetadataWorker:
         module = await _seed_module(db_session)
         metadata = {
             "schema_version": 1,
-            "keywords": {"bn": ["cough"], "en": []},
-            "search_phrases": {"bn": ["child cough"], "en": []},
-            "synonyms": {"en": {}},
-            "topic_tags": ["respiratory"],
-            "clinical_conditions": [],
+            "keywords": {"bn": ["cough"]},
+            "search_phrases": {"bn": ["child cough"]},
+            "synonyms": {"bn": {}},
+            "topic_tags": {"bn": ["respiratory"]},
+            "clinical_conditions": {"bn": []},
             "audience": "chw_field_worker",
             "rationale": "ok",
         }

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from platform_service.config import Settings
 from platform_service.db.repositories.module_repository import ModuleRepository
 from platform_service.db.repositories.source_repository import SourceRepository
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.card_provenance import resolve_card_provenance
 from platform_service.services.object_storage import ObjectStorageClient
 from platform_service.services.sync.presign_service import SyncPresignService
@@ -45,8 +46,17 @@ class PublishedSourceDocumentsBuilder:
         doc_ids: list[UUID] = []
         seen_doc_ids: set[UUID] = set()
 
+        module_ids = [module.id for module in modules]
+        cards_by_module_id: dict[UUID, list[dict]] = {}
+        if module_ids:
+            card_rows = await ModuleRepository(self._session).list_cards_for_module_ids(module_ids)
+            for row in card_rows:
+                if row.module_id is None:
+                    continue
+                cards_by_module_id.setdefault(row.module_id, []).append(card_row_to_dict(row))
+
         for module in modules:
-            cards = list((module.module_json or {}).get("cards", []))
+            cards = cards_by_module_id.get(module.id, [])
             if cards:
                 context = await resolve_card_provenance(self._session, cards, storage=None)
                 for row in context.provenance_by_block.values():

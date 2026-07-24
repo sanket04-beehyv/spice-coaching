@@ -29,6 +29,9 @@ class ModuleSummary(BaseModel):
     estimated_minutes: int
     published_at: datetime | None
     created_at: datetime
+    first_activated_at: datetime | None = None
+    last_deactivated_at: datetime | None = None
+    last_reactivated_at: datetime | None = None
     # Quality flags written by Stage 2 / Stage 2-draft (e.g.
     # `insufficient_source_filter`, drafter `insufficient_reason`). Surfaced
     # so the dashboard can build a "needs attention" view; presence of any
@@ -36,9 +39,22 @@ class ModuleSummary(BaseModel):
     quality_flags: dict[str, Any] | None
     # LLM-generated bilingual keywords, search phrases, and topic tags for retrieval.
     search_metadata: dict[str, Any] | None = None
+    chatbot_faqs_only: bool = False
     thumbnail_storage_path: str | None = None
     thumbnail_presigned_url: str | None = None
     thumbnail_presigned_expires_seconds: int | None = None
+    # Per-module source document linkage for dashboard document filters.
+    source_document_ids: list[str] | None = None
+
+
+class ModuleListResponse(BaseModel):
+    """Paginated admin module list envelope for ``GET /admin/modules``."""
+
+    modules: list[ModuleSummary]
+    total_modules: int
+    total_pages: int
+    limit: int
+    offset: int
 
 
 class ModuleSourceDocumentRef(BaseModel):
@@ -86,14 +102,14 @@ class QuizQuestionPayload(BaseModel):
 class ModuleDetail(ModuleSummary):
     """Full module: shell + cards + quiz + attachment refs (no presigned URLs on file refs).
 
-    Each card dict may include ``source_block_ids`` (when pipeline-drafted) and
-    a server-enriched ``source_pages`` list (``CardSourcePageRef`` shape).
+    Each card dict includes ``card_family_id``, may include ``source_block_ids`` (when
+    pipeline-drafted) and a server-enriched ``source_pages`` list (``CardSourcePageRef`` shape).
     """
 
     cards: list[dict[str, Any]]
     attachments: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Module-level attachments from module_json; presign via POST /admin/v3/files/presigned-url on demand",
+        description="Module-level attachments from module_json; presign via GET /admin/files/presigned-url on demand",
     )
     quiz: list[QuizQuestionPayload]
     sub_domain: str | None
@@ -119,6 +135,23 @@ class QuizQuestionEditRequest(BaseModel):
 
 
 class ModuleEditRequest(BaseModel):
+    """Edit a module tip; creates a new draft version unless the body is a complete
+    content snapshot that matches the current tip (idempotent no-op).
+
+    A complete snapshot requires ``title``, ``description``, ``module_json``,
+    ``thumbnail_storage_path``, and quiz either as top-level ``quiz`` or nested under
+    ``module_json.quiz``. Gap ids, ``editor_id``, and ``chatbot_faqs_only`` are ignored
+    for equality. Omitted content fields always version-bump.
+    """
+
+    expected_version: int = Field(
+        ...,
+        ge=1,
+        description=(
+            "Version of the module row being edited; must match the server tip "
+            "or the request fails with 409 module_version_conflict"
+        ),
+    )
     title: LocalizedString | None = None
     description: LocalizedString | None = None
     module_json: dict[str, Any] | None = None
@@ -136,7 +169,14 @@ class ModuleEditRequest(BaseModel):
         default=None,
         description=(
             "MinIO path to module preview image. Omit to copy forward on version bump; "
-            "send null to clear; send a path to set or replace (upload via POST /admin/v3/files)."
+            "send null to clear; send a path to set or replace (upload via POST /admin/files)."
+        ),
+    )
+    chatbot_faqs_only: bool | None = Field(
+        default=None,
+        description=(
+            "When set, updates this module version flag. True restricts the module to "
+            "chatbot knowledge retrieval only (no CHW training workflows)."
         ),
     )
 
@@ -154,6 +194,13 @@ class ModuleCreateRequest(BaseModel):
     behavioural_gap_ids: list[UUID] | None = None
     primary_gap_id: UUID | None = None
     creator_id: UUID | None = None
+    chatbot_faqs_only: bool = Field(
+        default=False,
+        description=(
+            "When true, the module is for chatbot FAQ/RAG knowledge only and is excluded "
+            "from CHW training, assignments, and refresher workflows."
+        ),
+    )
 
 
 class ClinicalFlagRequest(BaseModel):
@@ -208,6 +255,28 @@ class UpdateBindingRequest(BaseModel):
     notes: str | None = None
 
 
+class SourceDocumentSummary(BaseModel):
+    """List-row response for admin source document catalog (ingest dropdowns)."""
+
+    id: UUID
+    title: str
+    source_type: str
+    status: str
+    content_domain: str
+    original_filename: str | None = None
+    ingested_at: datetime
+
+
+class SourceDocumentListResponse(BaseModel):
+    """Paginated admin source document list envelope for ``GET /admin/source-documents``."""
+
+    source_documents: list[SourceDocumentSummary]
+    total_source_documents: int
+    total_pages: int
+    limit: int
+    offset: int
+
+
 class IngestionRunSummary(BaseModel):
     id: UUID
     source_document_id: UUID
@@ -215,11 +284,29 @@ class IngestionRunSummary(BaseModel):
     started_at: datetime
     completed_at: datetime | None
     error: dict[str, Any] | None
+    # Prefer original_filename when present; otherwise source_document.title.
+    document_label: str = ""
+    # Populated for succeeded runs only (else 0). Totals across modules
+    # produced by this run's card_draft steps (distinct module_id).
+    generated_module_count: int = 0
+    generated_card_count: int = 0
+    generated_quiz_count: int = 0
+
+
+class IngestionRunListResponse(BaseModel):
+    """Paginated admin ingestion-run list envelope for ``GET /admin/ingestion-runs``."""
+
+    runs: list[IngestionRunSummary]
+    total_runs: int
+    total_pages: int
+    limit: int
+    offset: int
 
 
 class IngestionRunCandidatePayload(BaseModel):
     candidate_id: UUID
     proposed_title: str
+    domain: str | None = None
     behavioural_gap_code: str | None
     proposed_module_type: str | None
     estimated_card_count: int | None

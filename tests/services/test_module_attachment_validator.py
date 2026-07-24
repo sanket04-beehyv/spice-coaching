@@ -91,10 +91,27 @@ class TestValidateModuleAttachments:
         assert att["youtube_url"] == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
     async def test_rejects_wrong_object_prefix(self) -> None:
-        module_json = {"attachments": [_file_ref(object_name="uploads/wrong.pdf")], "cards": []}
+        module_json = {"attachments": [_file_ref(object_name="evil/wrong.pdf")], "cards": []}
         with pytest.raises(ValidationError) as exc_info:
             await validate_module_attachments(module_json, settings=Settings())
         assert exc_info.value.code == "invalid_attachment_object_prefix"
+
+    async def test_accepts_legacy_media_and_uploads_prefixes(self) -> None:
+        module_json = {
+            "attachments": [
+                _file_ref(object_name="media/legacy.pdf"),
+                _file_ref(object_name="uploads/new.pdf"),
+            ],
+            "cards": [],
+        }
+        out = await validate_module_attachments(
+            module_json,
+            settings=Settings(),
+            storage=_FakeStorage(),
+        )
+        assert out is not None
+        assert out["attachments"][0]["object_name"] == "media/legacy.pdf"
+        assert out["attachments"][1]["object_name"] == "uploads/new.pdf"
 
     async def test_rejects_duplicate_attachment_id(self) -> None:
         aid = str(uuid4())

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from mc_contracts.admin_modules import (
     IngestionRunCandidatePayload,
@@ -11,15 +12,19 @@ from mc_contracts.admin_modules import (
     IngestionRunSummary,
     PublishedModuleMergePoll,
 )
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.models.ingestion_run import IngestionRun, IngestionRunStep
+from platform_service.db.models.source_document import SourceDocument
 from platform_service.db.repositories.module_candidate_repository import (
     ModuleCandidateRepository,
 )
+from platform_service.services.module_presenter import get_card_counts, get_quiz_counts
 from platform_service.services.run_state_service import (
     FUSION_RUN_TYPE,
     RUN_RUNNING,
+    RUN_SUCCEEDED,
     STAGE_CARD_DRAFT,
     STEP_FAILED,
     STEP_RUNNING,
@@ -27,6 +32,26 @@ from platform_service.services.run_state_service import (
     STEP_SUCCEEDED,
     RunStateService,
 )
+
+
+def _document_label(doc: SourceDocument | None) -> str:
+    if doc is None:
+        return ""
+    filename = (doc.original_filename or "").strip()
+    if filename:
+        return filename
+    return doc.title
+
+
+def _module_id_from_step(step: IngestionRunStep) -> UUID | None:
+    summary = step.output_summary_jsonb or {}
+    raw = summary.get("module_id")
+    if not raw:
+        return None
+    try:
+        return UUID(str(raw))
+    except (TypeError, ValueError):
+        return None
 
 
 class IngestionRunPresenter:
@@ -121,16 +146,79 @@ class IngestionRunPresenter:
             return current
         return None
 
-    @staticmethod
-    def present_summary(run: IngestionRun) -> IngestionRunSummary:
-        return IngestionRunSummary(
-            id=run.id,
-            source_document_id=run.source_document_id,
-            status=run.status,
-            started_at=run.started_at,
-            completed_at=run.completed_at,
-            error=run.error_jsonb,
+    async def present_summaries(self, runs: list[IngestionRun]) -> list[IngestionRunSummary]:
+        """Batch-enrich run rows with document label and generated counts."""
+        if not runs:
+            return []
+
+        doc_ids = list({r.source_document_id for r in runs})
+        docs_result = await self._session.execute(
+            select(SourceDocument).where(SourceDocument.id.in_(doc_ids))
         )
+        docs_by_id = {d.id: d for d in docs_result.scalars().all()}
+
+        succeeded_run_ids = [r.id for r in runs if r.status == RUN_SUCCEEDED]
+        module_ids_by_run: dict[UUID, list[UUID]] = {rid: [] for rid in succeeded_run_ids}
+        all_module_ids: list[UUID] = []
+
+        if succeeded_run_ids:
+            steps_result = await self._session.execute(
+                select(IngestionRunStep).where(
+                    IngestionRunStep.ingestion_run_id.in_(succeeded_run_ids),
+                    IngestionRunStep.stage == STAGE_CARD_DRAFT,
+                )
+            )
+            seen_per_run: dict[UUID, set[UUID]] = {rid: set() for rid in succeeded_run_ids}
+            for step in steps_result.scalars().all():
+                module_id = _module_id_from_step(step)
+                if module_id is None:
+                    continue
+                seen = seen_per_run[step.ingestion_run_id]
+                if module_id in seen:
+                    continue
+                seen.add(module_id)
+                module_ids_by_run[step.ingestion_run_id].append(module_id)
+                all_module_ids.append(module_id)
+
+        card_counts = await get_card_counts(self._session, all_module_ids)
+        quiz_counts = await get_quiz_counts(self._session, all_module_ids)
+
+        summaries: list[IngestionRunSummary] = []
+        for run in runs:
+            label = _document_label(docs_by_id.get(run.source_document_id))
+            if run.status != RUN_SUCCEEDED:
+                summaries.append(
+                    IngestionRunSummary(
+                        id=run.id,
+                        source_document_id=run.source_document_id,
+                        status=run.status,
+                        started_at=run.started_at,
+                        completed_at=run.completed_at,
+                        error=run.error_jsonb,
+                        document_label=label,
+                        generated_module_count=0,
+                        generated_card_count=0,
+                        generated_quiz_count=0,
+                    )
+                )
+                continue
+
+            module_ids = module_ids_by_run.get(run.id, [])
+            summaries.append(
+                IngestionRunSummary(
+                    id=run.id,
+                    source_document_id=run.source_document_id,
+                    status=run.status,
+                    started_at=run.started_at,
+                    completed_at=run.completed_at,
+                    error=run.error_jsonb,
+                    document_label=label,
+                    generated_module_count=len(module_ids),
+                    generated_card_count=sum(card_counts.get(mid, 0) for mid in module_ids),
+                    generated_quiz_count=sum(quiz_counts.get(mid, 0) for mid in module_ids),
+                )
+            )
+        return summaries
 
     async def _load_run_context(
         self,
@@ -141,6 +229,7 @@ class IngestionRunPresenter:
             IngestionRunCandidatePayload(
                 candidate_id=c.id,
                 proposed_title=c.proposed_title,
+                domain=c.domain,
                 behavioural_gap_code=c.behavioural_gap_code,
                 proposed_module_type=c.proposed_module_type,
                 estimated_card_count=c.estimated_card_count,
@@ -153,7 +242,7 @@ class IngestionRunPresenter:
         return steps, candidates, self.run_kind(run)
 
     async def present_poll(self, run: IngestionRun) -> dict[str, Any]:
-        """JSON payload for ``GET /admin/ingest/{run_id}`` and by-document poll."""
+        """JSON payload for ``GET /admin/ingest/by-document/{source_document_id}`` poll."""
         steps, candidates, run_kind = await self._load_run_context(run)
         payload: dict[str, Any] = {
             "run_id": str(run.id),
@@ -183,13 +272,18 @@ class IngestionRunPresenter:
         source_document_ids = None
         if run_kind == FUSION_RUN_TYPE:
             source_document_ids = (run.error_jsonb or {}).get("source_document_ids")
+        summary = (await self.present_summaries([run]))[0]
         return IngestionRunDetail(
-            id=run.id,
-            source_document_id=run.source_document_id,
-            status=run.status,
-            started_at=run.started_at,
-            completed_at=run.completed_at,
-            error=run.error_jsonb,
+            id=summary.id,
+            source_document_id=summary.source_document_id,
+            status=summary.status,
+            started_at=summary.started_at,
+            completed_at=summary.completed_at,
+            error=summary.error,
+            document_label=summary.document_label,
+            generated_module_count=summary.generated_module_count,
+            generated_card_count=summary.generated_card_count,
+            generated_quiz_count=summary.generated_quiz_count,
             run_kind=run_kind,
             steps=[self.step_to_payload(s) for s in steps],
             candidates=candidates,

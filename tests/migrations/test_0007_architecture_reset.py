@@ -32,6 +32,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from platform_service.config import get_settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -158,6 +159,8 @@ class TestModuleColumnsAdded:
         assert col["data_type"] == "USER-DEFINED"
         assert col["udt_name"] == "vector"
         assert col["is_nullable"] == "YES"
+        # Verify the dimension matches `settings.embedding_dimension`.
+        expected_dim = get_settings().embedding_dimension
         # pg_attribute records the typmod for vector(N); we read it via
         # `format_type` which prints the dim into the type string.
         formatted = (
@@ -170,7 +173,7 @@ class TestModuleColumnsAdded:
                 )
             )
         ).scalar_one()
-        assert formatted.startswith("vector")
+        assert f"vector({expected_dim})" in formatted
 
     async def test_visibility_window_is_tstzrange_nullable(self, db_session: AsyncSession) -> None:
         cols = await _columns_for(db_session, "module")
@@ -266,7 +269,11 @@ class TestQuizQuestionLinkedToModule:
         assert "module_id" in cols
         col = cols["module_id"]
         assert col["data_type"] == "uuid"
-        assert col["is_nullable"] in {"NO", "YES"}
+        assert col["is_nullable"] == "NO", (
+            "module_quiz_question.module_id must be NOT NULL — the "
+            "membership join table was dropped, every quiz question MUST "
+            "belong to exactly one module version."
+        )
 
     async def test_module_id_fk_cascades_on_delete(self, db_session: AsyncSession) -> None:
         # information_schema doesn't expose ON DELETE; query pg_constraint.

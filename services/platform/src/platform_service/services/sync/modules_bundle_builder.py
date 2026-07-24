@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from mc_contracts.sync import (
+    AssignedModulePayload,
     ModuleFamilySyncPayload,
     ModuleQuizQuestionPayload,
     ModulesSyncBundle,
     ModuleSyncPayload,
+    RequestedModulePayload,
     SourceDocumentSyncPayload,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,12 +21,14 @@ from platform_service.db.models.source_document import SourceDocument
 from platform_service.db.repositories.module_gap_repository import ModuleGapRepository
 from platform_service.db.repositories.module_repository import ModuleRepository
 from platform_service.db.repositories.source_repository import SourceRepository
+from platform_service.db.repositories.training_request_repository import TrainingRequestRepository
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.card_provenance import (
     block_ids_from_card,
     render_card_provenance,
     resolve_card_provenance,
 )
-from platform_service.services.sync.module_assignment_resolver import resolve_assigned_module_ids
+from platform_service.services.sync.module_assignment_resolver import resolve_assigned_modules
 
 
 def build_source_document_sync_payloads(
@@ -43,7 +48,6 @@ def build_source_document_sync_payloads(
                 primary_language=doc.primary_language,
                 content_domain=doc.content_domain,
                 assessment_mode=doc.assessment_mode,
-                authority_label=doc.authority_label,
                 version_label=doc.version_label,
                 publication_date=doc.publication_date,
                 original_filename=doc.original_filename,
@@ -71,10 +75,16 @@ class ModulesBundleBuilder:
 
         quiz_by_module_id: dict[UUID, list[ModuleQuizQuestionPayload]] = {}
         module_ids = [module.id for module in modules]
+        cards_by_module_id: dict[UUID, list[dict[str, Any]]] = {}
         gap_ids_by_module: dict[UUID, list[UUID]] = {}
         if module_ids:
             gap_ids_by_module = await ModuleGapRepository(self._session).get_gap_ids_by_module_ids(module_ids)
             quiz_rows = await module_repo.list_quiz_questions_for_module_ids(module_ids)
+            card_rows = await module_repo.list_cards_for_module_ids(module_ids)
+            for row in card_rows:
+                if row.module_id is None:
+                    continue
+                cards_by_module_id.setdefault(row.module_id, []).append(card_row_to_dict(row))
             for row in quiz_rows:
                 if row.module_id is None:
                     continue
@@ -104,7 +114,7 @@ class ModulesBundleBuilder:
             docs = await SourceRepository(self._session).list_source_documents_by_ids(all_doc_ids)
             doc_by_id = {doc.id: doc for doc in docs}
 
-        module_cards = [(module, list((module.module_json or {}).get("cards", []))) for module in modules]
+        module_cards = [(module, cards_by_module_id.get(module.id, [])) for module in modules]
         all_cards = [card for _, cards in module_cards for card in cards]
         provenance_context = await resolve_card_provenance(self._session, all_cards, storage=None)
 
@@ -146,16 +156,35 @@ class ModulesBundleBuilder:
                 )
             )
 
-        if user_id is None:
-            assigned_module_ids: list[UUID] = []
-        else:
-            assigned_module_ids = sorted(
-                await resolve_assigned_module_ids(
-                    self._session,
-                    user_id=user_id,
-                    organization_ids=organization_ids,
-                )
+        assigned_module_ids: list[AssignedModulePayload] = []
+        requested_modules: list[RequestedModulePayload] = []
+        if user_id is not None:
+            assignments_by_module = await resolve_assigned_modules(
+                self._session,
+                user_id=user_id,
+                organization_ids=organization_ids,
             )
+            for module_id in sorted(assignments_by_module):
+                assigned_module_ids.append(
+                    AssignedModulePayload(
+                        module_id=module_id,
+                        assigned_at=assignments_by_module[module_id],
+                    )
+                )
+            request_rows = await TrainingRequestRepository(self._session).list_for_chw(
+                chw_id=user_id,
+                tenant_id=tenant_id,
+            )
+            requested_modules = [
+                RequestedModulePayload(
+                    request_id=row.id,
+                    module_id=row.module_id,
+                    requested_module_name=row.requested_module_name,
+                    reason=row.reason,
+                    submitted_at=row.submitted_at,
+                )
+                for row in request_rows
+            ]
 
         return ModulesSyncBundle(
             modules=payloads,
@@ -170,5 +199,6 @@ class ModulesBundleBuilder:
                 for family in families
             ],
             assigned_module_ids=assigned_module_ids,
+            requested_modules=requested_modules,
             server_time_utc=datetime.now(UTC).isoformat(),
         )

@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from platform_service.services.llm_text_utils import strip_inline_markdown
+
 logger = logging.getLogger(__name__)
 
 _BLOCK_NODE_TYPES = frozenset(
@@ -55,7 +57,7 @@ def card_body_plain_text(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
-        return value.strip()
+        return strip_inline_markdown(value)
     if is_prosemirror_doc(value):
         return _prosemirror_doc_to_plain_text(value).strip()
     if is_rich_text_blocks(value):

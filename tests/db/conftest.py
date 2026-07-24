@@ -9,6 +9,11 @@ from uuid import uuid4
 from asyncpg import Range
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
+from platform_service.services.module_card_service import (
+    ModuleCardService,
+    extract_cards_from_module_json,
+    module_json_shell,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
@@ -53,10 +58,17 @@ async def _make_module(
     thumbnail_storage_path: str | None = None,
     version: int = 1,
     published_at: datetime | None = None,
+    created_at: datetime | None = None,
     set_family_pointer: bool = True,
 ) -> Module:
     if family is None:
         family = await _make_family(session)
+    if module_json is None:
+        cards_data = [{"title": {"bn": "Card 1"}}]
+        shell_json: dict[str, Any] | None = {}
+    else:
+        cards_data = extract_cards_from_module_json(module_json)
+        shell_json = module_json_shell(module_json)
     module = Module(
         module_family_id=family.id,
         version=version,
@@ -68,12 +80,16 @@ async def _make_module(
         clinically_reviewed=clinically_reviewed,
         visibility_window=visibility_window,
         embedding=embedding,
-        module_json=module_json or {"cards": [{"title": {"bn": "Card 1"}}]},
+        module_json=shell_json,
         thumbnail_storage_path=thumbnail_storage_path,
         published_at=published_at or (datetime.now(UTC) if lifecycle_status == "published" else None),
+        created_at=created_at or datetime.now(UTC),
     )
     session.add(module)
     await session.flush()
+    if cards_data:
+        await ModuleCardService(session).append_cards(module.id, cards_data)
+        await session.flush()
     if set_family_pointer and lifecycle_status == "published":
         family.current_published_module_id = module.id
         await session.flush()

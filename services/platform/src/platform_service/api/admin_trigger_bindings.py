@@ -13,6 +13,7 @@ from mc_contracts.admin_modules import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.models.trigger_definition import ModuleTriggerBinding
+from platform_service.db.repositories.module_family_repository import ModuleFamilyRepository
 from platform_service.db.repositories.trigger_repository import TriggerRepository
 from platform_service.deps import get_db
 
@@ -46,6 +47,12 @@ async def create_binding(
     session: AsyncSession = Depends(get_db),
 ) -> TriggerBindingPayload:
     repo = TriggerRepository(session)
+    family_repo = ModuleFamilyRepository(session)
+    if not await family_repo.is_assignable(body.module_family_id):
+        raise HTTPException(
+            status_code=409,
+            detail="cannot bind trigger to a deactivated or unpublished module",
+        )
     binding = await repo.bind_module_to_trigger(
         trigger_definition_id=body.trigger_definition_id,
         module_id=body.module_id,

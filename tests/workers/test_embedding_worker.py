@@ -68,9 +68,11 @@ class TestModuleTextForEmbedding:
             cards=[],
         )
         text = _module_text_for_embedding(m)
+        # Order matters: bn → en → desc.
         idx_bn = text.index("bn-title")
+        idx_en = text.index("en-title")
         idx_desc = text.index("bn-desc")
-        assert idx_bn < idx_desc
+        assert idx_bn < idx_en < idx_desc
 
     def test_prosemirror_body_fields_use_plain_text(self) -> None:
         m = _make_module_obj(
@@ -156,18 +158,17 @@ class TestModuleTextForEmbedding:
             text.index("next"),
         ]
         assert positions == sorted(positions)
+        assert "card-title-en" not in text
+        assert "body-en" not in text
 
     def test_skips_empty_card_fields(self) -> None:
-        m = Module(
-            module_family_id=uuid4(),
-            version=1,
-            title_localized={},
-            description_localized={},
-            domain="rmnch",
-            module_type="refresher",
-            module_json={"cards": [{"title": {"bn": "only-this"}}]},
+        m = _make_module_obj(
+            title_localized=None,
+            description_localized=None,
+            cards=[{"title": {"bn": "only-this"}}],
         )
         text = _module_text_for_embedding(m)
+        # Only the populated field shows up.
         assert text.strip() == "only-this"
 
     def test_skips_non_dict_cards(self) -> None:
@@ -187,15 +188,7 @@ class TestModuleTextForEmbedding:
         assert "t" in text
 
     def test_returns_empty_string_for_empty_module(self) -> None:
-        m = Module(
-            module_family_id=uuid4(),
-            version=1,
-            title_localized={},
-            description_localized={},
-            domain="rmnch",
-            module_type="refresher",
-            module_json={"cards": []},
-        )
+        m = _make_module_obj(title_localized=None, description_localized=None, cards=[])
         text = _module_text_for_embedding(m)
         assert text == ""
 
@@ -348,6 +341,7 @@ class TestHappyPath:
         text_in = mock_embed.call_args.args[0][0]
         for fragment in (
             "title-bn",
+            "title-en",
             "desc-bn",
             "c1-title",
             "c1-body",

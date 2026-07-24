@@ -46,6 +46,7 @@ from platform_service.services.corpus_partitioner import (
     dedup_and_flag_cross_chunk,
     estimate_corpus_tokens,
 )
+from platform_service.services.ingestion_cardinality import resolve_from_source_documents
 from platform_service.services.insufficient_source_filter import (
     FilterDecision,
     evaluate_candidate,
@@ -150,6 +151,8 @@ class StageCResult:
     # (trigram-similar titles from different chunks).
     cross_chunk_review_count: int = 0
     ingestion_instructions_present: bool = False
+    target_cards_per_module_present: bool = False
+    target_quizzes_per_module_present: bool = False
 
 
 def _ingestion_instructions_from_documents(documents: list[Any]) -> str | None:
@@ -207,6 +210,7 @@ class StageCOrchestrator:
         content_domains = {d["content_domain"] for d in page_corpus}
         estimated_tokens = estimate_corpus_tokens(page_corpus)
         ingestion_instructions = _ingestion_instructions_from_documents(documents)
+        cardinality = resolve_from_source_documents(documents)
 
         # Chunk into token-budgeted, content-disjoint slices.
         chunks = chunk_by_token_budget(page_corpus, document_outlines)
@@ -230,6 +234,7 @@ class StageCOrchestrator:
                         valid_block_ids=valid_block_ids,
                         valid_page_ids=valid_page_ids,
                         ingestion_instructions=ingestion_instructions,
+                        cardinality=cardinality,
                     )
                     backfilled = _backfill_empty_block_ids(result.candidates, chunk.page_corpus)
                     return chunk, backfilled
@@ -311,14 +316,21 @@ class StageCOrchestrator:
         for cand in raw_candidates:
             flags = cand.get("_quality_flags") or []
             quality_flags = {"flags": flags} if flags else None
+            card_count = int(cand["estimated_card_count"])
+            quiz_count = int(cand["estimated_quiz_count"])
+            if cardinality.target_cards is not None:
+                card_count = cardinality.target_cards
+            if cardinality.target_quizzes is not None:
+                quiz_count = cardinality.target_quizzes
             await self._candidate_repo.create_candidate(
                 ingestion_run_id=ingestion_run_id,
                 proposed_title=cand["proposed_title"],
                 scope_summary=cand["scope_summary"],
                 description_localized=candidate_description_localized(cand),
+                domain=cand.get("domain"),
                 source_provenance=cand["source_provenance"],
-                estimated_card_count=int(cand["estimated_card_count"]),
-                estimated_quiz_count=int(cand["estimated_quiz_count"]),
+                estimated_card_count=card_count,
+                estimated_quiz_count=quiz_count,
                 proposed_module_type=cand["proposed_module_type"],
                 quality_flags=quality_flags,
                 clinical_review_notes=cand.get("clinical_review_notes"),
@@ -356,6 +368,8 @@ class StageCOrchestrator:
             chunks_failed=chunks_failed,
             cross_chunk_review_count=cross_chunk_review_count,
             ingestion_instructions_present=ingestion_instructions is not None,
+            target_cards_per_module_present=cardinality.has_target_cards(),
+            target_quizzes_per_module_present=cardinality.has_target_quizzes(),
         )
 
     # ── Internal helpers ────────────────────────────────────────────────

@@ -13,13 +13,20 @@ from asyncpg import Range
 from fastapi import APIRouter, FastAPI
 from httpx import ASGITransport, AsyncClient
 from platform_service.api.admin_ingestion_runs import router as admin_ingestion_runs_router
+from platform_service.api.admin_module_analytics import router as admin_module_analytics_router
 from platform_service.api.admin_modules import router as admin_modules_router
+from platform_service.api.admin_source_documents import router as admin_source_documents_router
 from platform_service.api.admin_trigger_bindings import router as admin_trigger_bindings_router
 from platform_service.config import get_settings
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.deps import get_db, get_object_storage_client
+from platform_service.services.module_card_service import (
+    ModuleCardService,
+    extract_cards_from_module_json,
+    module_json_shell,
+)
 from platform_service.services.object_storage import ObjectNotFoundError, PresignedObjectUrl
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,7 +53,7 @@ async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[No
     await db_session.rollback()
     await db_session.execute(
         text(
-            "TRUNCATE module_quiz_question, module, module_family, "
+            "TRUNCATE module_lifecycle_event, module_quiz_question, module, module_family, "
             "module_trigger_binding, trigger_definition, "
             "ingestion_run_step, ingestion_run, content_block, source_page, source_document "
             "RESTART IDENTITY CASCADE"
@@ -77,8 +84,6 @@ class _FakeAttachmentStorage:
         object_name: str,
         expires_seconds: int,
         disposition: str = "auto",
-        download_filename: str | None = None,
-        **kwargs: object,
     ) -> PresignedObjectUrl:
         return PresignedObjectUrl(
             url=f"https://minio.test/{object_name}?exp={expires_seconds}",
@@ -94,8 +99,10 @@ async def app(db_session: AsyncSession) -> AsyncIterator[FastAPI]:
     app_obj = FastAPI()
     api_router = APIRouter(prefix=get_settings().api_root_path_normalized)
     api_router.include_router(admin_modules_router)
+    api_router.include_router(admin_module_analytics_router)
     api_router.include_router(admin_trigger_bindings_router)
     api_router.include_router(admin_ingestion_runs_router)
+    api_router.include_router(admin_source_documents_router)
     app_obj.include_router(api_router)
     fake_storage = _FakeAttachmentStorage()
 
@@ -145,7 +152,6 @@ async def _seed_source_document(
         primary_language="bn",
         content_domain="clinical",
         assessment_mode="with_quiz",
-        authority_label="BRAC",
         original_storage_path=storage_path,
         original_filename=original_filename,
         sync_published_visible=sync_published_visible,
@@ -170,11 +176,21 @@ async def _seed_module(
     quality_flags_jsonb: dict | None = None,
     search_metadata_jsonb: dict | None = None,
     source_document_ids: list[UUID] | None = None,
+    primary_gap_id: UUID | None = None,
+    chatbot_faqs_only: bool = False,
     set_family_pointer: bool = True,
+    created_at: datetime | None = None,
+    published_at: datetime | None = None,
 ) -> Module:
     family = ModuleFamily(module_code=f"f-{uuid4().hex[:8]}")
     session.add(family)
     await session.flush()
+    if module_json is None:
+        cards_data = [{"title": {"bn": "C1"}, "body": {"bn": "B1"}}]
+        shell_json: dict | None = {}
+    else:
+        cards_data = extract_cards_from_module_json(module_json)
+        shell_json = module_json_shell(module_json)
     module = Module(
         module_family_id=family.id,
         version=1,
@@ -186,14 +202,24 @@ async def _seed_module(
         clinically_reviewed=clinically_reviewed,
         visibility_window=visibility_window,
         embedding=embedding,
-        module_json=module_json or {"cards": [{"title": {"bn": "C1"}, "body": {"bn": "B1"}}]},
+        module_json=shell_json,
         quality_flags_jsonb=quality_flags_jsonb,
         search_metadata_jsonb=search_metadata_jsonb,
         source_document_ids=source_document_ids,
-        published_at=datetime.now(UTC) if lifecycle_status == "published" else None,
+        primary_gap_id=primary_gap_id,
+        chatbot_faqs_only=chatbot_faqs_only,
+        published_at=(
+            published_at
+            if published_at is not None
+            else (datetime.now(UTC) if lifecycle_status == "published" else None)
+        ),
+        created_at=created_at or datetime.now(UTC),
     )
     session.add(module)
     await session.flush()
+    if cards_data:
+        await ModuleCardService(session).append_cards(module.id, cards_data)
+        await session.flush()
     if set_family_pointer and lifecycle_status == "published":
         family.current_published_module_id = module.id
         await session.flush()

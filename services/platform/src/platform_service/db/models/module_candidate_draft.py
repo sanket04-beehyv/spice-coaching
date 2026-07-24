@@ -31,6 +31,8 @@ class ModuleCandidateDraft(Base):
         nullable=False,
     )
     proposed_title: Mapped[str] = mapped_column(Text, nullable=False)
+    # Admin filter domain emitted by Stage C; copied onto module.domain at Stage D.
+    domain: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Stage 2 dropped gap context from its prompt (architecture reset);
     # this column is nullable and the pipeline writes None. Reviewer-
     # authored bindings carry the gap mapping post-publish.

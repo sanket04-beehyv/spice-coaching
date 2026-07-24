@@ -1,8 +1,8 @@
 """Post-publish search metadata worker.
 
-Generates bilingual lexical enrichment for module retrieval via LLM, persists
-to ``module.search_metadata_jsonb``, then chains embedding generation so
-vectors include the enriched text.
+Generates locale-keyed lexical enrichment (primary locale only) for module
+retrieval via LLM, persists to ``module.search_metadata_jsonb``, then chains
+embedding generation so vectors include the enriched text.
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ from uuid import UUID
 
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.module import Module
+from platform_service.db.repositories.module_read_repository import ModuleReadRepository
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.module_search_metadata_generator import ModuleSearchMetadataGenerator
 from platform_service.services.post_publish_step import finish_post_publish_step
 
@@ -72,8 +74,11 @@ async def generate_search_metadata_for_module(
                 _chain_post_metadata()
                 return False
 
+            card_rows = await ModuleReadRepository(session).list_cards(module_id)
+            cards = [card_row_to_dict(row) for row in card_rows]
+
             generator = ModuleSearchMetadataGenerator()
-            result = await generator.generate(module)
+            result = await generator.generate(module, cards=cards)
             if result.metadata is None:
                 logger.warning(
                     "Search metadata worker: generation failed for module %s: %s",

@@ -4,7 +4,7 @@ services:
     image: pgvector/pgvector:pg15
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: postgres
       POSTGRES_DB: microcoaching
     ports:
       - "15432:5432"
@@ -53,8 +53,8 @@ services:
     image: quay.io/minio/minio:RELEASE.2024-09-09T16-59-28Z
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY in .env}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY in .env}
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-microcoaching}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-microcoaching123}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
@@ -75,7 +75,7 @@ services:
     command: >
       sh -c "alembic -c infra/alembic.ini upgrade head"
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:${DATABASE_PASSWORD:-postgres}@db:5432/microcoaching
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/microcoaching
     depends_on:
       db:
         condition: service_healthy
@@ -88,19 +88,16 @@ services:
     ports:
       - "18000:8000"
     environment:
-      database_url: postgresql+asyncpg://postgres:${DATABASE_PASSWORD:-postgres}@db:5432/microcoaching
-      database_password: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD in .env}
+      database_url: postgresql+asyncpg://postgres:postgres@db:5432/microcoaching
+      database_password: postgres
       redis_url: redis://redis:6379/0
       clickhouse_host: clickhouse
       ai_runtime_base_url: http://ai-runtime:8001
       ai_runtime_token: ${AI_RUNTIME_TOKEN:?set AI_RUNTIME_TOKEN in .env}
-      ai_runtime_timeout_seconds: ${AI_RUNTIME_TIMEOUT_SECONDS:-120}
+      ai_runtime_timeout_seconds: ${AI_RUNTIME_TIMEOUT_SECONDS:-600}
       ai_runtime_transcribe_timeout_seconds: ${AI_RUNTIME_TRANSCRIBE_TIMEOUT_SECONDS:-600}
-      ai_cloud_provider: ${AI_CLOUD_PROVIDER:-google}
-      stage_c_max_output_tokens: ${STAGE_C_MAX_OUTPUT_TOKENS:-32768}
       stage_d_published_merge_enabled: ${STAGE_D_PUBLISHED_MERGE_ENABLED:-true}
       stage_d_published_merge_prefilter_limit: ${STAGE_D_PUBLISHED_MERGE_PREFILTER_LIMIT:-25}
-      stage_d_published_merge_max_output_tokens: ${STAGE_D_PUBLISHED_MERGE_MAX_OUTPUT_TOKENS:-4000}
       stage_d_published_merge_min_existing_card_match_ratio: ${STAGE_D_PUBLISHED_MERGE_MIN_EXISTING_CARD_MATCH_RATIO:-0.0}
       stage_d_published_merge_card_similarity_threshold: ${STAGE_D_PUBLISHED_MERGE_CARD_SIMILARITY_THRESHOLD:-0.0}
       stage_d_published_merge_module_similarity_threshold: ${STAGE_D_PUBLISHED_MERGE_MODULE_SIMILARITY_THRESHOLD:-0.0}
@@ -109,29 +106,26 @@ services:
       search_metadata_max_search_phrases: ${SEARCH_METADATA_MAX_SEARCH_PHRASES:-10}
       search_metadata_max_synonyms: ${SEARCH_METADATA_MAX_SYNONYMS:-10}
       search_metadata_max_tags: ${SEARCH_METADATA_MAX_TAGS:-10}
-      minio_endpoint: ${MINIO_ENDPOINT:-minio:9000}
-      minio_presigned_endpoint: ${MINIO_PRESIGNED_ENDPOINT:-minio:9000}
-      minio_access_key: ${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY in .env}
-      minio_secret_key: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY in .env}
+      # Local compose MinIO (host .env may set localhost:19902 for non-compose runs).
+      minio_endpoint: minio:9000
+      minio_presigned_endpoint: minio:9000
+      minio_access_key: ${MINIO_ACCESS_KEY:-microcoaching}
+      minio_secret_key: ${MINIO_SECRET_KEY:-microcoaching123}
       minio_bucket_name: ${MINIO_BUCKET_NAME:-medtronics-storage}
       minio_auto_create_bucket: ${MINIO_AUTO_CREATE_BUCKET:-true}
-      minio_secure: ${MINIO_SECURE:-false}
+      minio_secure: "false"
       minio_region: ${MINIO_REGION:-us-east-1}
       admin_file_allowed_prefixes: ${ADMIN_FILE_ALLOWED_PREFIXES:-uploads,source-documents,media,ingest,module-thumbnails}
+      admin_file_upload_prefix: ${ADMIN_FILE_UPLOAD_PREFIX:-uploads}
       admin_file_presigned_max_seconds: ${ADMIN_FILE_PRESIGNED_MAX_SECONDS:-86400}
       coaching_rag_module_limit: ${COACHING_RAG_MODULE_LIMIT:-5}
       coaching_rag_presigned_url_ttl_seconds: ${COACHING_RAG_PRESIGNED_URL_TTL_SECONDS:-3600}
       coaching_rag_context_max_chars: ${COACHING_RAG_CONTEXT_MAX_CHARS:-28000}
-      spice_auth_enabled: ${SPICE_AUTH_ENABLED:-true}
+      # SPICE auth-service (optional; default off for local compose)
+      spice_auth_enabled: ${SPICE_AUTH_ENABLED:-false}
       spice_auth_base_url: ${SPICE_AUTH_BASE_URL:-http://host.docker.internal:8089}
       spice_auth_timeout_seconds: ${SPICE_AUTH_TIMEOUT_SECONDS:-5}
       spice_auth_default_client: ${SPICE_AUTH_DEFAULT_CLIENT:-mob}
-      spice_tenant_id_map: ${SPICE_TENANT_ID_MAP:-}
-      cors_allow_origins: ${CORS_ALLOW_ORIGINS:-http://localhost:5173,http://localhost:3000}
-      google_inference_model: ${GOOGLE_INFERENCE_MODEL:-gemini-2.5-flash}
-      google_identification_model: ${GOOGLE_IDENTIFICATION_MODEL:-gemini-2.5-pro}
-      google_vision_model: ${GOOGLE_VISION_MODEL:-gemini-2.5-flash}
-      google_embedding_model: ${GOOGLE_EMBEDDING_MODEL:-text-embedding-005}
       app_env: ${APP_ENV:-development}
       log_json: "true"
     depends_on:
@@ -160,18 +154,15 @@ services:
       dockerfile: services/platform/Dockerfile
     command: celery -A platform_service.celery_app.celery_app worker --loglevel=INFO
     environment:
-      database_url: postgresql+asyncpg://postgres:${DATABASE_PASSWORD:-postgres}@db:5432/microcoaching
-      database_password: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD in .env}
+      database_url: postgresql+asyncpg://postgres:postgres@db:5432/microcoaching
+      database_password: postgres
       redis_url: redis://redis:6379/0
       ai_runtime_base_url: http://ai-runtime:8001
       ai_runtime_token: ${AI_RUNTIME_TOKEN:?set AI_RUNTIME_TOKEN in .env}
-      ai_runtime_timeout_seconds: ${AI_RUNTIME_TIMEOUT_SECONDS:-120}
+      ai_runtime_timeout_seconds: ${AI_RUNTIME_TIMEOUT_SECONDS:-600}
       ai_runtime_transcribe_timeout_seconds: ${AI_RUNTIME_TRANSCRIBE_TIMEOUT_SECONDS:-600}
-      ai_cloud_provider: ${AI_CLOUD_PROVIDER:-google}
-      stage_c_max_output_tokens: ${STAGE_C_MAX_OUTPUT_TOKENS:-32768}
       stage_d_published_merge_enabled: ${STAGE_D_PUBLISHED_MERGE_ENABLED:-true}
       stage_d_published_merge_prefilter_limit: ${STAGE_D_PUBLISHED_MERGE_PREFILTER_LIMIT:-25}
-      stage_d_published_merge_max_output_tokens: ${STAGE_D_PUBLISHED_MERGE_MAX_OUTPUT_TOKENS:-4000}
       stage_d_published_merge_min_existing_card_match_ratio: ${STAGE_D_PUBLISHED_MERGE_MIN_EXISTING_CARD_MATCH_RATIO:-0.0}
       stage_d_published_merge_card_similarity_threshold: ${STAGE_D_PUBLISHED_MERGE_CARD_SIMILARITY_THRESHOLD:-0.0}
       stage_d_published_merge_module_similarity_threshold: ${STAGE_D_PUBLISHED_MERGE_MODULE_SIMILARITY_THRESHOLD:-0.0}
@@ -187,17 +178,21 @@ services:
       chat_faq_target_count: ${CHAT_FAQ_TARGET_COUNT:-6}
       chat_faq_min_output_count: ${CHAT_FAQ_MIN_OUTPUT_COUNT:-5}
       chat_faq_cluster_candidate_limit: ${CHAT_FAQ_CLUSTER_CANDIDATE_LIMIT:-100}
-      google_inference_model: ${GOOGLE_INFERENCE_MODEL:-gemini-2.5-flash}
-      google_identification_model: ${GOOGLE_IDENTIFICATION_MODEL:-gemini-2.5-pro}
-      google_vision_model: ${GOOGLE_VISION_MODEL:-gemini-2.5-flash}
-      google_embedding_model: ${GOOGLE_EMBEDDING_MODEL:-text-embedding-005}
+      chat_feedback_summary_weekly_hour_utc: ${CHAT_FEEDBACK_SUMMARY_WEEKLY_HOUR_UTC:-3}
+      chat_feedback_summary_weekly_day_of_week: ${CHAT_FEEDBACK_SUMMARY_WEEKLY_DAY_OF_WEEK:-0}
+      chat_feedback_summary_llm_timeout_seconds: ${CHAT_FEEDBACK_SUMMARY_LLM_TIMEOUT_SECONDS:-90}
+      chat_feedback_summary_first_run_lookback_days: ${CHAT_FEEDBACK_SUMMARY_FIRST_RUN_LOOKBACK_DAYS:-90}
+      chat_feedback_summary_max_positive_online_samples: ${CHAT_FEEDBACK_SUMMARY_MAX_POSITIVE_ONLINE_SAMPLES:-10}
+      chat_feedback_summary_max_positive_offline_samples: ${CHAT_FEEDBACK_SUMMARY_MAX_POSITIVE_OFFLINE_SAMPLES:-10}
+      chat_feedback_summary_max_negative_online_samples: ${CHAT_FEEDBACK_SUMMARY_MAX_NEGATIVE_ONLINE_SAMPLES:-30}
+      chat_feedback_summary_max_negative_offline_samples: ${CHAT_FEEDBACK_SUMMARY_MAX_NEGATIVE_OFFLINE_SAMPLES:-30}
       minio_endpoint: minio:9000
-      minio_presigned_endpoint: ${MINIO_PRESIGNED_ENDPOINT:-minio:9000}
-      minio_access_key: ${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY in .env}
-      minio_secret_key: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY in .env}
+      minio_presigned_endpoint: minio:9000
+      minio_access_key: ${MINIO_ACCESS_KEY:-microcoaching}
+      minio_secret_key: ${MINIO_SECRET_KEY:-microcoaching123}
       minio_bucket_name: ${MINIO_BUCKET_NAME:-medtronics-storage}
       minio_auto_create_bucket: ${MINIO_AUTO_CREATE_BUCKET:-true}
-      minio_secure: ${MINIO_SECURE:-false}
+      minio_secure: "false"
       minio_region: ${MINIO_REGION:-us-east-1}
       app_env: ${APP_ENV:-development}
       log_service_name: platform-celery-worker
@@ -221,14 +216,12 @@ services:
       dockerfile: services/platform/Dockerfile
     command: celery -A platform_service.celery_app.celery_app beat --loglevel=INFO
     environment:
-      database_url: postgresql+asyncpg://postgres:${DATABASE_PASSWORD:-postgres}@db:5432/microcoaching
-      database_password: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD in .env}
+      database_url: postgresql+asyncpg://postgres:postgres@db:5432/microcoaching
+      database_password: postgres
       redis_url: redis://redis:6379/0
       clickhouse_host: clickhouse
       ai_runtime_base_url: http://ai-runtime:8001
       ai_runtime_token: ${AI_RUNTIME_TOKEN:?set AI_RUNTIME_TOKEN in .env}
-      ai_cloud_provider: ${AI_CLOUD_PROVIDER:-google}
-      stage_c_max_output_tokens: ${STAGE_C_MAX_OUTPUT_TOKENS:-32768}
       chat_faq_lookback_days: ${CHAT_FAQ_LOOKBACK_DAYS:-90}
       chat_faq_min_occurrence_count: ${CHAT_FAQ_MIN_OCCURRENCE_COUNT:-3}
       chat_faq_min_question_length: ${CHAT_FAQ_MIN_QUESTION_LENGTH:-5}
@@ -237,6 +230,14 @@ services:
       chat_faq_cluster_candidate_limit: ${CHAT_FAQ_CLUSTER_CANDIDATE_LIMIT:-100}
       chat_faq_weekly_hour_utc: ${CHAT_FAQ_WEEKLY_HOUR_UTC:-2}
       chat_faq_weekly_day_of_week: ${CHAT_FAQ_WEEKLY_DAY_OF_WEEK:-0}
+      chat_feedback_summary_weekly_hour_utc: ${CHAT_FEEDBACK_SUMMARY_WEEKLY_HOUR_UTC:-3}
+      chat_feedback_summary_weekly_day_of_week: ${CHAT_FEEDBACK_SUMMARY_WEEKLY_DAY_OF_WEEK:-0}
+      chat_feedback_summary_llm_timeout_seconds: ${CHAT_FEEDBACK_SUMMARY_LLM_TIMEOUT_SECONDS:-90}
+      chat_feedback_summary_first_run_lookback_days: ${CHAT_FEEDBACK_SUMMARY_FIRST_RUN_LOOKBACK_DAYS:-90}
+      chat_feedback_summary_max_positive_online_samples: ${CHAT_FEEDBACK_SUMMARY_MAX_POSITIVE_ONLINE_SAMPLES:-10}
+      chat_feedback_summary_max_positive_offline_samples: ${CHAT_FEEDBACK_SUMMARY_MAX_POSITIVE_OFFLINE_SAMPLES:-10}
+      chat_feedback_summary_max_negative_online_samples: ${CHAT_FEEDBACK_SUMMARY_MAX_NEGATIVE_ONLINE_SAMPLES:-30}
+      chat_feedback_summary_max_negative_offline_samples: ${CHAT_FEEDBACK_SUMMARY_MAX_NEGATIVE_OFFLINE_SAMPLES:-30}
       app_env: ${APP_ENV:-development}
       log_service_name: platform-celery-beat
       log_json: "true"
@@ -257,24 +258,43 @@ services:
     build:
       context: .
       dockerfile: services/ai-runtime/Dockerfile
+    ports:
+      - "18001:8001"
     environment:
       internal_token: ${AI_RUNTIME_TOKEN:?set AI_RUNTIME_TOKEN in .env}
       ai_cloud_provider: ${AI_CLOUD_PROVIDER:-google}
+      # ── Google: Vertex AI auth (preferred) ───────────────────────
+      # When google_use_vertex=true the SDK uses ADC via the bind-mounted
+      # service-account JSON below — google_api_key is ignored. Without
+      # these envs ai-runtime starts with empty creds and crashes on the
+      # first LLM call.
       google_use_vertex: ${GOOGLE_USE_VERTEX:-false}
       google_cloud_project: ${GOOGLE_CLOUD_PROJECT:-}
       google_cloud_location: ${GOOGLE_CLOUD_LOCATION:-us-central1}
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/run/secrets/gcp-service-account.json}
+      # Optional: base64-encoded service-account JSON. When set, the SDK
+      # builds credentials in-process and the bind-mounted file path
+      # above is ignored. Useful when mounting a JSON file isn't
+      # ergonomic (CI runners, ephemeral containers, secret stores).
       google_service_account_base64: ${GOOGLE_SERVICE_ACCOUNT_BASE64:-}
+      # ── Google: Developer-API auth (fallback when Vertex disabled) ───
       google_api_key: ${GOOGLE_API_KEY:-${GEMINI_API_KEY:-}}
-      google_inference_model: ${GOOGLE_INFERENCE_MODEL:-gemini-2.5-flash}
+      # ── Google: embedding / transcription models (generate models are
+      # code defaults in ai_runtime.generation_profiles) ─────────────
       google_embedding_model: ${GOOGLE_EMBEDDING_MODEL:-gemini-embedding-001}
+      # Canonical pgvector corpus dimension; align matches platform's setting.
       embedding_dimension: ${EMBEDDING_DIMENSION:-768}
-      openai_api_key: ${OPENAI_API_KEY:-}
-      openai_inference_model: ${OPENAI_INFERENCE_MODEL:-gpt-4o-mini}
-      openai_embedding_model: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       app_env: ${APP_ENV:-development}
       log_json: "true"
     volumes:
+      # Bind-mount the service-account JSON so the path the container
+      # reads matches GOOGLE_APPLICATION_CREDENTIALS. Host path is set
+      # via GCP_SERVICE_ACCOUNT_JSON_HOST_PATH in .env. The default
+      # points at .env.example so compose starts cleanly even when
+      # Vertex isn't configured; if Vertex IS configured but the path
+      # isn't overridden, google.auth fails on first call with a clear
+      # "service account JSON is malformed" message rather than at
+      # compose startup.
       - ${GCP_SERVICE_ACCOUNT_JSON_HOST_PATH:-./.env.example}:/run/secrets/gcp-service-account.json:ro
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)\""]
@@ -285,6 +305,11 @@ services:
   # ── Analytics dashboard (optional) ───────────────────────────────────────────
   # Opt-in via profile so the default stack does not require a pre-built image:
   #   docker compose --profile dashboard up
+  # Build the image first (from micro-learning-analytics-dashboard), or let
+  # Compose build when ANALYTICS_DASHBOARD_BUILD_CONTEXT points at that repo:
+  #   docker build -t micro-learning-analytics-dashboard:local ../micro-learning-analytics-dashboard
+  #   docker compose --profile dashboard up --build
+  # VITE_* URLs must be reachable from the browser (localhost), not Docker DNS.
   analytics-dashboard:
     profiles: ["dashboard"]
     image: ${ANALYTICS_DASHBOARD_IMAGE:-micro-learning-analytics-dashboard:local}
@@ -293,8 +318,8 @@ services:
       context: ${ANALYTICS_DASHBOARD_BUILD_CONTEXT:-../micro-learning-analytics-dashboard}
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:18000/medtronics-api}
-        VITE_ADMIN_API_BASE_URL: ${VITE_ADMIN_API_BASE_URL:-http://localhost:18000/medtronics-api}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://agent-qa.beehyv.com/medtronics-api}
+        VITE_ADMIN_API_BASE_URL: ${VITE_ADMIN_API_BASE_URL:-https://agent-qa.beehyv.com/medtronics-api}
         VITE_USE_MOCK_API: ${VITE_USE_MOCK_API:-true}
         VITE_APP_ROLE: ${VITE_APP_ROLE:-programManager}
     ports:

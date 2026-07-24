@@ -94,8 +94,10 @@ def _inference_response(*, gap_codes: list[str], rationale: str = "test") -> Inf
     return InferenceResponse(
         request_id="r-gap",
         generation_type=GenerationType.MODULE_GAP_CLASSIFICATION,
-        provider="openai",
-        model="gpt-4o-mini",
+        provider="google",
+        model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text="",
         parsed_json={
             "associated_gap_codes": gap_codes,
@@ -145,7 +147,7 @@ class TestClassifyModuleGapsWorker:
         client.generate = AsyncMock(return_value=_inference_response(gap_codes=["referral_cbs"]))
 
         with patch(
-            "platform_service.services.module_gap_classifier.get_ai_client",
+            "platform_service.services.module_gap_classifier.AIRuntimeClient",
             return_value=client,
         ):
             count = await classify_module_gaps_for_module(module.id)

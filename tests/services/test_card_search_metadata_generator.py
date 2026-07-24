@@ -20,27 +20,22 @@ from platform_service.services.prompts.card_search_metadata_prompt import (
 )
 
 
-def _sample_payload() -> dict:
+def _sample_payload(*, primary: str = "bn") -> dict:
     return {
         "schema_version": 1,
-        "retrieval_hints": {
-            "bn": ["১৪ দিনের বেশি কাশি"],
-            "en": ["child cough more than 14 days"],
-        },
-        "keywords": {"bn": ["কাশি"], "en": ["ARI", "cough"]},
-        "synonyms_en": {"ARI": "acute respiratory infection"},
-        "questions": {
-            "bn": ["কাশি হলে কখন রেফার করব?"],
-            "en": ["When should I refer a child with cough?"],
-        },
+        "retrieval_hints": {primary: ["child cough more than 14 days"]},
+        "keywords": {primary: ["ARI", "cough"]},
+        "synonyms": {primary: {"ARI": "acute respiratory infection"}},
+        "questions": {primary: ["When should I refer a child with cough?"]},
     }
 
 
-def _batch_payload(*, indices: list[int]) -> dict:
+def _batch_payload(*, indices: list[int], primary: str = "bn") -> dict:
     return {
         "schema_version": 1,
         "cards": [
-            {"card_index": idx, **_sample_payload(), "keywords": {"bn": [f"k{idx}"]}} for idx in indices
+            {"card_index": idx, **_sample_payload(primary=primary), "keywords": {primary: [f"k{idx}"]}}
+            for idx in indices
         ],
     }
 
@@ -50,7 +45,7 @@ class TestNormalizeCardSearchMetadata:
         payload = {
             "retrieval_hints": {"bn": [f"h{i}" for i in range(20)]},
             "keywords": {"bn": [f"k{i}" for i in range(20)]},
-            "synonyms_en": {f"a{i}": f"expanded {i}" for i in range(20)},
+            "synonyms": {"bn": {f"a{i}": f"expanded {i}" for i in range(20)}},
             "questions": {"bn": [f"q{i}" for i in range(20)]},
         }
         out = normalize_card_search_metadata(
@@ -62,7 +57,7 @@ class TestNormalizeCardSearchMetadata:
         )
         assert len(out["retrieval_hints"]["bn"]) == 3
         assert len(out["keywords"]["bn"]) == 2
-        assert len(out["synonyms_en"]) == 2
+        assert len(out["synonyms"]["bn"]) == 2
         assert len(out["questions"]["bn"]) == 2
 
     def test_drops_empty_and_duplicate_strings(self) -> None:
@@ -90,13 +85,30 @@ class TestNormalizeCardSearchMetadata:
         assert card_metadata_has_searchable_content(normalized)
         assert not card_metadata_has_searchable_content(
             normalize_card_search_metadata(
-                {"keywords": {"bn": []}, "retrieval_hints": {"bn": []}, "synonyms_en": {}},
+                {"keywords": {"bn": []}, "retrieval_hints": {"bn": []}, "synonyms": {"bn": {}}},
                 max_retrieval_hints=10,
                 max_keywords=10,
                 max_synonyms=10,
                 max_questions=10,
             )
         )
+
+    @pytest.mark.parametrize("primary", ["hi", "bn"])
+    def test_writes_only_deployment_primary_locale(self, primary: str) -> None:
+        payload = {
+            "keywords": {"hi": ["खांसी"], "bn": ["কাশি"]},
+            "retrieval_hints": {"hi": ["बच्चे की खांसी"], "bn": ["শিশুর কাশি"]},
+            "questions": {"hi": ["कब रेफर करें?"], "bn": ["কখন রেফার?"]},
+        }
+        out = normalize_card_search_metadata(
+            payload,
+            max_retrieval_hints=10,
+            max_keywords=10,
+            max_synonyms=10,
+            max_questions=10,
+            primary_locale=primary,
+        )
+        assert list(out["keywords"].keys()) == [primary]
 
 
 class TestParseBatchCardSearchMetadata:
@@ -171,8 +183,10 @@ def _inference_response(payload: dict) -> InferenceResponse:
     return InferenceResponse(
         request_id="r-card-meta",
         generation_type=GenerationType.CARD_SEARCH_METADATA,
-        provider="openai",
-        model="gpt-4o-mini",
+        provider="google",
+        model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text="",
         parsed_json=payload,
         latency_ms=1,
@@ -218,8 +232,10 @@ class TestCardSearchMetadataGenerator:
             return_value=InferenceResponse(
                 request_id="r-card-meta",
                 generation_type=GenerationType.CARD_SEARCH_METADATA,
-                provider="openai",
-                model="gpt-4o-mini",
+                provider="google",
+                model="gemini-2.5-flash",
+                max_tokens=8192,
+                temperature=0.2,
                 raw_text="",
                 error="provider down",
                 latency_ms=1,

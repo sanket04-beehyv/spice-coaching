@@ -51,13 +51,8 @@ def _isolate_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "EXTRACTION_CALIBRATION_FORCE_VISION_THRESHOLD",
         "EXTRACTION_CALIBRATION_SKIP_VISION_THRESHOLD",
         "EXTRACTION_CALIBRATION_SAMPLE_SIZE",
-        "GOOGLE_EMBEDDING_MODEL",
-        "GOOGLE_INFERENCE_MODEL",
-        "GOOGLE_IDENTIFICATION_MODEL",
-        "GOOGLE_VISION_MODEL",
         "STAGE_C_INSUFFICIENT_SOURCE_MIN_TOKENS",
         "QUIZ_PASS_THRESHOLD_DEFAULT",
-        "AI_CLOUD_PROVIDER",
         "APP_ENV",
         "MINIO_ENDPOINT",
         "MINIO_PRESIGNED_ENDPOINT",
@@ -67,6 +62,7 @@ def _isolate_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "MINIO_SECURE",
         "MINIO_REGION",
         "ADMIN_FILE_ALLOWED_PREFIXES",
+        "ADMIN_FILE_UPLOAD_PREFIX",
         "ADMIN_FILE_PRESIGNED_MAX_SECONDS",
     ):
         monkeypatch.delenv(var, raising=False)
@@ -82,7 +78,7 @@ def test_app_name_default() -> None:
 
 
 def test_api_root_path_default() -> None:
-    assert Settings().api_root_path == "/medtronics-api"
+    assert Settings().api_root_path == "/medtronics-api/"
     assert Settings().api_root_path_normalized == "/medtronics-api"
 
 
@@ -99,8 +95,8 @@ def test_api_root_path_normalized_strips_slashes() -> None:
 
 def test_spice_auth_exempt_path_set_with_empty_root() -> None:
     s = Settings(api_root_path="")
-    assert "/health" in s.spice_auth_exempt_path_set
     assert "/ready" in s.spice_auth_exempt_path_set
+    assert "/health" not in s.spice_auth_exempt_path_set
 
 
 def test_embedding_dimension_default() -> None:
@@ -169,7 +165,7 @@ def test_quiz_and_card_bounds() -> None:
     assert s.quiz_min_questions == 3
     assert s.quiz_max_questions == 10
     assert s.card_min_count == 3
-    assert s.card_max_count == 7
+    assert s.card_max_count == 10
 
 
 def test_quiz_and_card_bounds_form_valid_intervals() -> None:
@@ -210,15 +206,26 @@ def test_minio_defaults() -> None:
     s = Settings()
     assert s.minio_endpoint == "localhost:9100"
     assert s.minio_presigned_endpoint is None
-    assert s.minio_access_key.get_secret_value() == ""
-    assert s.minio_secret_key.get_secret_value() == ""
+    assert s.minio_access_key.get_secret_value() == "minioadmin"
+    assert s.minio_secret_key.get_secret_value() == "minioadmin"
     assert s.minio_bucket_name == "medtronics-storage"
     assert s.minio_secure is False
     assert s.minio_region == "us-east-1"
     assert s.admin_file_allowed_prefix_set == frozenset(
         {"uploads", "source-documents", "media", "ingest", "module-thumbnails"}
     )
+    assert s.admin_file_upload_prefix == "uploads"
     assert s.admin_file_presigned_max_seconds == 24 * 60 * 60
+
+
+def test_admin_file_upload_prefix_must_be_allowlisted() -> None:
+    with pytest.raises(ValidationError):
+        Settings(admin_file_upload_prefix="not-allowed")  # type: ignore[call-arg]
+
+
+def test_admin_file_upload_prefix_normalizes_slashes() -> None:
+    s = Settings(admin_file_upload_prefix="/uploads/")  # type: ignore[call-arg]
+    assert s.admin_file_upload_prefix == "uploads"
 
 
 def test_coaching_rag_defaults() -> None:
@@ -238,27 +245,27 @@ def test_coaching_rag_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.coaching_rag_context_max_chars == 50_000
 
 
-# ─── Model selection (post-P3 defaults) ────────────────────────────────────
+# ─── Model selection ownership ─────────────────────────────────────────────
 
 
-def test_model_defaults_are_gemini_25() -> None:
-    """P3 fix: all four model defaults moved to gemini-2.5-{flash,pro}.
-    Reverting any of these would re-introduce the model-not-found bug
-    against Vertex projects that only have 2.5-series access."""
+def test_platform_settings_do_not_own_model_selection() -> None:
+    """Inference models/budgets live in ai-runtime generation_profiles."""
     s = Settings()
-    # Default provider is "openai" in code; deployments override via env/compose.
-    assert s.ai_cloud_provider == "openai"
-    assert s.text_model == "gpt-4o-mini"
-    assert s.vision_model == "gpt-4o-mini"
-    assert s.identification_model == "gpt-4o-mini"
-    assert s.embedding_model == "text-embedding-3-small"
-
-
-def test_openai_models_resolved_when_provider_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AI_CLOUD_PROVIDER", "openai")
-    s = Settings()
-    assert s.text_model == "gpt-4o-mini"
-    assert s.embedding_model == "text-embedding-3-small"
+    for removed in (
+        "ai_cloud_provider",
+        "text_model",
+        "vision_model",
+        "identification_model",
+        "embedding_model",
+        "google_inference_model",
+        "google_vision_model",
+        "google_identification_model",
+        "google_embedding_model",
+        "stage_c_max_output_tokens",
+        "stage_d_published_merge_max_output_tokens",
+    ):
+        assert not hasattr(s, removed), f"unexpected platform setting: {removed}"
+    assert s.embedding_dimension == 768
 
 
 # ─── env-override mechanics ────────────────────────────────────────────────
@@ -320,7 +327,7 @@ def test_spice_referral_set_parses_default_destinations() -> None:
 # ─── Architecture-reset removals: removed attrs must NOT be present ────────
 
 
-@pytest.mark.parametrize("app_env", ["production"])
+@pytest.mark.parametrize("app_env", ["production", "staging"])
 def test_deployed_env_rejects_insecure_defaults(
     monkeypatch: pytest.MonkeyPatch,
     app_env: str,
@@ -335,7 +342,7 @@ def test_deployed_env_rejects_insecure_defaults(
         )
 
 
-@pytest.mark.parametrize("app_env", ["production"])
+@pytest.mark.parametrize("app_env", ["production", "staging"])
 def test_deployed_env_requires_spice_tenant_id_map(
     monkeypatch: pytest.MonkeyPatch,
     app_env: str,

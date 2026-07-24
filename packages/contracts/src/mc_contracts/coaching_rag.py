@@ -75,7 +75,7 @@ class SourceAttribution(BaseModel):
     presigned_expires_seconds: int | None = None
     linked_module_ids: list[UUID] = Field(
         default_factory=list,
-        description="Published modules from retrieval that cite this source_document.",
+        description="Cited modules that link this source_document.",
     )
 
 

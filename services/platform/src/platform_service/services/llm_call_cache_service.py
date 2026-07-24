@@ -1,12 +1,12 @@
 """W-7 — llm_call_cache service + caching wrapper around AIRuntimeClient.
 
-Per Pipeline §16 P3 / Data Model §4.3. Hashes (model + prompt + input
-payload) and stores the parsed ai-runtime response in `llm_call_cache`.
+Per Pipeline §16 P3 / Data Model §4.3. Hashes (generation_type + prompt +
+input payload) and stores the parsed ai-runtime response in `llm_call_cache`.
 On a re-run after failure, the stage worker computes the same hash, gets a
 cache hit, and skips the LLM round-trip entirely.
 
-The cache is keyed by hash so duplicate inputs (same prompt + same model +
-same payload) deduplicate naturally — no per-request_id key.
+Model id and generation budgets are owned by ai-runtime (per GenerationType
+profiles) and are intentionally excluded from the cache key.
 
 Retention is handled by the staging-cleanup job (default 30 days). Stale
 hits after eviction simply trigger a fresh LLM call.
@@ -25,13 +25,16 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from platform_service.config import get_settings
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.llm_call_cache import LlmCallCache
 from platform_service.deps import get_ai_client
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 
 logger = logging.getLogger(__name__)
+
+# Bumped when cache key shape changes so old Redis/DB rows cannot collide
+# with requests that no longer include model/budget fields.
+_CACHE_KEY_VERSION = 2
 
 
 def _stored_response_has_error(response_jsonb: dict[str, Any]) -> bool:
@@ -41,24 +44,19 @@ def _stored_response_has_error(response_jsonb: dict[str, Any]) -> bool:
 
 
 def compute_input_hash(request: InferenceRequest) -> str:
-    """Stable SHA-256 of (generation_type, model, prompt template + content,
-    context payload, image attachments).
+    """Stable SHA-256 of (generation_type, prompt, content constraints, context, images).
 
     JSON-serialise with sort_keys so equivalent dicts hash identically. Excludes
     request_id and trace_context so different runs of the same logical prompt
-    collide deterministically and hit the cache.
+    collide deterministically and hit the cache. Excludes model / max_tokens /
+    temperature (owned by ai-runtime profiles).
 
     Image attachment bytes are hashed (not embedded) to keep the key small —
     two requests with the same MIME type and the same image content collide.
     """
-    settings = get_settings()
     payload = {
+        "cache_key_version": _CACHE_KEY_VERSION,
         "generation_type": request.generation_type.value,
-        "model": {
-            # Provider is ai-runtime config; platform ai_cloud_provider must match.
-            "provider": settings.ai_cloud_provider,
-            "model": request.model_policy.model,
-        },
         "prompt": {
             "template_id": request.prompt.template_id,
             "template_version": request.prompt.template_version,
@@ -68,8 +66,6 @@ def compute_input_hash(request: InferenceRequest) -> str:
         "constraints": {
             "language": request.constraints.language,
             "output_format": request.constraints.output_format,
-            "max_tokens": request.constraints.max_tokens,
-            "temperature": request.constraints.temperature,
         },
         "context": request.context,
         "image_attachments": [
@@ -193,12 +189,13 @@ class CachingAIRuntimeClient:
 
         await self._cache.put(
             input_hash=input_hash,
-            model=response.model or request.model_policy.model,
+            model=response.model,
             response_jsonb=response.model_dump(mode="json"),
             token_usage={
                 "input": response.token_usage.input,
                 "output": response.token_usage.output,
             },
+            prompt_template_id=request.prompt.prompt_template_db_id,
         )
         logger.info(
             "llm_call_cache MISS+stored generation_type=%s hash=%s",

@@ -20,16 +20,20 @@ from platform_service.celery_tasks import (
 )
 from platform_service.config import get_settings
 from platform_service.db.models.content_block import ContentBlock
+from platform_service.db.models.module import Module
+from platform_service.db.models.module_candidate_draft import ModuleCandidateDraft
 from platform_service.db.models.source_page import SourcePage
 from platform_service.services.card_drafter import (
     CardDrafter,
     CardDrafterError,
     CardDrafterResult,
 )
+from platform_service.services.ingestion_cardinality import resolve_for_candidate
 from platform_service.services.module_card_validator import (
     ModuleCardValidator,
     annotate_field_flags,
 )
+from platform_service.services.plain_text import block_content_to_plain_text
 from platform_service.services.post_publish import should_generate_quiz_for_sources
 from platform_service.services.run_state_service import (
     STAGE_CARD_SEARCH_METADATA_GENERATION,
@@ -42,6 +46,17 @@ from platform_service.services.run_state_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+_PUBLISHED_MODULE_MERGED_FLAG = "published_module_merged"
+
+
+def _sanitize_cited_block_text(*, block_type: str, content_text: str) -> str:
+    return block_content_to_plain_text(block_type=block_type, content_text=content_text)
+
+
+def _module_requires_metadata_regeneration(module: Module) -> bool:
+    flags = (module.quality_flags_jsonb or {}).get("flags") or []
+    return _PUBLISHED_MODULE_MERGED_FLAG in flags
 
 
 @dataclass(frozen=True)
@@ -81,11 +96,16 @@ class DraftPipeline:
                 insufficient_reason="no_cited_blocks_resolvable",
             )
 
+        cardinality = await resolve_for_candidate(candidate_dict, self._session)
+        card_min, card_max = cardinality.card_bounds()
+
         try:
             card_result: CardDrafterResult = await self._card_drafter.draft(
                 candidate=candidate_dict,
                 cited_blocks=cited_blocks,
                 valid_block_ids=valid_block_ids,
+                card_min_count=card_min,
+                card_max_count=card_max,
             )
         except CardDrafterError as exc:
             logger.exception("Card drafter failed for candidate %s", candidate_id)
@@ -99,8 +119,7 @@ class DraftPipeline:
             )
 
         cards = self.validate_cards(card_result.cards, candidate_id=candidate_id)
-        settings = get_settings()
-        if len(cards) < settings.card_min_count:
+        if len(cards) < card_min:
             return CardDraftOutcome(
                 cards=None,
                 cards_count=0,
@@ -193,6 +212,19 @@ class DraftPipeline:
             )
             trigger_binding_step_id = trigger_binding_step.id
         quiz_step_id: UUID | None = None
+        quiz_size: int | None = None
+        candidate = await self._session.get(ModuleCandidateDraft, candidate_id)
+        if candidate is not None:
+            cardinality = await resolve_for_candidate(
+                {
+                    "source_provenance": candidate.source_provenance_jsonb,
+                    "estimated_quiz_count": candidate.estimated_quiz_count,
+                },
+                self._session,
+            )
+            if cardinality.has_target_quizzes():
+                quiz_size = candidate.estimated_quiz_count
+
         if await should_generate_quiz_for_sources(self._session, source_document_ids):
             quiz_step = await run_state.start_step(
                 run_id=ingestion_run_id,
@@ -213,11 +245,20 @@ class DraftPipeline:
                 module_id,
             )
 
+        force_card_metadata = False
+        module = await self._session.get(Module, module_id)
+        if module is not None:
+            force_card_metadata = _module_requires_metadata_regeneration(module)
+
         await self._session.commit()
 
         try:
             if quiz_step_id is not None:
-                generate_module_quiz_task.delay(str(module_id), str(quiz_step_id))
+                generate_module_quiz_task.delay(
+                    str(module_id),
+                    str(quiz_step_id),
+                    quiz_size=quiz_size,
+                )
             if metadata_step_id is not None:
                 if card_metadata_step_id is not None:
                     generate_module_card_search_metadata_batch_task.delay(
@@ -226,6 +267,7 @@ class DraftPipeline:
                         str(metadata_step_id),
                         str(embedding_step.id),
                         str(trigger_binding_step_id) if trigger_binding_step_id else None,
+                        force=force_card_metadata,
                     )
                 else:
                     generate_module_search_metadata_task.delay(
@@ -319,7 +361,11 @@ class DraftPipeline:
                 "content_block_id": str(b.id),
                 "source_document_id": str(sd_id),
                 "block_type": b.block_type,
-                "content_text": b.content_text,
+                # Defensive: legacy rows may still contain markdown-ish text.
+                "content_text": _sanitize_cited_block_text(
+                    block_type=str(b.block_type or "paragraph"),
+                    content_text=b.content_text or "",
+                ),
                 "content_language": b.content_language,
             }
             for b, sd_id in rows

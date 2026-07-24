@@ -10,6 +10,7 @@ import asyncio
 import logging
 import tempfile
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -179,3 +180,19 @@ async def presign_thumbnail(
         logger.warning("Thumbnail presign failed path=%s: %s", thumbnail_storage_path, exc)
         return None
     return presigned.url, presigned.expires_seconds
+
+
+async def thumbnail_poll_fields(
+    session: AsyncSession,
+    source_document_id: UUID,
+    storage: ObjectStorageClient,
+) -> dict[str, Any]:
+    doc = await SourceRepository(session).get_source_document(source_document_id)
+    if doc is None:
+        return {"thumbnail_storage_path": None, "thumbnail_presigned_url": None}
+    thumb_presign = await presign_thumbnail(storage, thumbnail_storage_path=doc.thumbnail_storage_path)
+    return {
+        "thumbnail_storage_path": doc.thumbnail_storage_path,
+        "thumbnail_presigned_url": thumb_presign[0] if thumb_presign else None,
+        "thumbnail_presigned_expires_seconds": thumb_presign[1] if thumb_presign else None,
+    }

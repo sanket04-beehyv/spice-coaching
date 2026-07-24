@@ -45,10 +45,12 @@ from platform_service.db.base import SessionLocal
 from platform_service.db.repositories.module_candidate_repository import (
     ModuleCandidateRepository,
 )
+from platform_service.db.repositories.source_repository import SourceRepository
 from platform_service.services.cross_source_fuser import CrossSourceFuser, CrossSourceFuserResult, FusionGroup
 from platform_service.services.fusion_candidate_loader import load_fusion_candidates
 from platform_service.services.fusion_draft_orchestrator import FusionDraftOrchestrator
 from platform_service.services.fusion_retire_policy import FusionRetirePolicy
+from platform_service.services.ingestion_cardinality import resolve_from_source_documents
 from platform_service.services.run_state_service import (
     RUN_FAILED,
     RUN_SUCCEEDED,
@@ -440,6 +442,7 @@ class CrossSourceFusionRunner:
         module_type = candidates_by_id[str(group.constituent_ids[0])].get(
             "proposed_module_type", "initial_training"
         )
+        domain = candidates_by_id[str(group.constituent_ids[0])].get("domain")
 
         quality_flags = {
             "flags": ["cross_source_fused"],
@@ -450,14 +453,40 @@ class CrossSourceFusionRunner:
             },
         }
 
+        source_doc_ids = {
+            UUID(str(candidates_by_id[str(cid)]["source_document_id"]))
+            for cid in group.constituent_ids
+            if candidates_by_id.get(str(cid), {}).get("source_document_id")
+        }
+        documents = []
+        if source_doc_ids:
+            source_repo = SourceRepository(db)
+            for doc_id in source_doc_ids:
+                doc = await source_repo.get_source_document(doc_id)
+                if doc is not None:
+                    documents.append(doc)
+        cardinality = resolve_from_source_documents(documents)
+        first_constituent = candidates_by_id[str(group.constituent_ids[0])]
+        estimated_card_count = (
+            cardinality.target_cards
+            if cardinality.target_cards is not None
+            else int(first_constituent.get("estimated_card_count") or 5)
+        )
+        estimated_quiz_count = (
+            cardinality.target_quizzes
+            if cardinality.target_quizzes is not None
+            else int(first_constituent.get("estimated_quiz_count") or 5)
+        )
+
         repo = ModuleCandidateRepository(db)
         cand = await repo.create_candidate(
             ingestion_run_id=fusion_run_id,
             proposed_title=group.merged_title,
             scope_summary=group.merged_scope_summary,
+            domain=domain,
             source_provenance=merged_prov,
-            estimated_card_count=5,
-            estimated_quiz_count=5,
+            estimated_card_count=estimated_card_count,
+            estimated_quiz_count=estimated_quiz_count,
             proposed_module_type=module_type,
             quality_flags=quality_flags,
         )

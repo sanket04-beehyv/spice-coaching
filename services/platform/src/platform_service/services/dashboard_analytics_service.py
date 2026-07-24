@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from mc_contracts.dashboard import DigitalHelpModuleUsageItem, DigitalHelpModuleUsageResponse
+from mc_contracts.dashboard import (
+    DigitalHelpModuleUsageItem,
+    DigitalHelpModuleUsageResponse,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.clickhouse.client import ClickHouseClient
 from platform_service.db.repositories.module_repository import ModuleRepository
 
 _DIGITAL_HELP_EVENT = "digital_help_used"
+DEFAULT_CHATBOT_DEMAND_PERIOD_DAYS = 30
 
 
 def _to_int(value: Any, default: int = 0) -> int:
@@ -51,56 +56,39 @@ class DashboardAnalyticsService:
         limit: int = 20,
         offset: int = 0,
     ) -> DigitalHelpModuleUsageResponse:
-        family_counts: dict[UUID, int] = {}
+        """Rank modules by digital_help_used event volume, keyed on module_id.
 
-        for row in await self._query_family_counts(tenant_id=tenant_id, period_days=period_days):
-            family_id = _to_uuid(row.get("module_family_id"))
-            if family_id is None:
+        Events without a ``module_id`` are ignored. We do not roll up by
+        ``module_family_id`` — a family spans multiple versions, so collapsing
+        to a single representative module misattributes usage.
+        """
+        module_counts: dict[UUID, int] = {}
+        for row in await self._query_module_counts(tenant_id=tenant_id, period_days=period_days):
+            module_id = _to_uuid(row.get("module_id"))
+            if module_id is None:
                 continue
-            family_counts[family_id] = family_counts.get(family_id, 0) + _to_int(row.get("query_count"))
+            module_counts[module_id] = module_counts.get(module_id, 0) + _to_int(row.get("query_count"))
 
-        module_rows = await self._query_module_id_only_counts(
-            tenant_id=tenant_id,
-            period_days=period_days,
-        )
-        if module_rows and self._session is not None:
-            module_ids = [
-                module_id for row in module_rows if (module_id := _to_uuid(row.get("module_id"))) is not None
-            ]
+        sorted_modules = sorted(module_counts.items(), key=lambda item: item[1], reverse=True)
+        total_modules = len(sorted_modules)
+        paged_modules = sorted_modules[offset : offset + limit]
+
+        title_by_module: dict[UUID, Any] = {}
+        if paged_modules and self._session is not None:
+            module_ids = [module_id for module_id, _ in paged_modules]
             modules = await ModuleRepository(self._session).list_modules_by_ids(
                 module_ids,
                 tenant_id=tenant_id,
             )
-            module_to_family = {mod.id: mod.module_family_id for mod in modules}
-            for row in module_rows:
-                module_id = _to_uuid(row.get("module_id"))
-                if module_id is None:
-                    continue
-                family_id = module_to_family.get(module_id)
-                if family_id is None:
-                    continue
-                count = _to_int(row.get("query_count"))
-                family_counts[family_id] = family_counts.get(family_id, 0) + count
-
-        sorted_families = sorted(family_counts.items(), key=lambda item: item[1], reverse=True)
-        total_modules = len(sorted_families)
-        paged_families = sorted_families[offset : offset + limit]
-
-        title_by_family: dict[UUID, Any] = {}
-        if paged_families and self._session is not None:
-            family_ids = [family_id for family_id, _ in paged_families]
-            title_by_family = await ModuleRepository(self._session).list_latest_published_by_family_ids(
-                family_ids,
-                tenant_id=tenant_id,
-            )
+            title_by_module = {mod.id: mod for mod in modules}
 
         items: list[DigitalHelpModuleUsageItem] = []
-        for family_id, query_count in paged_families:
-            mod = title_by_family.get(family_id)
+        for module_id, query_count in paged_modules:
+            mod = title_by_module.get(module_id)
             items.append(
                 DigitalHelpModuleUsageItem(
-                    module_family_id=family_id,
-                    module_id=mod.id if mod else None,
+                    module_id=module_id,
+                    module_family_id=mod.module_family_id if mod else None,
                     query_count=query_count,
                     title=mod.title_localized if mod else None,
                 )
@@ -108,7 +96,7 @@ class DashboardAnalyticsService:
 
         return DigitalHelpModuleUsageResponse(
             period_days=period_days,
-            total_queries=sum(family_counts.values()),
+            total_queries=sum(module_counts.values()),
             total_modules=total_modules,
             limit=limit,
             offset=offset,
@@ -120,28 +108,89 @@ class DashboardAnalyticsService:
             return "", {}
         return "  AND tenant_id = {tenant_id:UUID}\n", {"tenant_id": tenant_id}
 
-    async def _query_family_counts(
+    async def distinct_chw_by_module_id(
         self,
         *,
         tenant_id: UUID | None,
-        period_days: int,
-    ) -> list[dict[str, Any]]:
+        period_days: int = DEFAULT_CHATBOT_DEMAND_PERIOD_DAYS,
+    ) -> dict[UUID, set[int]]:
+        """Map module_id → distinct chw_ids who used digital help.
+
+        Demand is attributed to the concrete ``module_id`` on each event; events
+        without a ``module_id`` are ignored. We deliberately do not fold in
+        ``module_family_id`` — a family spans multiple versions, so collapsing to
+        a single representative module misattributes demand.
+        """
         tenant_clause, tenant_params = self._tenant_clause(tenant_id)
         query = f"""
         SELECT
-          module_family_id,
-          count() AS query_count
+          module_id,
+          groupUniqArray(chw_id) AS chw_ids
         FROM coaching_events
-        WHERE event_type = '{_DIGITAL_HELP_EVENT}'
+        WHERE event_type = {{event_type:String}}
           AND event_date >= (today() - toIntervalDay({{period_days:Int32}}))
-          AND module_family_id IS NOT NULL
-        {tenant_clause}GROUP BY module_family_id
-        ORDER BY query_count DESC
+          AND module_id IS NOT NULL
+          AND chw_id IS NOT NULL
+        {tenant_clause}GROUP BY module_id
         """
-        parameters = {"period_days": int(period_days), **tenant_params}
-        return await self._ch.query_rows(query, parameters=parameters)
+        parameters: dict[str, Any] = {
+            "event_type": _DIGITAL_HELP_EVENT,
+            "period_days": int(period_days),
+            **tenant_params,
+        }
+        rows = await self._ch.query_rows(query, parameters=parameters)
+        out: dict[UUID, set[int]] = {}
+        for row in rows:
+            module_id = _to_uuid(row.get("module_id"))
+            if module_id is None:
+                continue
+            chw_ids = {cid for raw in (row.get("chw_ids") or []) if (cid := _to_int(raw, default=-1)) >= 0}
+            if chw_ids:
+                out[module_id] = chw_ids
+        return out
 
-    async def _query_module_id_only_counts(
+    async def requestors_for_module(
+        self,
+        *,
+        module_id: UUID,
+        tenant_id: UUID | None = None,
+        period_days: int = DEFAULT_CHATBOT_DEMAND_PERIOD_DAYS,
+    ) -> list[tuple[int, datetime | None]]:
+        """Return (chw_id, last_seen) for chatbot demanders of this exact module.
+
+        Matches strictly on ``module_id`` so demand is never over-attributed from
+        a sibling module in the same family into the assign modal.
+        """
+        tenant_clause, tenant_params = self._tenant_clause(tenant_id)
+        query = f"""
+        SELECT
+          chw_id,
+          max(timestamp_utc) AS last_seen
+        FROM coaching_events
+        WHERE event_type = {{event_type:String}}
+          AND event_date >= (today() - toIntervalDay({{period_days:Int32}}))
+          AND chw_id IS NOT NULL
+          AND module_id = {{module_id:UUID}}
+        {tenant_clause}GROUP BY chw_id
+        ORDER BY last_seen DESC
+        """
+        parameters: dict[str, Any] = {
+            "event_type": _DIGITAL_HELP_EVENT,
+            "period_days": int(period_days),
+            "module_id": module_id,
+            **tenant_params,
+        }
+        rows = await self._ch.query_rows(query, parameters=parameters)
+        results: list[tuple[int, datetime | None]] = []
+        for row in rows:
+            chw_id = _to_int(row.get("chw_id"), default=-1)
+            if chw_id < 0:
+                continue
+            last_seen = row.get("last_seen")
+            results.append((chw_id, last_seen if isinstance(last_seen, datetime) else None))
+        return results
+
+    async def _query_module_counts(
         self,
         *,
         tenant_id: UUID | None,
@@ -155,9 +204,9 @@ class DashboardAnalyticsService:
         FROM coaching_events
         WHERE event_type = '{_DIGITAL_HELP_EVENT}'
           AND event_date >= (today() - toIntervalDay({{period_days:Int32}}))
-          AND module_family_id IS NULL
           AND module_id IS NOT NULL
         {tenant_clause}GROUP BY module_id
+        ORDER BY query_count DESC
         """
         parameters = {"period_days": int(period_days), **tenant_params}
         return await self._ch.query_rows(query, parameters=parameters)

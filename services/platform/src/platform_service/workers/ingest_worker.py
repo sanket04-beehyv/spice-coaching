@@ -1,9 +1,9 @@
 """Ingest and cross-source fusion background jobs (Celery-backed).
 
 ``POST /admin/ingest`` uploads files synchronously, then enqueues
-``run_ingest_batch_job``. ``POST /admin/fusion`` enqueues
-``run_cross_source_fusion_job``. Each job opens its own DB session(s) —
-the API request session is not reused.
+``run_ingest_batch_job``. When ``fuse_sources=true``, cross-source fusion
+runs in-process after all per-file pipelines finish. Each job opens its own
+DB session(s) — the API request session is not reused.
 """
 
 from __future__ import annotations

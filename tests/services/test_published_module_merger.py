@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -21,21 +20,6 @@ from platform_service.services.published_module_merger import (
 )
 
 from tests.localized_helpers import refresher_card
-
-_STRICT_MERGE_ENV = {
-    "STAGE_D_PUBLISHED_MERGE_MIN_EXISTING_CARD_MATCH_RATIO": "0.51",
-    "STAGE_D_PUBLISHED_MERGE_MODULE_SIMILARITY_THRESHOLD": "0.5",
-    "STAGE_D_PUBLISHED_MERGE_CARD_SIMILARITY_THRESHOLD": "0.85",
-}
-
-
-@pytest.fixture
-def strict_merge_content_gate(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    for key, value in _STRICT_MERGE_ENV.items():
-        monkeypatch.setenv(key, value)
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
 
 
 def _published(
@@ -181,7 +165,7 @@ def test_content_gate_passes_high_overlap() -> None:
     assert "content_gate" in detail
 
 
-def test_content_gate_fails_per_card_majority(strict_merge_content_gate: None) -> None:
+def test_content_gate_fails_per_card_majority() -> None:
     existing = [
         _refresher_card(title="এ", body="এএএ বিষয়বস্তু এক।"),
         _refresher_card(title="বি", body="বিবি বিষয়বস্তু দুই।"),
@@ -201,7 +185,7 @@ def test_content_gate_fails_per_card_majority(strict_merge_content_gate: None) -
     )
 
 
-def test_content_gate_fails_whole_module_similarity(strict_merge_content_gate: None) -> None:
+def test_content_gate_fails_whole_module_similarity() -> None:
     bid1, bid2 = uuid.uuid4(), uuid.uuid4()
     existing = [
         _refresher_card(title="পুরোনো১", body="xxx", block_id=bid1),
@@ -310,7 +294,7 @@ def test_parse_match_success_when_content_gate_passes() -> None:
     assert len(result.merged_cards) == 1
 
 
-def test_parse_match_rejected_when_content_gate_fails(strict_merge_content_gate: None) -> None:
+def test_parse_match_rejected_when_content_gate_fails() -> None:
     pub_id = uuid.uuid4()
     block_id = uuid.uuid4()
     new_card = {

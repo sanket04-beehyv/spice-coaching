@@ -10,6 +10,7 @@ members = [
     "packages/foundation",
     "services/platform",
     "services/ai-runtime",
+    "eval",
 ]
 
 [tool.uv]
@@ -20,6 +21,7 @@ mc-contracts = { workspace = true }
 mc-foundation = { workspace = true }
 microcoaching-platform = { workspace = true }
 ai-runtime = { workspace = true }
+rag-eval = { workspace = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -35,16 +37,18 @@ markers = [
 dev = [
     "microcoaching-platform",
     "ai-runtime",
-    "pytest>=9.0.3,<10.0.0",
+    "rag-eval",
+    "pytest>=8.4.2,<9.0.0",
     "pytest-asyncio>=1.2.0,<2.0.0",
-    "pytest-cov>=6.0.0,<7.0.0",
     "httpx>=0.28.1,<0.29.0",
     "aiosqlite>=0.20.0",
     "python-dotenv>=1.0.0",
     "ruff>=0.6.0",
+    "pre-commit>=4.0.0,<5.0.0",
     "bandit>=1.8.0,<2.0.0",
     "pip-audit>=2.9.0,<3.0.0",
     "pyright>=1.1.400,<2.0.0",
+    "pytest-cov>=6.0.0,<7.0.0",
 ]
 
 [tool.coverage.run]

@@ -30,51 +30,18 @@ from mc_contracts.internal_ai import (
     InferenceImage,
     InferenceRequest,
     InferenceResponse,
-    ModelPolicy,
-    PromptSpec,
     TraceContext,
 )
 
-from platform_service.config import get_settings
 from platform_service.deps import get_ai_client
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 from platform_service.services.llm_text_utils import strip_code_fence
+from platform_service.services.prompt_registry import VISION_TEMPLATE_ID
+from platform_service.services.prompt_template_service import PromptTemplateService, prompt_spec_from_rendered
+from platform_service.services.prompt_variables.vision_variables import build_vision_variables
+from platform_service.workers.extractors.extraction_markdown import normalize_extraction_markdown
 
 logger = logging.getLogger(__name__)
-
-
-_VISION_PROMPT_SYSTEM = """\
-You are an expert assistant tasked with describing pages of a clinical training document for retrieval.
-A page image may contain text (paragraphs, headings), tables, figures, charts, or diagrams.
-
-Instructions:
-1. Return any text paragraphs verbatim — do NOT translate or paraphrase.
-2. Return tables in markdown format.
-3. For figures, charts, or diagrams: describe content clearly (title, axes, labels, key data points).
-4. Do not use lead-in phrases like "The image shows" or "This page contains".
-5. Output plain text / markdown suitable for downstream clinical scenario extraction.
-6. Preserve the source language exactly (Bangla stays Bangla, English stays English).
-7. Mark headings with Markdown syntax. Heading rules are STRICT:
-   - At most ONE `#` per page. Use `#` ONLY when the page introduces a new chapter
-     (typically the first page of a chapter where the chapter title is the largest text).
-     If the page is a continuation of an ongoing chapter, do NOT use `#` at all.
-   - Use `##` for section headings within a chapter (e.g. "পাঠ শিরোনাম", "উদ্দেশ্য",
-     "প্রক্রিয়া"), `###` for subsection headings.
-   - Numbered list items (e.g. "1. Fundal height", "14. Edema"), bulleted list items,
-     glossary terms, definition list entries, and table headers are NEVER headings —
-     even when bold or visually prominent. They are list items, definition entries,
-     or table content. Body paragraphs have no marker.
-"""
-
-_VISION_PROMPT_HUMAN = "Describe this page following the instructions above."
-
-_VISION_TEMPLATE_ID = "v33-stage-a-vision"
-# v4 tightens heading-emission constraints to fix the "every bold line becomes a `#`"
-# problem on dense list pages (SK manual page 90: 9 numbered ANC checklist items
-# were all marked `#`, producing 10 outline sections per page that the partitioner
-# then sent to the identifier 10 times). Bump invalidates v3 cache entries so
-# re-runs re-extract with the stricter rules.
-_VISION_TEMPLATE_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -95,12 +62,8 @@ class VisionExtractor:
     def __init__(
         self,
         client: AIRuntimeClient | None = None,
-        *,
-        model: str | None = None,
     ) -> None:
-        settings = get_settings()
         self._client = client or get_ai_client()
-        self._model = model or settings.vision_model
 
     async def extract_page(
         self,
@@ -129,16 +92,17 @@ class VisionExtractor:
         if not page_image_bytes:
             raise VisionExtractionError("page_image_bytes is empty; nothing to extract")
 
+        rendered = await PromptTemplateService().render(
+            None,
+            template_id=VISION_TEMPLATE_ID,
+            variant_key=None,
+            variables=build_vision_variables(),
+        )
+
         request = InferenceRequest(
             request_id=str(uuid.uuid4()),
             generation_type=GenerationType.VISION_EXTRACTION,
-            model_policy=ModelPolicy(model=self._model),
-            prompt=PromptSpec(
-                template_id=_VISION_TEMPLATE_ID,
-                template_version=_VISION_TEMPLATE_VERSION,
-                resolved_system_prompt=_VISION_PROMPT_SYSTEM,
-                resolved_human_message=_VISION_PROMPT_HUMAN,
-            ),
+            prompt=prompt_spec_from_rendered(rendered),
             constraints=GenerationConstraints(
                 language="bn",  # source-preserving prompt; this hint is informational
                 output_format="text",
@@ -206,15 +170,15 @@ def _unwrap_envelope(raw: str) -> str:
     if fenced != s:
         s = fenced
     if not s.startswith("{"):
-        return s
+        return normalize_extraction_markdown(s)
     # Try parsing as JSON. If it fails, the LLM probably just returned
     # markdown that happened to start with a brace — treat as raw.
     try:
         obj = json.loads(s)
     except json.JSONDecodeError:
-        return s
+        return normalize_extraction_markdown(s)
     if not isinstance(obj, dict):
-        return s
+        return normalize_extraction_markdown(s)
     for key in _ENVELOPE_KEYS:
         value = obj.get(key)
         if isinstance(value, list):
@@ -223,9 +187,9 @@ def _unwrap_envelope(raw: str) -> str:
             # at column 0 of a fresh line.
             parts = [str(item).strip() for item in value if str(item).strip()]
             if parts:
-                return "\n\n".join(parts)
+                return normalize_extraction_markdown("\n\n".join(parts))
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            return normalize_extraction_markdown(value.strip())
     # Unknown JSON shape — last-resort: dump the values as text so we at
     # least surface SOME content to the reviewer instead of failing the
     # stage on what was a successful LLM call.
@@ -233,4 +197,4 @@ def _unwrap_envelope(raw: str) -> str:
         "Vision response was JSON but no known content key matched; keys=%s",
         list(obj.keys()),
     )
-    return s
+    return normalize_extraction_markdown(s)

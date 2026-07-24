@@ -10,7 +10,7 @@ This document describes how the admin UI should integrate **file and YouTube att
 X-Admin-Caller-Id: <editor-user-id>
 ```
 
-File upload and presign live at `/admin/v3/files` (plus your deployment’s `api_root_path` prefix if configured, e.g. `/medtronics-api/admin/v3/files`).
+File upload and presign live at `/admin/files` (plus your deployment’s `api_root_path` prefix if configured, e.g. `/medtronics-api/admin/files`).
 
 **Note:** `X-Admin-File-Token` is **not** used on `optimal-ingest`; do not send it for module attachments.
 
@@ -23,21 +23,21 @@ File upload and presign live at `/admin/v3/files` (plus your deployment’s `api
 | Where attachments live | Inside `module_json` — module-level `attachments[]` and/or per-card `cards[i].attachments[]` |
 | File bytes | Uploaded separately to MinIO; module only stores **references** (`object_name`, `storage_path`, …) |
 | Playback / preview | **On demand** — module GET does **not** return presigned URLs; call presign when the user opens a file |
-| Module save | `PUT /admin/modules/{id}` creates a **new version** (new `id`); always use the returned `id` after save |
-| Ingest API | **Do not use** `/admin/v3/ingest*` for editor attachments — that is the AI source-document pipeline |
+| Module save | `PUT /admin/modules/{id}` creates a **new version** (new `id`) when content changes or the body is a partial edit; when the body is a complete content snapshot that matches the tip, the response reuses the existing `id` / `version`. Always use the returned `id` after save |
+| Ingest API | **Do not use** `/admin/ingest*` for editor attachments — that is the AI source-document pipeline |
 
 ```mermaid
 sequenceDiagram
     participant UI as Admin UI
-    participant Files as /admin/v3/files
+    participant Files as /admin/files
     participant Mod as /admin/modules
 
-    UI->>Files: POST upload (prefix=media)
+    UI->>Files: POST upload (file only)
     Files-->>UI: object_name, storage_path, content_type
     UI->>Mod: GET module (load editor)
     Mod-->>UI: cards + attachments (refs only)
     UI->>Mod: PUT module_json with attachment refs
-    Mod-->>UI: new module id, version
+    Mod-->>UI: new module id, version (or same id if unchanged)
     UI->>User: User clicks attachment
     UI->>Files: GET presigned-url?object_name=...
     Files-->>UI: url (short-lived)
@@ -50,7 +50,7 @@ sequenceDiagram
 
 ### 2.1 File uploads (`kind: "file"`)
 
-Upload via `POST /admin/v3/files` with `prefix=media`.
+Upload via `POST /admin/files` with the file only (no client-chosen prefix). Objects are stored under the server-configured `ADMIN_FILE_UPLOAD_PREFIX` (default `uploads/`).
 
 | Category | Extensions | `media_kind` value |
 |----------|------------|-------------------|
@@ -127,12 +127,11 @@ type ModuleAttachment = ModuleFileAttachment | ModuleYoutubeAttachment;
 ### Step A — Upload file (when user picks a file)
 
 ```http
-POST /admin/v3/files
+POST /admin/files
 Content-Type: multipart/form-data
 <SPICE auth headers> + optional X-Admin-Caller-Id
 
 file: <binary>
-prefix: media
 ```
 
 **Response `201`:**
@@ -140,8 +139,8 @@ prefix: media
 ```json
 {
   "bucket_name": "medtronics-storage",
-  "object_name": "media/2bb43346-36bd-42ea-99b8-c6347b94f3bd_audio.mp3",
-  "storage_path": "medtronics-storage/media/2bb43346-36bd-42ea-99b8-c6347b94f3bd_audio.mp3",
+  "object_name": "uploads/2bb43346-36bd-42ea-99b8-c6347b94f3bd_audio.mp3",
+  "storage_path": "medtronics-storage/uploads/2bb43346-36bd-42ea-99b8-c6347b94f3bd_audio.mp3",
   "content_type": "audio/mpeg",
   "size_bytes": 3813041
 }
@@ -237,7 +236,7 @@ Content-Type: application/json
 
 | `code` | Meaning | UI action |
 |--------|---------|-----------|
-| `invalid_attachment_object_prefix` | `object_name` must start with `media/` | Re-upload with `prefix=media` |
+| `invalid_attachment_object_prefix` | `object_name` top segment must be in `ADMIN_FILE_ALLOWED_PREFIXES` | Re-upload via `/admin/files` and use returned `object_name` |
 | `unsupported_attachment_suffix` | Extension not allowed | Show allowed types |
 | `attachment_media_kind_mismatch` | `media_kind` does not match file type | Fix mapping from extension |
 | `attachment_object_not_found` | File not in MinIO | Re-upload |
@@ -251,7 +250,7 @@ Content-Type: application/json
 ### Step D — Preview / play file (user clicks attachment)
 
 ```http
-GET /admin/v3/files/presigned-url?object_name={encodeURIComponent(object_name)}&disposition=inline&expires_seconds=3600
+GET /admin/files/presigned-url?object_name={encodeURIComponent(object_name)}&disposition=inline&expires_seconds=3600
 <SPICE auth headers> + optional X-Admin-Caller-Id
 ```
 
@@ -277,7 +276,7 @@ GET /admin/v3/files/presigned-url?object_name={encodeURIComponent(object_name)}&
 ```typescript
 async function openFileAttachment(att: ModuleFileAttachment) {
   const res = await fetch(
-    `/admin/v3/files/presigned-url?object_name=${encodeURIComponent(att.object_name)}&disposition=inline&expires_seconds=3600`,
+    `/admin/files/presigned-url?object_name=${encodeURIComponent(att.object_name)}&disposition=inline&expires_seconds=3600`,
     { headers: { /* SPICE auth headers */, "X-Admin-Caller-Id": callerId } }
   );
   if (!res.ok) throw new Error("presign failed");
@@ -312,7 +311,7 @@ async function openFileAttachment(att: ModuleFileAttachment) {
 
 1. User on module edit screen → `GET /admin/modules/{id}`.
 2. User clicks “Add attachment” on card *N*.
-3. File picker → `POST /admin/v3/files` → build `ModuleFileAttachment`.
+3. File picker → `POST /admin/files` → build `ModuleFileAttachment`.
 4. Append to `cards[N].attachments` in **local state** (show thumbnail/name).
 5. User clicks Save → `PUT` full `module_json` → replace route/state with new `id` from response.
 6. Optional: `GET` new module to refresh server-normalized YouTube fields.
@@ -338,7 +337,7 @@ POST /admin/modules/{module_id}/clinically-reviewed
 { "clinically_reviewed": true, "reviewer_id": "<uuid>" }
 ```
 
-Use the **latest** module version `id` after edits.
+Use the **latest** module version `id` after edits (same `id` when a complete unchanged snapshot was a no-op).
 
 ---
 
@@ -374,7 +373,8 @@ Preserve `card_family_id` on each card when present (needed for telemetry/runtim
 | Module-level attachments | 20 |
 | Per-card attachments | 10 |
 | Upload max size | `104857600` bytes (100 MB) default |
-| Object key prefix | `media/` required |
+| Object key prefix (new uploads) | Configured `ADMIN_FILE_UPLOAD_PREFIX` (default `uploads/`) |
+| Object key prefix (existing refs) | Any top-level prefix in `ADMIN_FILE_ALLOWED_PREFIXES` |
 | Presign TTL | Query param; typical 600–3600 s |
 
 ---
@@ -397,11 +397,10 @@ BASE="http://localhost:8000"
 MODULE_ID="<existing-module-uuid>"
 
 # 1. Upload
-curl -s -X POST "$BASE/admin/v3/files" \
+curl -s -X POST "$BASE/admin/files" \
   -H "X-Admin-Caller-Id: editor@example.com" \
   # plus SPICE Authorization header(s) as for other admin routes
-  -F "file=@./audio.mp3" \
-  -F "prefix=media"
+  -F "file=@./audio.mp3"
 
 # 2. Save (use upload fields in module_json.attachments or cards[].attachments)
 curl -s -X PUT "$BASE/admin/modules/$MODULE_ID" \
@@ -413,7 +412,7 @@ NEW_ID="<id from PUT response>"
 curl -s "$BASE/admin/modules/$NEW_ID"
 
 # 4. On user click
-curl -s "$BASE/admin/v3/files/presigned-url?object_name=media%2F...&disposition=inline" \
+curl -s "$BASE/admin/files/presigned-url?object_name=uploads%2F...&disposition=inline" \
   -H "X-Admin-Caller-Id: editor@example.com"
 ```
 
@@ -422,7 +421,7 @@ curl -s "$BASE/admin/v3/files/presigned-url?object_name=media%2F...&disposition=
 ## 10. OpenAPI / discovery
 
 - Module routes: `GET /docs` → **admin-dashboard** tag.
-- File routes: **admin-files** tag (`/admin/v3/files`, `/admin/v3/files/presigned-url`).
+- File routes: **admin-files** tag (`/admin/files`, `/admin/files/presigned-url`).
 
 ---
 

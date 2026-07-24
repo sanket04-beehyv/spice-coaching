@@ -6,6 +6,7 @@ Per `docs/ARCHITECTURE_RESET.md`. Trigger bindings live in
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -16,6 +17,7 @@ from mc_contracts.admin_modules import (
     ModuleCreateRequest,
     ModuleDetail,
     ModuleEditRequest,
+    ModuleListResponse,
     ModuleSummary,
     SemanticSearchRequest,
     VisibilityWindowRequest,
@@ -31,6 +33,7 @@ from platform_service.celery_tasks import (
 )
 from platform_service.config import Settings, get_settings
 from platform_service.db.models.module import Module
+from platform_service.db.module_availability import VALID_LIFECYCLE_STATUSES
 from platform_service.db.repositories.module_gap_repository import (
     ModuleGapLinkError,
     ModuleGapRepository,
@@ -38,14 +41,27 @@ from platform_service.db.repositories.module_gap_repository import (
 from platform_service.db.repositories.module_repository import (
     ModuleNotFoundError,
     ModuleRepository,
+    ModuleVersionConflictError,
 )
 from platform_service.db.validators import ValidationError
 from platform_service.deps import get_ai_client, get_db, get_object_storage_client
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 from platform_service.services.module_attachment_validator import validate_module_attachments
 from platform_service.services.module_card_body_validator import validate_module_card_bodies
+from platform_service.services.module_card_service import (
+    ModuleCardService,
+    extract_cards_from_module_json,
+    module_json_shell,
+)
+from platform_service.services.module_edit_equality import (
+    edit_content_matches,
+    is_complete_edit_snapshot,
+    resolve_edit_request_quiz,
+)
 from platform_service.services.module_presenter import (
+    card_payload,
     cards_with_source_pages,
+    get_card_counts,
     get_quiz_counts,
     quiz_payload,
     source_documents_for_module,
@@ -68,6 +84,7 @@ async def create_new_module(
 ) -> dict[str, Any]:
     """Manually create a new module family and initial draft module version."""
     module_json = body.module_json
+    cards_data: list[dict[str, Any]] = []
     if module_json is not None:
         try:
             module_json = validate_module_card_bodies(module_json)
@@ -76,6 +93,8 @@ async def create_new_module(
                 settings=settings,
                 storage=storage,
             )
+            cards_data = extract_cards_from_module_json(module_json)
+            module_json = module_json_shell(module_json)
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
 
@@ -93,9 +112,15 @@ async def create_new_module(
             creator_id=body.creator_id,
             behavioural_gap_ids=body.behavioural_gap_ids,
             primary_gap_id=body.primary_gap_id,
+            chatbot_faqs_only=body.chatbot_faqs_only,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ModuleGapLinkError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
+
+    if cards_data:
+        await ModuleCardService(session).append_cards(new_module.id, cards_data)
 
     quiz_data = body.quiz
     if quiz_data is None and body.module_json is not None:
@@ -112,17 +137,53 @@ async def create_new_module(
     }
 
 
-@router.get("/modules", response_model=list[ModuleSummary])
+@router.get("/modules", response_model=ModuleListResponse)
 async def list_modules(
     request: Request,
-    status: str | None = Query(None, description="draft | published | retired"),
+    status: str | None = Query(None, description="draft | published | retired | deactivated"),
     clinically_reviewed: bool | None = Query(None),
     has_visibility_window: bool | None = Query(None),
     has_quality_flags: bool | None = Query(
         None,
         description="true → only modules with non-empty quality_flags_jsonb (the 'needs attention' view)",
     ),
-    domain: str | None = Query(None),
+    domain: str | None = Query(None, description="Domain filter (module.domain)"),
+    source_document_id: UUID | None = Query(
+        default=None,
+        description="Optional filter: only modules linked to this source_document_id",
+    ),
+    created_from: datetime | None = Query(
+        None, description="Inclusive Created Date range start (module.created_at)."
+    ),
+    created_to: datetime | None = Query(
+        None, description="Inclusive Created Date range end (module.created_at)."
+    ),
+    published_from: datetime | None = Query(
+        None, description="Inclusive Published Date range start (module.published_at)."
+    ),
+    published_to: datetime | None = Query(
+        None, description="Inclusive Published Date range end (module.published_at)."
+    ),
+    activated_from: datetime | None = Query(
+        None,
+        description=(
+            "Inclusive Activated Date range start. Uses "
+            "coalesce(last_reactivated_at, first_activated_at, published_at)."
+        ),
+    ),
+    activated_to: datetime | None = Query(
+        None,
+        description=(
+            "Inclusive Activated Date range end. Uses "
+            "coalesce(last_reactivated_at, first_activated_at, published_at)."
+        ),
+    ),
+    deactivated_from: datetime | None = Query(
+        None, description="Inclusive Deactivated Date range start (module.last_deactivated_at)."
+    ),
+    deactivated_to: datetime | None = Query(
+        None, description="Inclusive Deactivated Date range end (module.last_deactivated_at)."
+    ),
     q: str | None = Query(None, description="full-text query against title + description"),
     tenant_id: UUID | None = Query(
         default=None,
@@ -136,31 +197,100 @@ async def list_modules(
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
     storage: ObjectStorageClient = Depends(get_object_storage_client),
-) -> list[ModuleSummary]:
+) -> ModuleListResponse:
+    for date_from, date_to, from_name, to_name in (
+        (created_from, created_to, "created_from", "created_to"),
+        (published_from, published_to, "published_from", "published_to"),
+        (activated_from, activated_to, "activated_from", "activated_to"),
+        (deactivated_from, deactivated_to, "deactivated_from", "deactivated_to"),
+    ):
+        if date_from is not None and date_to is not None and date_from > date_to:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{from_name} must be on or before {to_name}",
+            )
+    if status is not None and status not in VALID_LIFECYCLE_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"status must be one of: {', '.join(sorted(VALID_LIFECYCLE_STATUSES))}",
+        )
     effective_tenant = resolve_tenant_id_for_admin(request, tenant_id)
     repo = ModuleRepository(session)
-    modules = await repo.list_modules(
-        status=status,
-        clinically_reviewed=clinically_reviewed,
-        has_visibility_window=has_visibility_window,
-        has_quality_flags=has_quality_flags,
-        domain=domain,
-        full_text_query=q,
-        latest_version_only=latest_version_only,
-        tenant_id=effective_tenant,
-        limit=limit,
-        offset=offset,
-    )
+    list_filters = {
+        "status": status,
+        "clinically_reviewed": clinically_reviewed,
+        "has_visibility_window": has_visibility_window,
+        "has_quality_flags": has_quality_flags,
+        "domain": domain,
+        "source_document_id": source_document_id,
+        "created_from": created_from,
+        "created_to": created_to,
+        "published_from": published_from,
+        "published_to": published_to,
+        "activated_from": activated_from,
+        "activated_to": activated_to,
+        "deactivated_from": deactivated_from,
+        "deactivated_to": deactivated_to,
+        "full_text_query": q,
+        "latest_version_only": latest_version_only,
+        "tenant_id": effective_tenant,
+    }
+    total_modules = await repo.count_modules(**list_filters)
+    modules = await repo.list_modules(**list_filters, limit=limit, offset=offset)
     quiz_counts = await get_quiz_counts(session, [m.id for m in modules])
-    return [
+    card_counts = await get_card_counts(session, [m.id for m in modules])
+    summaries = [
         await summary_from_module(
             m,
-            card_count=len((m.module_json or {}).get("cards", [])),
+            card_count=card_counts.get(m.id, 0),
             quiz_count=quiz_counts.get(m.id, 0),
             storage=storage,
         )
         for m in modules
     ]
+    total_pages = (total_modules + limit - 1) // limit if total_modules > 0 else 0
+    return ModuleListResponse(
+        modules=summaries,
+        total_modules=total_modules,
+        total_pages=total_pages,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/modules/domains", response_model=list[str])
+async def list_module_domains(
+    request: Request,
+    status: str | None = Query(
+        None,
+        description=(
+            "draft | published | retired | deactivated — omit for All "
+            "(retired + deactivated excluded)"
+        ),
+    ),
+    tenant_id: UUID | None = Query(
+        default=None,
+        description="Optional tenant UUID override (admin principals only when auth is enabled).",
+    ),
+    latest_version_only: bool = Query(
+        True,
+        description="When true (default), one domain per module family (highest version).",
+    ),
+    session: AsyncSession = Depends(get_db),
+) -> list[str]:
+    """Distinct ``module.domain`` values for admin filter dropdowns."""
+    if status is not None and status not in VALID_LIFECYCLE_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"status must be one of: {', '.join(sorted(VALID_LIFECYCLE_STATUSES))}",
+        )
+    effective_tenant = resolve_tenant_id_for_admin(request, tenant_id)
+    repo = ModuleRepository(session)
+    return await repo.list_module_domains(
+        status=status,
+        latest_version_only=latest_version_only,
+        tenant_id=effective_tenant,
+    )
 
 
 @router.get("/modules/{module_id}", response_model=ModuleDetail)
@@ -174,6 +304,7 @@ async def get_module(
     if module is None:
         raise HTTPException(status_code=404, detail="module not found")
     quiz = await repo.list_quiz_questions(module_id)
+    card_rows = await repo.list_cards(module_id)
     module_payload = module.module_json or {}
     source_documents = await source_documents_for_module(session, module, storage)
     presigned_by_doc = {ref.source_document_id: ref.presigned_url for ref in source_documents}
@@ -182,13 +313,18 @@ async def get_module(
     }
     cards = await cards_with_source_pages(
         session,
-        list(module_payload.get("cards", [])),
+        card_payload(card_rows),
         storage=storage,
         presigned_by_doc=presigned_by_doc,
         presigned_expires_by_doc=presigned_expires_by_doc,
     )
     module_attachments = list(module_payload.get("attachments", []))
-    summary = await summary_from_module(module, card_count=len(cards), quiz_count=len(quiz), storage=storage)
+    summary = await summary_from_module(
+        module,
+        card_count=len(cards),
+        quiz_count=len(quiz),
+        storage=storage,
+    )
     window_lower, window_upper = visibility_window_bounds(module)
     gap_repo = ModuleGapRepository(session)
     behavioural_gap_ids = await gap_repo.get_gap_ids(module_id)
@@ -217,6 +353,7 @@ async def edit_module(
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     repo = ModuleRepository(session)
+    cards_data: list[dict[str, Any]] | None = None
     module_json = body.module_json
     if module_json is not None:
         try:
@@ -226,6 +363,8 @@ async def edit_module(
                 settings=settings,
                 storage=storage,
             )
+            cards_data = extract_cards_from_module_json(module_json)
+            module_json = module_json_shell(module_json)
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
 
@@ -240,22 +379,62 @@ async def edit_module(
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
 
+    def _edit_response(module: Module) -> dict[str, Any]:
+        return {
+            "id": str(module.id),
+            "module_family_id": str(module.module_family_id),
+            "version": module.version,
+            "supersedes_module_id": str(module.supersedes_module_id) if module.supersedes_module_id else None,
+        }
+
     try:
+        current = await repo.get_editable_module_tip(
+            module_id,
+            expected_version=body.expected_version,
+        )
+        if (
+            is_complete_edit_snapshot(body)
+            and "thumbnail_storage_path" in thumbnail_kw
+            and edit_content_matches(
+                request_title=body.title,
+                request_description=body.description,
+                request_module_json_shell=module_json,
+                request_cards=cards_data or [],
+                request_quiz=resolve_edit_request_quiz(body),
+                request_thumbnail_storage_path=thumbnail_kw["thumbnail_storage_path"],
+                module=current,
+                current_cards=card_payload(await repo.list_cards(current.id)),
+                current_quiz=quiz_payload(await repo.list_quiz_questions(current.id)),
+            )
+        ):
+            return _edit_response(current)
+
+        edit_kwargs: dict[str, Any] = {}
+        if "chatbot_faqs_only" in body.model_fields_set:
+            edit_kwargs["chatbot_faqs_only"] = body.chatbot_faqs_only
+
         new_module = await repo.edit_module(
             module_id,
+            expected_version=body.expected_version,
             title=body.title,
             description=body.description,
             module_json=module_json,
             editor_id=body.editor_id,
             **thumbnail_kw,
+            **edit_kwargs,
         )
 
         if body.behavioural_gap_ids is not None:
+            if new_module.chatbot_faqs_only and body.behavioural_gap_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail="chatbot_faqs_only modules cannot be linked to behavioural gaps",
+                )
             gap_repo = ModuleGapRepository(session)
             primary = body.primary_gap_id
             if primary is None and body.behavioural_gap_ids:
-                current = await session.get(Module, module_id)
-                primary = current.primary_gap_id if current is not None else None
+                prior = await session.get(Module, module_id)
+                primary = prior.primary_gap_id if prior is not None else None
                 if primary is None or primary not in body.behavioural_gap_ids:
                     primary = body.behavioural_gap_ids[0]
             try:
@@ -267,23 +446,32 @@ async def edit_module(
             except ModuleGapLinkError as exc:
                 raise HTTPException(status_code=400, detail=exc.message) from exc
 
-        quiz_data = body.quiz
-        if quiz_data is None and body.module_json is not None:
-            quiz_data = body.module_json.get("quiz")
+        quiz_data = resolve_edit_request_quiz(body)
         if quiz_data is not None:
             await ModuleQuizService(session).append_questions(new_module.id, quiz_data)
 
+        if cards_data is not None:
+            await ModuleCardService(session).append_cards(new_module.id, cards_data)
+        elif module_json is None:
+            prior_cards = card_payload(await repo.list_cards(module_id))
+            if prior_cards:
+                await ModuleCardService(session).append_cards(new_module.id, prior_cards)
+
     except ModuleNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ModuleVersionConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "module_version_conflict",
+                "message": "module has been modified; refetch and retry",
+                "expected_version": exc.expected_version,
+                "current_version": exc.current_version,
+                "latest_module_id": str(exc.latest_module_id),
+            },
+        ) from exc
     await session.commit()
-    return {
-        "id": str(new_module.id),
-        "module_family_id": str(new_module.module_family_id),
-        "version": new_module.version,
-        "supersedes_module_id": str(new_module.supersedes_module_id)
-        if new_module.supersedes_module_id
-        else None,
-    }
+    return _edit_response(new_module)
 
 
 @router.post("/modules/{module_id}/clinically-reviewed")
@@ -388,10 +576,11 @@ async def semantic_search(
     )
     modules = [m for m, _distance in pairs]
     quiz_counts = await get_quiz_counts(session, [m.id for m in modules])
+    card_counts = await get_card_counts(session, [m.id for m in modules])
     return [
         await summary_from_module(
             m,
-            card_count=len((m.module_json or {}).get("cards", [])),
+            card_count=card_counts.get(m.id, 0),
             quiz_count=quiz_counts.get(m.id, 0),
             storage=storage,
         )

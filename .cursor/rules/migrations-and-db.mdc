@@ -1,0 +1,34 @@
+---
+description: Database & migration rules. Apply when editing alembic/, db/models, db/repositories.
+globs: ["infra/alembic/**", "services/platform/src/platform_service/db/**"]
+---
+
+# Database & Migrations
+
+## Alembic
+
+- One linear chain under `infra/alembic/versions/`. Each new migration references the previous one via `down_revision`.
+- Migrations are run via the `migrate` compose service or manually as:
+  ```bash
+  uv run alembic -c infra/alembic.ini upgrade head
+  ```
+  NEVER at application startup.
+- `alembic/env.py` requires `DATABASE_URL` (uppercase). Don't reintroduce the lowercase fallback.
+- For columns using pgvector types, create the column as `sa.Text()` first and then `op.execute("ALTER TABLE ... TYPE vector(N) USING ...")` — see `0001_initial_schema.py`.
+
+## Models
+
+- Every ORM model lives under `services/platform/src/platform_service/db/models/`.
+- New models **must be imported in `infra/alembic/env.py`** or Alembic won't see them during autogenerate.
+- Keep `DeclarativeBase` = `platform_service.db.base.Base`. Don't create a second base class.
+
+## Repositories
+
+- Repositories live in `services/platform/src/platform_service/db/repositories/`.
+- Repositories take an `AsyncSession` in `__init__`. They do not open/close sessions themselves.
+- Repositories expose *named* methods (`get_active_gaps`, `record_wrong_answer`). No generic `find_by(**kwargs)`.
+- No SQL strings inside API handlers or services — route them through a repository method.
+
+## Seed data
+
+- Seed SQL-or-CSV lives under `seed/` at the repo root. The first migration loads `seed/clinical_glossary.csv` if present. If you add a new seed, put it under `seed/` and load it conditionally in its migration (never error if the file is absent — local devs may not check it in).

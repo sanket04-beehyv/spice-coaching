@@ -63,10 +63,20 @@ async def test_validate_module_thumbnail_storage_path_none_clears() -> None:
 
 @pytest.mark.asyncio
 async def test_validate_module_thumbnail_rejects_bad_prefix() -> None:
-    path = f"{_BUCKET}/media/bad.png"
+    path = f"{_BUCKET}/other/bad.png"
     with pytest.raises(ValidationError) as exc_info:
         await validate_module_thumbnail_storage_path(path, settings=_settings())
     assert exc_info.value.code == "invalid_thumbnail_object_prefix"
+
+
+@pytest.mark.asyncio
+async def test_validate_module_thumbnail_accepts_media_prefix() -> None:
+    path = f"{_BUCKET}/media/thumb.png"
+    storage = MagicMock()
+    storage.stat_object = AsyncMock()
+    result = await validate_module_thumbnail_storage_path(path, settings=_settings(), storage=storage)
+    assert result == path
+    storage.stat_object.assert_awaited_once_with(path)
 
 
 @pytest.mark.asyncio

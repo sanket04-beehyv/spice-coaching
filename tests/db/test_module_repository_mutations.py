@@ -13,6 +13,7 @@ from platform_service.db.repositories.module_gap_repository import ModuleGapRepo
 from platform_service.db.repositories.module_repository import (
     ModuleNotFoundError,
     ModuleRepository,
+    ModuleVersionConflictError,
 )
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +33,7 @@ class TestEditModule:
         v1 = await _make_module(db_session, family=fam, title_localized={"bn": "v1 title"}, version=1)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title={"bn": "v2 title"})
+        v2 = await repo.edit_module(v1.id, expected_version=v1.version, title={"bn": "v2 title"})
 
         assert v2.id != v1.id
         assert v2.module_family_id == fam.id
@@ -51,7 +52,7 @@ class TestEditModule:
         v1.clinically_reviewed_by = uuid4()
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title={"bn": "new title"})
+        v2 = await repo.edit_module(v1.id, expected_version=v1.version, title={"bn": "new title"})
         # New version starts unreviewed regardless of v1's flag.
         assert v2.clinically_reviewed is False
 
@@ -70,7 +71,7 @@ class TestEditModule:
 
         repo = ModuleRepository(db_session)
         # Edit ONLY the title.
-        v2 = await repo.edit_module(v1.id, title={"bn": "v2"})
+        v2 = await repo.edit_module(v1.id, expected_version=v1.version, title={"bn": "v2"})
 
         assert v2.title_localized["bn"] == "v2"
         # Untouched fields copy forward.
@@ -88,34 +89,52 @@ class TestEditModule:
         assert fam.current_published_module_id == v1.id
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title={"bn": "v2"})
+        v2 = await repo.edit_module(v1.id, expected_version=v1.version, title={"bn": "v2"})
         await db_session.refresh(fam)
         assert fam.current_published_module_id == v2.id
 
     async def test_edit_unknown_module_raises(self, db_session: AsyncSession) -> None:
         repo = ModuleRepository(db_session)
         with pytest.raises(ModuleNotFoundError):
-            await repo.edit_module(uuid4(), title={"bn": "x"})
+            await repo.edit_module(uuid4(), expected_version=1, title={"bn": "x"})
 
-    async def test_previous_version_is_retired_on_edit(self, db_session: AsyncSession) -> None:
-        """Edits create a new draft version; the prior published row stays published."""
+    async def test_rejects_version_mismatch(self, db_session: AsyncSession) -> None:
+        fam = await _make_family(db_session)
+        v1 = await _make_module(db_session, family=fam, title_localized={"bn": "v1"})
+
+        repo = ModuleRepository(db_session)
+        with pytest.raises(ModuleVersionConflictError) as exc_info:
+            await repo.edit_module(v1.id, expected_version=99, title={"bn": "nope"})
+        assert exc_info.value.expected_version == 99
+        assert exc_info.value.current_version == v1.version
+        assert exc_info.value.latest_module_id == v1.id
+
+    async def test_rejects_edit_when_not_family_tip(self, db_session: AsyncSession) -> None:
+        fam = await _make_family(db_session)
+        v1 = await _make_module(db_session, family=fam, title_localized={"bn": "v1"}, version=1)
+        repo = ModuleRepository(db_session)
+        v2 = await repo.edit_module(v1.id, expected_version=v1.version, title={"bn": "v2"})
+
+        with pytest.raises(ModuleVersionConflictError) as exc_info:
+            await repo.edit_module(v1.id, expected_version=v1.version, title={"bn": "fork"})
+        assert exc_info.value.current_version == v2.version
+        assert exc_info.value.latest_module_id == v2.id
+
+    async def test_edit_creates_draft_successor_without_retiring_prior(
+        self, db_session: AsyncSession
+    ) -> None:
         fam = await _make_family(db_session)
         v1 = await _make_module(db_session, family=fam, title_localized={"bn": "v1"})
         assert v1.lifecycle_status == "published"
-        assert v1.deprecated_at is None
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title={"bn": "v2"})
+        v2 = await repo.edit_module(v1.id, expected_version=v1.version, title={"bn": "v2"})
         await db_session.refresh(v1)
 
         assert v1.lifecycle_status == "published"
-        assert v1.deprecated_at is None
         assert v2.lifecycle_status == "draft"
-
-        published = await repo.list_modules(status="published")
-        ids = [m.id for m in published]
-        assert v1.id in ids
-        assert v2.id not in ids
+        assert v2.supersedes_module_id == v1.id
+        assert v2.version == v1.version + 1
 
     async def test_edit_retired_module_raises(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
@@ -123,7 +142,7 @@ class TestEditModule:
 
         repo = ModuleRepository(db_session)
         with pytest.raises(ModuleNotFoundError):
-            await repo.edit_module(m.id, title={"bn": "post-retire"})
+            await repo.edit_module(m.id, expected_version=m.version, title={"bn": "post-retire"})
 
     async def test_edit_replaces_module_json_when_provided(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
@@ -131,7 +150,7 @@ class TestEditModule:
 
         repo = ModuleRepository(db_session)
         new_cards = {"cards": [{"title": {"bn": "new1"}}, {"title": {"bn": "new2"}}]}
-        v2 = await repo.edit_module(v1.id, module_json=new_cards)
+        v2 = await repo.edit_module(v1.id, expected_version=v1.version, module_json=new_cards)
         assert v2.module_json == new_cards
 
     async def test_edit_copies_behavioural_gap_links(self, db_session: AsyncSession) -> None:
@@ -155,7 +174,7 @@ class TestEditModule:
         await gap_repo.replace_links(v1.id, gap_ids=[gap_a.id, gap_b.id], primary_gap_id=gap_a.id)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title={"bn": "v2"})
+        v2 = await repo.edit_module(v1.id, expected_version=v1.version, title={"bn": "v2"})
 
         v2_gap_ids = await gap_repo.get_gap_ids(v2.id)
         assert set(v2_gap_ids) == {gap_a.id, gap_b.id}
@@ -168,7 +187,7 @@ class TestEditModule:
         v1 = await _make_module(db_session, family=fam, thumbnail_storage_path=thumb)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title={"bn": "v2"})
+        v2 = await repo.edit_module(v1.id, expected_version=v1.version, title={"bn": "v2"})
 
         assert v2.thumbnail_storage_path == thumb
 
@@ -178,7 +197,12 @@ class TestEditModule:
         v1 = await _make_module(db_session, family=fam, thumbnail_storage_path=thumb)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title={"bn": "v2"}, thumbnail_storage_path=None)
+        v2 = await repo.edit_module(
+            v1.id,
+            expected_version=v1.version,
+            title={"bn": "v2"},
+            thumbnail_storage_path=None,
+        )
 
         assert v2.thumbnail_storage_path is None
 
@@ -189,7 +213,12 @@ class TestEditModule:
         v1 = await _make_module(db_session, family=fam, thumbnail_storage_path=old_thumb)
 
         repo = ModuleRepository(db_session)
-        v2 = await repo.edit_module(v1.id, title={"bn": "v2"}, thumbnail_storage_path=new_thumb)
+        v2 = await repo.edit_module(
+            v1.id,
+            expected_version=v1.version,
+            title={"bn": "v2"},
+            thumbnail_storage_path=new_thumb,
+        )
 
         assert v2.thumbnail_storage_path == new_thumb
 
@@ -430,9 +459,10 @@ class TestCountModules:
         reviewed = (
             (
                 await db_session.execute(
-                    select(Module).where(
-                        Module.description_localized["bn"].astext == marker,
-                        Module.clinically_reviewed.is_(True),
+                    select(
+                        ModuleRepository.__init__.__globals__["Module"]
+                    ).where(  # use Module from the repo's namespace
+                        Module.description_localized["bn"] == marker, Module.clinically_reviewed.is_(True)
                     )
                 )
             )
@@ -443,8 +473,7 @@ class TestCountModules:
             (
                 await db_session.execute(
                     select(Module).where(
-                        Module.description_localized["bn"].astext == marker,
-                        Module.clinically_reviewed.is_(False),
+                        Module.description_localized["bn"] == marker, Module.clinically_reviewed.is_(False)
                     )
                 )
             )

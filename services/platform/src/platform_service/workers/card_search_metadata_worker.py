@@ -1,8 +1,8 @@
 """Post-publish card search metadata workers.
 
-Generates bilingual lexical enrichment for all module cards in one LLM call,
-persists to ``module_json.cards[i].search_metadata``, then chains module-level
-search metadata generation.
+Generates locale-keyed lexical enrichment (primary locale only) for all module
+cards in one LLM call, persists to ``module_card.search_metadata_jsonb``,
+then chains module-level search metadata generation.
 """
 
 from __future__ import annotations
@@ -13,7 +13,9 @@ from uuid import UUID
 
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.module import Module
+from platform_service.db.repositories.module_read_repository import ModuleReadRepository
 from platform_service.db.repositories.module_write_repository import ModuleWriteRepository
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.card_search_metadata_generator import CardSearchMetadataGenerator
 from platform_service.services.post_publish_step import finish_post_publish_step
 
@@ -101,8 +103,9 @@ async def generate_card_search_metadata_batch(
                 _chain_module_metadata()
                 return 0
 
-            cards = (module.module_json or {}).get("cards", [])
-            card_indices = [idx for idx, card in enumerate(cards) if isinstance(card, dict)]
+            card_rows = await ModuleReadRepository(session).list_cards(module_id)
+            cards = [card_row_to_dict(row) for row in card_rows]
+            card_indices = list(range(len(cards)))
 
             if not card_indices:
                 logger.info(
@@ -146,7 +149,7 @@ async def generate_card_search_metadata_batch(
                 return 0
 
             generator = CardSearchMetadataGenerator()
-            result = await generator.generate_for_module(module, to_generate)
+            result = await generator.generate_for_module(module, to_generate, cards=cards)
 
             succeeded_indices = sorted(result.metadata_by_index)
             failed_indices = sorted(result.failed_indices)

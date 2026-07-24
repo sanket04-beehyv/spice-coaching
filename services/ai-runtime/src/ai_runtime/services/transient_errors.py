@@ -47,26 +47,6 @@ def is_transient_provider_error(exc: Exception) -> bool:
         return True
 
     try:
-        from openai import APIConnectionError, APITimeoutError, RateLimitError
-
-        if isinstance(exc, (APIConnectionError, APITimeoutError, RateLimitError)):
-            return True
-    except ImportError:
-        pass
-
-    try:
-        from openai import APIStatusError
-
-        if isinstance(exc, APIStatusError):
-            status = exc.status_code
-            if status in _PERMANENT_HTTP_STATUS_CODES:
-                return False
-            if status in _TRANSIENT_HTTP_STATUS_CODES:
-                return True
-    except ImportError:
-        pass
-
-    try:
         from google.api_core import exceptions as google_exceptions
 
         if isinstance(exc, google_exceptions.InvalidArgument):

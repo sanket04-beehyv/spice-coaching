@@ -26,8 +26,6 @@ from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceRequest,
-    ModelPolicy,
-    PromptSpec,
     TraceContext,
 )
 
@@ -39,19 +37,20 @@ from platform_service.localized import (
     migrate_legacy_suffix_field,
     primary_text,
 )
+from platform_service.module_domains import catalog_domain_label
 from platform_service.services._json_salvage import (
     extract_inner_array,
     salvage_truncated_array,
 )
+from platform_service.services.ingestion_cardinality import IngestionCardinality
 from platform_service.services.prompt_id_codec import (
     PromptIdCodec,
     translate_provenance_tokens,
 )
-from platform_service.services.prompts.module_identifier_prompt import (
-    MODULE_IDENTIFIER_TEMPLATE_ID,
-    MODULE_IDENTIFIER_TEMPLATE_VERSION,
-    render_human_message,
-    render_system_prompt,
+from platform_service.services.prompt_registry import MODULE_IDENTIFIER_TEMPLATE_ID
+from platform_service.services.prompt_template_service import PromptTemplateService, prompt_spec_from_rendered
+from platform_service.services.prompt_variables.module_identifier_variables import (
+    build_module_identifier_variables,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,14 +93,8 @@ class ModuleIdentifier:
     def __init__(
         self,
         client: AIRuntimeClient | None = None,
-        *,
-        model: str | None = None,
     ) -> None:
-        settings = get_settings()
         self._client = client or get_ai_client()
-        # Default to the identification model (Gemini Pro for accuracy on
-        # the corpus call). Caller can override per ingestion.
-        self._model = model or settings.identification_model
 
     async def identify(
         self,
@@ -113,8 +106,8 @@ class ModuleIdentifier:
         valid_block_ids: set[uuid.UUID],
         valid_page_ids: set[uuid.UUID],
         ingestion_instructions: str | None = None,
+        cardinality: IngestionCardinality | None = None,
         trace_context: TraceContext | None = None,
-        max_tokens: int | None = None,
     ) -> ModuleIdentifierResult:
         """Run the Stage 2 identification call.
 
@@ -125,11 +118,15 @@ class ModuleIdentifier:
         broader defence and must not be opt-in).
         """
         settings = get_settings()
-        system_prompt = render_system_prompt(
-            content_domains,
-            ingestion_instructions=ingestion_instructions,
-            deployment_primary_locale=settings.deployment_primary_locale,
-            deployment_region_context=settings.deployment_region_context,
+        card_lo, card_hi = (
+            cardinality.card_bounds(settings)
+            if cardinality is not None
+            else (settings.card_min_count, settings.card_max_count)
+        )
+        quiz_lo, quiz_hi = (
+            cardinality.quiz_bounds(settings)
+            if cardinality is not None
+            else (settings.quiz_min_questions, settings.quiz_max_questions)
         )
         codec = PromptIdCodec.from_corpus(page_corpus)
         logger.info(
@@ -138,34 +135,35 @@ class ModuleIdentifier:
             codec.page_count,
             codec.block_count,
         )
-        human_message = render_human_message(
-            already_published_modules=already_published_modules,
-            document_outlines=document_outlines,
-            page_corpus=page_corpus,
-            codec=codec,
-            ingestion_instructions=ingestion_instructions,
+        rendered = await PromptTemplateService().render(
+            None,
+            template_id=MODULE_IDENTIFIER_TEMPLATE_ID,
+            variant_key=None,
+            variables=build_module_identifier_variables(
+                already_published_modules=already_published_modules,
+                document_outlines=document_outlines,
+                page_corpus=page_corpus,
+                codec=codec,
+                content_domains=content_domains,
+                card_min_count=card_lo,
+                card_max_count=card_hi,
+                quiz_min_count=quiz_lo,
+                quiz_max_count=quiz_hi,
+                target_cards=cardinality.target_cards if cardinality is not None else None,
+                target_quizzes=cardinality.target_quizzes if cardinality is not None else None,
+                deployment_primary_locale=settings.deployment_primary_locale,
+                deployment_region_context=settings.deployment_region_context,
+                ingestion_instructions=ingestion_instructions,
+            ),
         )
-
-        # Default to the per-stage cap (Gemini 2.5 Pro reserves part of
-        # max_output_tokens for thinking, so the ai-runtime default of 8192
-        # truncates Stage 2's output mid-string on a real corpus).
-        if max_tokens is None:
-            max_tokens = settings.stage_c_max_output_tokens
 
         request = InferenceRequest(
             request_id=str(uuid.uuid4()),
             generation_type=GenerationType.MODULE_IDENTIFICATION,
-            model_policy=ModelPolicy(model=self._model),
-            prompt=PromptSpec(
-                template_id=MODULE_IDENTIFIER_TEMPLATE_ID,
-                template_version=MODULE_IDENTIFIER_TEMPLATE_VERSION,
-                resolved_system_prompt=system_prompt,
-                resolved_human_message=human_message,
-            ),
+            prompt=prompt_spec_from_rendered(rendered),
             constraints=GenerationConstraints(
                 language="en",
                 output_format="json",
-                max_tokens=max_tokens,
             ),
             trace_context=trace_context or TraceContext(),
         )
@@ -207,7 +205,8 @@ class ModuleIdentifier:
                         "LLM output truncated mid-stream and no complete "
                         "candidate could be salvaged. Lower "
                         "stage_c_max_corpus_tokens to force partitioning, "
-                        "or raise stage_c_max_output_tokens."
+                        "or raise the module_identification max_tokens "
+                        "profile in ai-runtime."
                     )
                 recovered = payload.get("candidates", []) if isinstance(payload, dict) else payload
                 logger.warning(
@@ -238,6 +237,7 @@ class ModuleIdentifier:
                 c,
                 valid_block_ids=valid_block_ids,
                 valid_page_ids=valid_page_ids,
+                cardinality=cardinality,
             )
         ]
         validated = _apply_ingestion_instruction_gate(
@@ -318,11 +318,23 @@ def _apply_ingestion_instruction_gate(
     return kept
 
 
+def _normalize_candidate_domain(cand: dict[str, Any]) -> None:
+    """Normalize optional Stage C ``domain`` onto the candidate dict in-place."""
+    raw = cand.get("domain") or cand.get("proposed_domain")
+    normalized = catalog_domain_label(str(raw) if raw is not None else None)
+    if normalized is not None:
+        cand["domain"] = normalized
+        return
+    cand.pop("domain", None)
+    cand.pop("proposed_domain", None)
+
+
 def _validate_candidate(
     cand: dict[str, Any],
     *,
     valid_block_ids: set[uuid.UUID],
     valid_page_ids: set[uuid.UUID] | None = None,
+    cardinality: IngestionCardinality | None = None,
 ) -> bool:
     """Apply per-candidate validation. Returns True if the candidate survives.
 
@@ -365,6 +377,8 @@ def _validate_candidate(
             if isinstance(primary_val, str) and primary_val.strip():
                 cand["description"] = {primary: primary_val.strip()}
 
+    _normalize_candidate_domain(cand)
+
     # Module type
     if cand["proposed_module_type"] not in _VALID_MODULE_TYPES:
         logger.warning("Rejecting candidate: invalid proposed_module_type %r", cand["proposed_module_type"])
@@ -377,20 +391,30 @@ def _validate_candidate(
     except (TypeError, ValueError):
         logger.warning("Rejecting candidate: card/quiz counts not int")
         return False
-    if not (settings.card_min_count <= card_n <= settings.card_max_count):
+    card_min, card_max = (
+        cardinality.card_bounds(settings)
+        if cardinality is not None
+        else (settings.card_min_count, settings.card_max_count)
+    )
+    quiz_min, quiz_max = (
+        cardinality.quiz_bounds(settings)
+        if cardinality is not None
+        else (settings.quiz_min_questions, settings.quiz_max_questions)
+    )
+    if not (card_min <= card_n <= card_max):
         logger.warning(
             "Rejecting candidate: estimated_card_count %d out of bounds [%d,%d]",
             card_n,
-            settings.card_min_count,
-            settings.card_max_count,
+            card_min,
+            card_max,
         )
         return False
-    if not (settings.quiz_min_questions <= quiz_n <= settings.quiz_max_questions):
+    if not (quiz_min <= quiz_n <= quiz_max):
         logger.warning(
             "Rejecting candidate: estimated_quiz_count %d out of bounds [%d,%d]",
             quiz_n,
-            settings.quiz_min_questions,
-            settings.quiz_max_questions,
+            quiz_min,
+            quiz_max,
         )
         return False
 

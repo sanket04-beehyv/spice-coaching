@@ -13,6 +13,7 @@ from platform_service.config import get_settings
 from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
+from platform_service.services.module_card_service import ModuleCardService
 from platform_service.services.module_gap_classifier import (
     GapClassificationResult,
     ModuleGapClassifier,
@@ -30,7 +31,9 @@ pytestmark = [requires_db]
 async def _wipe_gaps(db_session: AsyncSession):
     yield
     await db_session.rollback()
-    await db_session.execute(text("TRUNCATE module, module_family, behavioural_gap RESTART IDENTITY CASCADE"))
+    await db_session.execute(
+        text("TRUNCATE module_card, module, module_family, behavioural_gap RESTART IDENTITY CASCADE")
+    )
     await db_session.commit()
 
 
@@ -64,18 +67,20 @@ async def _seed_module(session: AsyncSession) -> Module:
         description_localized={"en": "Teaches referral thresholds."},
         domain="hypertension",
         module_type="refresher",
-        module_json={
-            "cards": [
-                {
-                    "title": {"bn": "কার্ড"},
-                    "body": {"bn": "x" * 500},
-                    "next_action": {"bn": "act"},
-                }
-            ]
-        },
         lifecycle_status="draft",
     )
     session.add(module)
+    await session.flush()
+    await ModuleCardService(session).append_cards(
+        module.id,
+        [
+            {
+                "title": {"bn": "কার্ড"},
+                "body": {"bn": "x" * 500},
+                "next_action": {"bn": "act"},
+            }
+        ],
+    )
     await session.flush()
     await session.commit()
     return module
@@ -85,8 +90,10 @@ def _inference_response(*, gap_codes: list[str], rationale: str = "ok") -> Infer
     return InferenceResponse(
         request_id="r-gap",
         generation_type=GenerationType.MODULE_GAP_CLASSIFICATION,
-        provider="openai",
-        model="gpt-4o-mini",
+        provider="google",
+        model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text="",
         parsed_json={"associated_gap_codes": gap_codes, "rationale": rationale},
         latency_ms=1,
@@ -102,17 +109,15 @@ class TestModulePayloadForClassification:
             title_localized={"bn": "t"},
             domain="rmnch",
             module_type="refresher",
-            module_json={
-                "cards": [
-                    {
-                        "title": {"bn": "T"},
-                        "body": {"bn": "b" * 500},
-                        "next_action": {"bn": "n" * 300},
-                    }
-                ]
-            },
         )
-        payload = module_payload_for_classification(module)
+        cards = [
+            {
+                "title": {"bn": "T"},
+                "body": {"bn": "b" * 500},
+                "next_action": {"bn": "n" * 300},
+            }
+        ]
+        payload = module_payload_for_classification(module, cards=cards)
         assert payload["cards"][0]["body"]["bn"].endswith("...")
         assert len(payload["cards"][0]["body"]["bn"]) == 400
         assert len(payload["cards"][0]["next_action"]["bn"]) == 200
@@ -124,9 +129,11 @@ class TestModulePayloadForClassification:
             title_localized={"bn": "t"},
             domain="rmnch",
             module_type="refresher",
-            module_json={"cards": ["not-a-dict", {"title": {"bn": "ok"}}]},
         )
-        payload = module_payload_for_classification(module)
+        payload = module_payload_for_classification(
+            module,
+            cards=["not-a-dict", {"title": {"bn": "ok"}}],  # type: ignore[list-item]
+        )
         assert len(payload["cards"]) == 1
         assert payload["cards"][0]["title"]["bn"] == "ok"
 
@@ -177,8 +184,10 @@ class TestClassifyModule:
             return_value=InferenceResponse(
                 request_id="r",
                 generation_type=GenerationType.MODULE_GAP_CLASSIFICATION,
-                provider="openai",
+                provider="google",
                 model="m",
+                max_tokens=8192,
+                temperature=0.2,
                 raw_text="",
                 error="provider down",
                 latency_ms=1,
@@ -199,8 +208,10 @@ class TestClassifyModule:
             return_value=InferenceResponse(
                 request_id="r",
                 generation_type=GenerationType.MODULE_GAP_CLASSIFICATION,
-                provider="openai",
+                provider="google",
                 model="m",
+                max_tokens=8192,
+                temperature=0.2,
                 raw_text="not json",
                 parsed_json=None,
                 latency_ms=1,
@@ -258,8 +269,10 @@ class TestClassifyModule:
             return_value=InferenceResponse(
                 request_id="r",
                 generation_type=GenerationType.MODULE_GAP_CLASSIFICATION,
-                provider="openai",
+                provider="google",
                 model="m",
+                max_tokens=8192,
+                temperature=0.2,
                 raw_text="",
                 parsed_json={"associated_gap_codes": "not-a-list", "rationale": ""},
                 latency_ms=1,

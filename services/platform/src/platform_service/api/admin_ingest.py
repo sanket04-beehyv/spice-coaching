@@ -7,7 +7,7 @@ on the Document/Scenario tables); this endpoint operates on the v3.3
 
 Endpoints:
   POST /admin/ingest              — upload one or more files + start pipeline (optional cross-source fusion)
-  GET  /admin/ingest/{run_id}    — poll run + step state + emitted candidates
+  GET  /admin/ingest/by-document/{source_document_id} — poll run + step state + emitted candidates
 
 Uploaded bytes are stored in MinIO under the ``ingest/`` prefix. The API
 returns ``stored_path`` as ``{bucket}/{object_key}``. The pipeline downloads
@@ -21,21 +21,14 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import StreamingResponse
-from mc_contracts.admin_ingest import FusionRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.auth.spice_identity import resolve_tenant_id_for_admin
 from platform_service.auth.spice_user import resolve_spice_actor
-from platform_service.celery_tasks import run_cross_source_fusion_task
 from platform_service.config import get_settings
 from platform_service.deps import get_db, get_object_storage_client
-from platform_service.services.ingest_enqueue_service import (
-    enqueue_thumbnail,
-    enqueue_thumbnail_and_batch,
-)
+from platform_service.services.ingest_enqueue_service import enqueue_thumbnail_and_batch
 from platform_service.services.ingest_errors import IngestValidationError
-from platform_service.services.ingest_stream_service import IngestStreamService
 from platform_service.services.ingest_upload_service import (
     DuplicateIngestConflict,
     IngestUploadParams,
@@ -46,11 +39,8 @@ from platform_service.services.ingestion_instruction_sanitizer import (
 )
 from platform_service.services.ingestion_run_presenter import IngestionRunPresenter
 from platform_service.services.object_storage import ObjectStorageClient
-from platform_service.services.run_state_service import (
-    ConcurrentFusionRunError,
-    ConcurrentRunError,
-    RunStateService,
-)
+from platform_service.services.run_state_service import RunStateService
+from platform_service.services.source_thumbnail_service import thumbnail_poll_fields
 
 router = APIRouter(
     prefix="/admin",
@@ -60,6 +50,7 @@ router = APIRouter(
 _DUPLICATE_CONTENT_CODE = "duplicate_content"
 _DUPLICATE_CONTENT_MESSAGE = "One or more files match already-ingested content; set override to re-ingest."
 _INVALID_INGESTION_INSTRUCTIONS_CODE = "invalid_ingestion_instructions"
+_INVALID_CARDINALITY_TARGETS_CODE = "invalid_cardinality_targets"
 
 
 def _duplicate_content_detail(conflicts: list[DuplicateIngestConflict]) -> dict[str, Any]:
@@ -87,10 +78,32 @@ def _resolve_ingestion_instructions(raw: str | None) -> str | None:
     return result.text
 
 
-def _resolve_primary_language(primary_language: str | None) -> str:
-    if primary_language:
-        return primary_language
-    return get_settings().deployment_primary_locale
+def _resolve_optional_positive_int(
+    raw: str | None,
+    *,
+    field_name: str,
+) -> int | None:
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        value = int(raw.strip())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": _INVALID_CARDINALITY_TARGETS_CODE,
+                "message": f"{field_name} must be an integer",
+            },
+        ) from exc
+    if value <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": _INVALID_CARDINALITY_TARGETS_CODE,
+                "message": f"{field_name} must be a positive integer",
+            },
+        )
+    return value
 
 
 @router.post("/ingest", status_code=202)
@@ -114,24 +127,11 @@ async def start_ingest(
     ),
     content_domain: str = Form(
         "clinical",
-        description="digital | clinical | clinical_with_app_action | supervisor_update",
+        description="digital | clinical | clinical_with_app_workflows",
     ),
     assessment_mode: str = Form(
         "with_quiz",
         description="with_quiz | read_only (read_only skips post-publish quiz generation)",
-    ),
-    authority_label: str = Form("BRAC", description="Source authority label (e.g. 'BRAC' or 'BBS')"),
-    primary_language: str | None = Form(
-        None,
-        description="Primary language of the source; defaults to deployment primary locale",
-    ),
-    mode: str = Form(
-        "append",
-        description=(
-            "Workspace handling. 'append' (default): leave existing published modules in "
-            "place. 'new': retire all currently-published modules before ingesting (use "
-            "this to start a clean workspace, e.g. switching from one program to another)."
-        ),
     ),
     override_duplicates: str | None = Form(
         None,
@@ -144,6 +144,20 @@ async def start_ingest(
     ingestion_instructions: str | None = Form(
         None,
         description="Optional steering text for Stage C module identification (batch-wide)",
+    ),
+    cards_per_module: str | None = Form(
+        None,
+        description=(
+            "Optional fixed number of cards per module for this ingest "
+            "(deployment bounds apply; default from settings)"
+        ),
+    ),
+    quizzes_per_module: str | None = Form(
+        None,
+        description=(
+            "Optional fixed number of quiz questions per module for this ingest "
+            "(deployment bounds apply; default from settings)"
+        ),
     ),
     sync_published_visible: str | None = Form(
         None,
@@ -159,14 +173,18 @@ async def start_ingest(
     db: AsyncSession = Depends(get_db),
     storage: ObjectStorageClient = Depends(get_object_storage_client),
 ) -> dict[str, Any]:
-    """Upload one or more source documents and kick off the v3.3 ingestion pipeline."""
-    effective_tenant = resolve_tenant_id_for_admin(request, tenant_id)
-    resolved_primary_language = _resolve_primary_language(primary_language)
+    """Upload one or more source documents and kick off the ingestion pipeline."""
+    _ = resolve_tenant_id_for_admin(request, tenant_id)
+    target_cards = _resolve_optional_positive_int(cards_per_module, field_name="cards_per_module")
+    target_quizzes = _resolve_optional_positive_int(quizzes_per_module, field_name="quizzes_per_module")
     upload_svc = IngestUploadService(db, storage)
     try:
         upload_svc.validate_file_count(files)
-        upload_svc.validate_mode(mode)
         sanitized_instructions = _resolve_ingestion_instructions(ingestion_instructions)
+        upload_svc.validate_cardinality_targets(
+            target_cards_per_module=target_cards,
+            target_quizzes_per_module=target_quizzes,
+        )
         if fuse_sources and len(files) < 2:
             raise IngestValidationError("fuse_sources requires at least 2 files")
 
@@ -180,19 +198,14 @@ async def start_ingest(
             content_domain=content_domain,
             assessment_mode=assessment_mode,
         )
-        retired_count, retired_ids = await upload_svc.retire_published_modules_if_new(
-            mode,
-            tenant_id=effective_tenant,
-        )
         uploaded_by = resolve_spice_actor(request)
         params = IngestUploadParams(
             content_domain=content_domain,
             assessment_mode=assessment_mode,
-            authority_label=authority_label,
-            primary_language=resolved_primary_language,
             uploaded_by=uploaded_by,
-            retired_ids=retired_ids,
             ingestion_instructions=sanitized_instructions,
+            target_cards_per_module=target_cards,
+            target_quizzes_per_module=target_quizzes,
         )
         outcomes = await upload_svc.ingest_uploaded_files(
             files=files,
@@ -221,7 +234,6 @@ async def start_ingest(
 
     enqueue_thumbnail_and_batch(
         ingested,
-        primary_language=resolved_primary_language,
         skip_merge=skip_merge,
         fuse_sources=fuse_sources,
     )
@@ -230,8 +242,6 @@ async def start_ingest(
         "status": "batch_queued",
         "fuse_sources": fuse_sources,
         "skip_merge": skip_merge,
-        "mode": mode,
-        "modules_retired": retired_count,
         "sources": [
             {
                 "source_document_id": str(result.source_document_id),
@@ -255,110 +265,6 @@ async def start_ingest(
     return response
 
 
-@router.post("/ingest/stream")
-async def start_ingest_stream(
-    request: Request,
-    file: UploadFile = File(..., description="Source file (PDF/PPTX/DOCX/audio/video)"),
-    title: str = Form(..., description="Human-readable title for the source"),
-    content_domain: str = Form(
-        "clinical",
-        description="digital | clinical | clinical_with_app_action | supervisor_update",
-    ),
-    assessment_mode: str = Form(
-        "with_quiz",
-        description="with_quiz | read_only (read_only skips post-publish quiz generation)",
-    ),
-    authority_label: str = Form("BRAC", description="Source authority label (e.g. 'BRAC' or 'BBS')"),
-    primary_language: str | None = Form(
-        None,
-        description="Primary language of the source; defaults to deployment primary locale",
-    ),
-    mode: str = Form(
-        "append",
-        description="Same as POST /ingest: 'append' | 'new' (retire published modules before ingest).",
-    ),
-    skip_merge: bool = Form(
-        False,
-        description="When true, Stage D does not merge new cards into existing modules",
-    ),
-    override_duplicate: bool = Form(
-        False,
-        description=(
-            "When true, re-ingest even if the file's content_sha256 matches an "
-            "already-ingested source_document."
-        ),
-    ),
-    ingestion_instructions: str | None = Form(
-        None,
-        description="Optional steering text for Stage C module identification (batch-wide)",
-    ),
-    sync_published_visible: bool = Form(
-        False,
-        description=("When true, the source document may appear in GET /sync/source-documents/published."),
-    ),
-    tenant_id: UUID | None = Query(
-        default=None,
-        description="Optional tenant UUID override (admin principals only when auth is enabled).",
-    ),
-    db: AsyncSession = Depends(get_db),
-    storage: ObjectStorageClient = Depends(get_object_storage_client),
-) -> StreamingResponse:
-    """Upload a source document and stream SSE pipeline progress events."""
-    effective_tenant = resolve_tenant_id_for_admin(request, tenant_id)
-    resolved_primary_language = _resolve_primary_language(primary_language)
-    upload_svc = IngestUploadService(db, storage)
-    try:
-        upload_svc.validate_mode(mode)
-        sanitized_instructions = _resolve_ingestion_instructions(ingestion_instructions)
-        upload_svc.validate_ingest_metadata(
-            content_domain=content_domain,
-            assessment_mode=assessment_mode,
-        )
-        _, retired_ids = await upload_svc.retire_published_modules_if_new(
-            mode,
-            tenant_id=effective_tenant,
-        )
-        uploaded_by = resolve_spice_actor(request)
-        outcome = await upload_svc.ingest_one_uploaded_file(
-            file=file,
-            title=title,
-            params=IngestUploadParams(
-                content_domain=content_domain,
-                assessment_mode=assessment_mode,
-                authority_label=authority_label,
-                primary_language=resolved_primary_language,
-                uploaded_by=uploaded_by,
-                retired_ids=retired_ids,
-                ingestion_instructions=sanitized_instructions,
-            ),
-            override_duplicate=override_duplicate,
-            sync_published_visible=sync_published_visible,
-        )
-    except IngestValidationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-    if outcome.skipped is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=_duplicate_content_detail([outcome.skipped]),
-        )
-    ingested = outcome.ingested
-    assert ingested is not None
-    await db.commit()
-
-    enqueue_thumbnail(ingested, primary_language=resolved_primary_language, skip_merge=skip_merge)
-
-    return StreamingResponse(
-        IngestStreamService.pipeline_sse_lines(
-            source_document_id=ingested.source_document_id,
-            source_path=ingested.stored_path,
-            source_type=ingested.source_type,
-            primary_language=resolved_primary_language,
-            skip_merge=skip_merge,
-        ),
-        media_type="text/event-stream",
-    )
-
-
 @router.get("/ingest/by-document/{source_document_id}")
 async def get_ingest_status_by_document(
     source_document_id: uuid.UUID,
@@ -375,53 +281,5 @@ async def get_ingest_status_by_document(
     fusion_run = await state.find_active_fusion_run_for_document(source_document_id)
     if fusion_run is not None and fusion_run.id != run.id:
         payload["cross_source_fusion"] = await presenter.present_poll(fusion_run)
-    payload.update(await IngestStreamService.thumbnail_poll_fields(db, source_document_id, storage))
+    payload.update(await thumbnail_poll_fields(db, source_document_id, storage))
     return payload
-
-
-@router.get("/ingest/{run_id}")
-async def get_ingest_status(
-    run_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    state = RunStateService(db)
-    run = await state.get_run(run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail=f"ingestion_run {run_id} not found")
-    return await IngestionRunPresenter(db).present_poll(run)
-
-
-@router.post("/fusion", status_code=202)
-async def start_fusion(
-    request: FusionRequest,
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    """Trigger a cross-source fusion pass over the specified source documents."""
-    if len(request.source_document_ids) < 2:
-        raise HTTPException(
-            status_code=400,
-            detail="cross-source fusion requires at least two source_document_ids",
-        )
-    try:
-        await RunStateService(db).assert_no_active_fusion_overlap(request.source_document_ids)
-    except ConcurrentRunError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=f"source_document {exc.source_document_id} has an active ingest run",
-        ) from exc
-    except ConcurrentFusionRunError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=f"source_document {exc.source_document_id} has an active fusion run",
-        ) from exc
-
-    run_cross_source_fusion_task.delay({"source_document_ids": [str(d) for d in request.source_document_ids]})
-    return {
-        "status": "fusion_queued",
-        "source_document_ids": [str(d) for d in request.source_document_ids],
-        "note": (
-            "Fusion runs on the Celery worker. Inspect resulting modules via the admin "
-            "module-list endpoint; published rows with array_length(source_document_ids) "
-            ">= 2 are the fused outputs."
-        ),
-    }
