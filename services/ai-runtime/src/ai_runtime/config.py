@@ -7,10 +7,10 @@ from typing import Self
 
 from mc_contracts.internal_ai import AiProvider
 from mc_foundation.config import BaseAppSettings
-from pydantic import AliasChoices, Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import SettingsConfigDict
 
-_PLACEHOLDER_VALUES = frozenset({"replace-with-strong-internal-token", "dev-internal-token", "default=key"})
+_DEV_INTERNAL_TOKEN = "dev-internal-token"
 _DEPLOYED_ENVS = frozenset({"production", "staging"})
 
 
@@ -26,7 +26,7 @@ class Settings(BaseAppSettings):
     # ── Auth ─────────────────────────────────────────────────────────────────
     # Simple shared-secret token for internal service-to-service auth.
     # Platform sends X-Internal-Token header; we verify it here.
-    internal_token: SecretStr = SecretStr("")
+    internal_token: str = _DEV_INTERNAL_TOKEN
 
     # ── AI Provider ───────────────────────────────────────────────────────────
     # Single source of truth for generate / embed / transcribe routing.
@@ -40,15 +40,15 @@ class Settings(BaseAppSettings):
     # google_use_vertex=true ⇒ ADC via GOOGLE_APPLICATION_CREDENTIALS env var
     # plus google_cloud_project / google_cloud_location.
     # Otherwise the SDK falls back to api-key auth via google_api_key.
-    google_use_vertex: bool = False
-    google_cloud_project: str | None = None
+    google_use_vertex: bool = True
+    google_cloud_project: str | None = "microcoaching"
     google_cloud_location: str = "us-central1"
-    google_api_key: SecretStr = SecretStr("")
+    google_api_key: str = "default=key"
     # Base64-encoded service-account JSON. When set, forces Vertex mode and
     # builds credentials in-process (no GOOGLE_APPLICATION_CREDENTIALS file
     # needed). Standard pattern for passing GCP credentials in container
     # deployments where mounting a JSON file isn't ergonomic.
-    google_service_account_base64: SecretStr | None = None
+    google_service_account_base64: str | None = None
     google_embedding_model: str = "gemini-embedding-001"
     google_embedding_dimension: int = 768
 
@@ -83,16 +83,16 @@ class Settings(BaseAppSettings):
         if self.app_env not in _DEPLOYED_ENVS:
             return self
         errors: list[str] = []
-        internal_token = self.internal_token.get_secret_value().strip()
-        if not internal_token:
-            errors.append("INTERNAL_TOKEN must be configured in production")
-        if len(internal_token) < 32 or internal_token in _PLACEHOLDER_VALUES:
-            errors.append("INTERNAL_TOKEN must be at least 32 chars and not a placeholder")
-        google_api_key = self.google_api_key.get_secret_value().strip()
+        if self.internal_token == _DEV_INTERNAL_TOKEN:
+            errors.append("INTERNAL_TOKEN must not use the dev default in production")
         if (
             self.ai_provider == "google"
             and not self.google_use_vertex
-            and (not google_api_key or google_api_key in _PLACEHOLDER_VALUES)
+            and self.google_api_key
+            in {
+                "",
+                "default=key",
+            }
         ):
             errors.append("GOOGLE_API_KEY or Vertex credentials are required in production")
         if errors:

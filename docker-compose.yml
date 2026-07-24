@@ -93,7 +93,7 @@ services:
       redis_url: redis://redis:6379/0
       clickhouse_host: clickhouse
       ai_runtime_base_url: http://ai-runtime:8001
-      ai_runtime_token: ${AI_RUNTIME_TOKEN:?set AI_RUNTIME_TOKEN in .env}
+      ai_runtime_token: ${AI_RUNTIME_TOKEN:-dev-internal-token}
       ai_runtime_timeout_seconds: ${AI_RUNTIME_TIMEOUT_SECONDS:-600}
       ai_runtime_transcribe_timeout_seconds: ${AI_RUNTIME_TRANSCRIBE_TIMEOUT_SECONDS:-600}
       stage_d_published_merge_enabled: ${STAGE_D_PUBLISHED_MERGE_ENABLED:-true}
@@ -158,7 +158,7 @@ services:
       database_password: postgres
       redis_url: redis://redis:6379/0
       ai_runtime_base_url: http://ai-runtime:8001
-      ai_runtime_token: ${AI_RUNTIME_TOKEN:?set AI_RUNTIME_TOKEN in .env}
+      ai_runtime_token: ${AI_RUNTIME_TOKEN:-dev-internal-token}
       ai_runtime_timeout_seconds: ${AI_RUNTIME_TIMEOUT_SECONDS:-600}
       ai_runtime_transcribe_timeout_seconds: ${AI_RUNTIME_TRANSCRIBE_TIMEOUT_SECONDS:-600}
       stage_d_published_merge_enabled: ${STAGE_D_PUBLISHED_MERGE_ENABLED:-true}
@@ -221,7 +221,7 @@ services:
       redis_url: redis://redis:6379/0
       clickhouse_host: clickhouse
       ai_runtime_base_url: http://ai-runtime:8001
-      ai_runtime_token: ${AI_RUNTIME_TOKEN:?set AI_RUNTIME_TOKEN in .env}
+      ai_runtime_token: ${AI_RUNTIME_TOKEN:-dev-internal-token}
       chat_faq_lookback_days: ${CHAT_FAQ_LOOKBACK_DAYS:-90}
       chat_faq_min_occurrence_count: ${CHAT_FAQ_MIN_OCCURRENCE_COUNT:-3}
       chat_faq_min_question_length: ${CHAT_FAQ_MIN_QUESTION_LENGTH:-5}
@@ -261,7 +261,7 @@ services:
     ports:
       - "18001:8001"
     environment:
-      internal_token: ${AI_RUNTIME_TOKEN:?set AI_RUNTIME_TOKEN in .env}
+      internal_token: ${AI_RUNTIME_TOKEN:-dev-internal-token}
       ai_cloud_provider: ${AI_CLOUD_PROVIDER:-google}
       # ── Google: Vertex AI auth (preferred) ───────────────────────
       # When google_use_vertex=true the SDK uses ADC via the bind-mounted

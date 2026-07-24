@@ -21,7 +21,7 @@ from mc_contracts.internal_ai import (
 
 
 def _internal_headers() -> dict[str, str]:
-    return {"X-Internal-Token": get_settings().internal_token.get_secret_value()}
+    return {"X-Internal-Token": get_settings().internal_token}
 
 
 @pytest.fixture(autouse=True)

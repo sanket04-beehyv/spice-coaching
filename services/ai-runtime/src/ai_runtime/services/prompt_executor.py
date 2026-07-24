@@ -114,14 +114,9 @@ def _build_provider(provider_name: str) -> BaseProvider:
     timeout_seconds = settings.provider_timeout_seconds
     if provider_name == "google":
         service_account_info = None
-        sa_b64 = (
-            settings.google_service_account_base64.get_secret_value().strip()
-            if settings.google_service_account_base64 is not None
-            else ""
-        )
-        if sa_b64:
+        if settings.google_service_account_base64:
             try:
-                decoded = base64.b64decode(sa_b64).decode("utf-8")
+                decoded = base64.b64decode(settings.google_service_account_base64).decode("utf-8")
                 service_account_info = json.loads(decoded)
             except Exception as exc:
                 logger.error("Failed to decode google_service_account_base64: %s", exc)
@@ -137,7 +132,7 @@ def _build_provider(provider_name: str) -> BaseProvider:
                 timeout_seconds=timeout_seconds,
             )
         return GoogleProvider(
-            api_key=settings.google_api_key.get_secret_value(),
+            api_key=settings.google_api_key,
             embedding_dimension=settings.google_embedding_dimension,
             timeout_seconds=timeout_seconds,
         )
