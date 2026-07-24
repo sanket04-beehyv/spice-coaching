@@ -17,9 +17,10 @@ from platform_service.config import get_settings
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.deps import get_db, get_object_storage_client
 from platform_service.services.object_storage import StoredObject
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.api.conftest import wipe_api_tables
 from tests.conftest import platform_path, requires_db
 
 pytestmark = [requires_db, pytest.mark.asyncio]
@@ -31,12 +32,8 @@ _DUPLICATE_PDF_SHA256 = hashlib.sha256(_DUPLICATE_PDF_BYTES).hexdigest()
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_ingest_tables(db_session: AsyncSession) -> AsyncIterator[None]:
+    await wipe_api_tables(db_session)
     yield
-    await db_session.rollback()
-    await db_session.execute(
-        text("TRUNCATE attribution_event, file_upload, source_document RESTART IDENTITY CASCADE")
-    )
-    await db_session.commit()
 
 
 @pytest_asyncio.fixture

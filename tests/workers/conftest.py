@@ -37,15 +37,21 @@ def patch_session_local(db_session: AsyncSession):
     async def _factory():
         # Disable internal commit so the test's rollback fixture cleans up.
         original_commit = db_session.commit
+        original_rollback = db_session.rollback
 
         async def _commit_as_flush() -> None:
             await db_session.flush()
 
+        async def _rollback_noop() -> None:
+            return None
+
         db_session.commit = _commit_as_flush  # type: ignore[method-assign]
+        db_session.rollback = _rollback_noop  # type: ignore[method-assign]
         try:
             yield db_session
         finally:
             db_session.commit = original_commit  # type: ignore[method-assign]
+            db_session.rollback = original_rollback  # type: ignore[method-assign]
 
     with patch.object(module_completion_worker, "SessionLocal", _factory):
         yield

@@ -459,10 +459,9 @@ class TestCountModules:
         reviewed = (
             (
                 await db_session.execute(
-                    select(
-                        ModuleRepository.__init__.__globals__["Module"]
-                    ).where(  # use Module from the repo's namespace
-                        Module.description_localized["bn"] == marker, Module.clinically_reviewed.is_(True)
+                    select(Module).where(
+                        Module.description_localized["bn"].astext == marker,
+                        Module.clinically_reviewed.is_(True),
                     )
                 )
             )
@@ -473,7 +472,8 @@ class TestCountModules:
             (
                 await db_session.execute(
                     select(Module).where(
-                        Module.description_localized["bn"] == marker, Module.clinically_reviewed.is_(False)
+                        Module.description_localized["bn"].astext == marker,
+                        Module.clinically_reviewed.is_(False),
                     )
                 )
             )
@@ -551,7 +551,7 @@ class TestListActiveModulesForMerge:
 
     async def test_excludes_modules_with_empty_cards(self, db_session: AsyncSession) -> None:
         repo = ModuleRepository(db_session)
-        await _make_module(
+        empty = await _make_module(
             db_session,
             title_localized={"bn": "no cards"},
             module_json={"cards": []},
@@ -559,7 +559,7 @@ class TestListActiveModulesForMerge:
         )
         await db_session.commit()
         active = await repo.list_active_modules_for_merge()
-        assert all((m.module_json or {}).get("cards") for m in active)
+        assert empty.id not in {m.id for m in active}
 
 
 # Suppress unused-import lint when only referenced via select(...)

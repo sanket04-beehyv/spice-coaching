@@ -9,20 +9,17 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from platform_service.db.repositories.chat_feedback_summary_repository import ChatFeedbackSummaryRepository
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe(db_session: AsyncSession) -> AsyncIterator[None]:
+    await truncate_tables(db_session, "chat_feedback_summary")
     yield
-    await db_session.rollback()
-    await db_session.execute(text("TRUNCATE chat_feedback_summary RESTART IDENTITY CASCADE"))
-    await db_session.commit()
 
 
 class TestChatFeedbackSummaryRepository:

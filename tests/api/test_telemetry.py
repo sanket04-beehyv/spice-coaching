@@ -13,6 +13,7 @@ from fastapi import APIRouter, FastAPI
 from httpx import ASGITransport, AsyncClient
 from mc_contracts.enums import CoachingEventType, EventFamily
 from mc_contracts.telemetry import TelemetryEvent
+from platform_service.api import telemetry
 from platform_service.api.telemetry import (
     _event_to_row,
     _resolve_timestamp_utc,
@@ -47,7 +48,7 @@ def _sample_batch_payload() -> dict:
 
 
 @pytest_asyncio.fixture
-async def app() -> AsyncIterator[FastAPI]:
+async def app(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FastAPI]:
     app_obj = FastAPI()
     api_router = APIRouter(prefix=get_settings().api_root_path_normalized)
     api_router.include_router(telemetry_router)
@@ -55,6 +56,7 @@ async def app() -> AsyncIterator[FastAPI]:
 
     ch_mock = MagicMock()
     ch_mock.insert_coaching_events = AsyncMock()
+    monkeypatch.setattr(telemetry, "get_clickhouse_client", lambda: ch_mock)
     app_obj.dependency_overrides[get_clickhouse_client] = lambda: ch_mock
 
     yield app_obj
@@ -113,8 +115,16 @@ class TestResolveTimestampUtc:
 
 class TestTelemetryIngest:
     async def test_accepts_valid_batch(self, app: FastAPI, client: AsyncClient) -> None:
-        redis_mock = AsyncMock()
+        redis_mock = MagicMock()
+        redis_mock.pipeline.return_value = MagicMock(
+            rpush=MagicMock(),
+            ltrim=MagicMock(),
+            llen=MagicMock(),
+            execute=AsyncMock(return_value=(None, None, 0)),
+        )
         redis_mock.aclose = AsyncMock()
+        redis_mock.rpush = AsyncMock()
+        redis_mock.llen = AsyncMock(return_value=0)
         body = _sample_batch_payload()
         ch_mock = app.dependency_overrides[get_clickhouse_client]()
 
@@ -145,8 +155,16 @@ class TestTelemetryIngest:
         assert rows[0][_TIMESTAMP_UTC_COLUMN_INDEX] == body["events"][0]["timestamp_local"]
 
     async def test_quiz_mode_only_enqueues_module_quiz_attempted(self, client: AsyncClient) -> None:
-        redis_mock = AsyncMock()
+        redis_mock = MagicMock()
+        redis_mock.pipeline.return_value = MagicMock(
+            rpush=MagicMock(),
+            ltrim=MagicMock(),
+            llen=MagicMock(),
+            execute=AsyncMock(return_value=(None, None, 0)),
+        )
         redis_mock.aclose = AsyncMock()
+        redis_mock.rpush = AsyncMock()
+        redis_mock.llen = AsyncMock(return_value=0)
         module_id = str(uuid4())
         quiz_id = str(uuid4())
         delivered_id = str(uuid4())
@@ -201,8 +219,16 @@ class TestTelemetryIngest:
         assert job["event_type"] == CoachingEventType.MODULE_QUIZ_ATTEMPTED.value
 
     async def test_reports_duplicates(self, client: AsyncClient) -> None:
-        redis_mock = AsyncMock()
+        redis_mock = MagicMock()
+        redis_mock.pipeline.return_value = MagicMock(
+            rpush=MagicMock(),
+            ltrim=MagicMock(),
+            llen=MagicMock(),
+            execute=AsyncMock(return_value=(None, None, 0)),
+        )
         redis_mock.aclose = AsyncMock()
+        redis_mock.rpush = AsyncMock()
+        redis_mock.llen = AsyncMock(return_value=0)
         dup_id = str(uuid4())
         with (
             patch("platform_service.api.telemetry.get_redis_client", return_value=redis_mock),
@@ -227,8 +253,16 @@ class TestTelemetryIngest:
 
 class TestModuleRequestedIngest:
     async def test_enqueues_when_module_id_present(self, app: FastAPI, client: AsyncClient) -> None:
-        redis_mock = AsyncMock()
+        redis_mock = MagicMock()
+        redis_mock.pipeline.return_value = MagicMock(
+            rpush=MagicMock(),
+            ltrim=MagicMock(),
+            llen=MagicMock(),
+            execute=AsyncMock(return_value=(None, None, 0)),
+        )
         redis_mock.aclose = AsyncMock()
+        redis_mock.rpush = AsyncMock()
+        redis_mock.llen = AsyncMock(return_value=0)
         module_id = str(uuid4())
         event_id = str(uuid4())
         body = {
@@ -280,8 +314,16 @@ class TestModuleRequestedIngest:
         ch_mock.insert_coaching_events.assert_awaited_once()
 
     async def test_enqueues_when_only_requested_module_name(self, client: AsyncClient) -> None:
-        redis_mock = AsyncMock()
+        redis_mock = MagicMock()
+        redis_mock.pipeline.return_value = MagicMock(
+            rpush=MagicMock(),
+            ltrim=MagicMock(),
+            llen=MagicMock(),
+            execute=AsyncMock(return_value=(None, None, 0)),
+        )
         redis_mock.aclose = AsyncMock()
+        redis_mock.rpush = AsyncMock()
+        redis_mock.llen = AsyncMock(return_value=0)
         event_id = str(uuid4())
         body = {
             "events": [
@@ -320,8 +362,16 @@ class TestModuleRequestedIngest:
         assert job["requested_module_name"] == "Custom Module"
 
     async def test_skips_enqueue_when_neither_identity(self, client: AsyncClient) -> None:
-        redis_mock = AsyncMock()
+        redis_mock = MagicMock()
+        redis_mock.pipeline.return_value = MagicMock(
+            rpush=MagicMock(),
+            ltrim=MagicMock(),
+            llen=MagicMock(),
+            execute=AsyncMock(return_value=(None, None, 0)),
+        )
         redis_mock.aclose = AsyncMock()
+        redis_mock.rpush = AsyncMock()
+        redis_mock.llen = AsyncMock(return_value=0)
         event_id = str(uuid4())
         body = {
             "events": [

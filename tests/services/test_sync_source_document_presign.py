@@ -12,10 +12,9 @@ from platform_service.config import Settings
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.services.object_storage import ObjectNotFoundError, PresignedObjectUrl
 from platform_service.services.sync_service import SyncService
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
@@ -26,10 +25,8 @@ _STORAGE_PATH = f"{_BUCKET}/{_OBJECT_KEY}"
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_source_documents(db_session: AsyncSession) -> AsyncIterator[None]:
+    await truncate_tables(db_session, "source_document")
     yield
-    await db_session.rollback()
-    await db_session.execute(text("TRUNCATE source_document RESTART IDENTITY CASCADE"))
-    await db_session.commit()
 
 
 async def _seed_doc(

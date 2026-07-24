@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -39,7 +39,8 @@ async def app() -> AsyncIterator[FastAPI]:
         ]
     )
     app_obj.dependency_overrides[get_clickhouse_client] = lambda: ch_mock
-    yield app_obj
+    with patch("platform_service.api.dashboard.get_clickhouse_client", return_value=ch_mock):
+        yield app_obj
     app_obj.dependency_overrides.clear()
 
 

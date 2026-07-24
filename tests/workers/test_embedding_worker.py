@@ -28,15 +28,16 @@ import pytest
 import pytest_asyncio
 from platform_service.config import get_settings
 from platform_service.db.models.module import Module
+from platform_service.db.models.module_card import ModuleCard
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.workers.embedding_worker import (
     _module_text_for_embedding,
     generate_embedding_for_module,
 )
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 # ─── Pure-unit: text composition ────────────────────────────────────────────
 
@@ -52,8 +53,8 @@ def _make_module_obj(
     return Module(
         module_family_id=uuid4(),
         version=1,
-        title_localized=title_localized or {"bn": "শিরোনাম", "en": "Title"},
-        description_localized=description_localized or {"bn": "বর্ণনা"},
+        title_localized=title_localized if title_localized is not None else {"bn": "শিরোনাম", "en": "Title"},
+        description_localized=description_localized if description_localized is not None else {"bn": "বর্ণনা"},
         domain="rmnch",
         module_type="refresher",
         module_json={"cards": cards} if cards is not None else None,
@@ -67,17 +68,17 @@ class TestModuleTextForEmbedding:
             description_localized={"bn": "bn-desc"},
             cards=[],
         )
-        text = _module_text_for_embedding(m)
-        # Order matters: bn → en → desc.
+        text = _module_text_for_embedding(m, [])
+        # Search text uses the deployment primary locale, then description.
         idx_bn = text.index("bn-title")
-        idx_en = text.index("en-title")
         idx_desc = text.index("bn-desc")
-        assert idx_bn < idx_en < idx_desc
+        assert idx_bn < idx_desc
+        assert "en-title" not in text
 
     def test_prosemirror_body_fields_use_plain_text(self) -> None:
         m = _make_module_obj(
-            title_localized=None,
-            description_localized=None,
+            title_localized={},
+            description_localized={},
             cards=[
                 {
                     "title": {"bn": "card-title-bn", "en": "card-title-en"},
@@ -104,7 +105,7 @@ class TestModuleTextForEmbedding:
                 }
             ],
         )
-        text = _module_text_for_embedding(m)
+        text = _module_text_for_embedding(m, m.module_json["cards"])
         assert "rich-body-bn" in text
         assert "rich-body-en" in text
         assert "'type': 'doc'" not in text
@@ -133,15 +134,15 @@ class TestModuleTextForEmbedding:
                 }
             ],
         )
-        text = _module_text_for_embedding(m)
+        text = _module_text_for_embedding(m, m.module_json["cards"])
         assert "block-list-bn" in text
         assert "block-list-en" in text
         assert "'type': 'paragraph'" not in text
 
     def test_card_fields_appended_in_field_order(self) -> None:
         m = _make_module_obj(
-            title_localized=None,
-            description_localized=None,
+            title_localized={},
+            description_localized={},
             cards=[
                 {
                     "title": {"bn": "card-title-bn", "en": "card-title-en"},
@@ -150,7 +151,7 @@ class TestModuleTextForEmbedding:
                 }
             ],
         )
-        text = _module_text_for_embedding(m)
+        text = _module_text_for_embedding(m, m.module_json["cards"])
         # Field order per the implementation: primary title → body → next_action.
         positions = [
             text.index("card-title-bn"),
@@ -159,15 +160,15 @@ class TestModuleTextForEmbedding:
         ]
         assert positions == sorted(positions)
         assert "card-title-en" not in text
-        assert "body-en" not in text
+        assert "body-en" in text
 
     def test_skips_empty_card_fields(self) -> None:
         m = _make_module_obj(
-            title_localized=None,
-            description_localized=None,
+            title_localized={},
+            description_localized={},
             cards=[{"title": {"bn": "only-this"}}],
         )
-        text = _module_text_for_embedding(m)
+        text = _module_text_for_embedding(m, m.module_json["cards"])
         # Only the populated field shows up.
         assert text.strip() == "only-this"
 
@@ -177,19 +178,19 @@ class TestModuleTextForEmbedding:
             description_localized=None,
             cards=["not a dict", {"title": {"bn": "ok"}}],  # type: ignore[list-item]
         )
-        text = _module_text_for_embedding(m)
+        text = _module_text_for_embedding(m, m.module_json["cards"])
         assert "ok" in text
         assert "t" in text
 
     def test_handles_null_module_json(self) -> None:
         m = _make_module_obj(title_localized={"bn": "t"}, cards=None)
         m.module_json = None
-        text = _module_text_for_embedding(m)
+        text = _module_text_for_embedding(m, [])
         assert "t" in text
 
     def test_returns_empty_string_for_empty_module(self) -> None:
-        m = _make_module_obj(title_localized=None, description_localized=None, cards=[])
-        text = _module_text_for_embedding(m)
+        m = _make_module_obj(title_localized={}, description_localized={}, cards=[])
+        text = _module_text_for_embedding(m, [])
         assert text == ""
 
     def test_text_concat_is_stable_for_cache_hashability(self) -> None:
@@ -204,7 +205,9 @@ class TestModuleTextForEmbedding:
             title_localized={"bn": "t"},
             cards=[{"title": {"bn": "a"}}, {"title": {"bn": "b"}}],
         )
-        assert _module_text_for_embedding(m1) == _module_text_for_embedding(m2)
+        assert _module_text_for_embedding(m1, m1.module_json["cards"]) == _module_text_for_embedding(
+            m2, m2.module_json["cards"]
+        )
 
 
 # ─── DB-backed: end-to-end with mocked ai-runtime ───────────────────────────
@@ -215,12 +218,8 @@ pytestmark_db = [requires_db, pytest.mark.asyncio]
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
+    await truncate_tables(db_session, "module_quiz_question, module, module_family")
     yield
-    await db_session.rollback()
-    await db_session.execute(
-        text("TRUNCATE module_quiz_question, module, module_family RESTART IDENTITY CASCADE")
-    )
-    await db_session.commit()
 
 
 @pytest_asyncio.fixture
@@ -243,6 +242,14 @@ async def seeded_module_id(db_session: AsyncSession) -> UUID:
     )
     db_session.add(module)
     await db_session.flush()
+    db_session.add(
+        ModuleCard(
+            module_id=module.id,
+            card_order=1,
+            title_localized={"bn": "C1"},
+            body_localized={"bn": "Body of card 1"},
+        )
+    )
     fam.current_published_module_id = module.id
     await db_session.commit()
     return module.id
@@ -333,6 +340,16 @@ class TestHappyPath:
         )
         db_session.add(module)
         await db_session.flush()
+        for order, card in enumerate(module.module_json["cards"], start=1):
+            db_session.add(
+                ModuleCard(
+                    module_id=module.id,
+                    card_order=order,
+                    title_localized=card["title"],
+                    body_localized=card.get("body"),
+                    next_action_localized=card.get("next_action"),
+                )
+            )
         await db_session.commit()
 
         mock_embed.return_value = [[0.0] * _expected_dim()]
@@ -341,7 +358,6 @@ class TestHappyPath:
         text_in = mock_embed.call_args.args[0][0]
         for fragment in (
             "title-bn",
-            "title-en",
             "desc-bn",
             "c1-title",
             "c1-body",

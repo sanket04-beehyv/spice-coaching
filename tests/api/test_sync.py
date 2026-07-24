@@ -12,13 +12,13 @@ from httpx import ASGITransport, AsyncClient
 from platform_service.api.sync import router as sync_router
 from platform_service.config import get_settings
 from platform_service.deps import get_db, get_object_storage_client
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.api.conftest import (
     _mock_storage,
     _seed_module,
     _seed_source_document,
+    wipe_api_tables,
 )
 from tests.conftest import platform_path, requires_db
 
@@ -27,16 +27,8 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
+    await wipe_api_tables(db_session)
     yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE module_quiz_question, module, module_family, "
-            "content_block, source_page, source_document "
-            "RESTART IDENTITY CASCADE"
-        )
-    )
-    await db_session.commit()
 
 
 class _FakeStorage:

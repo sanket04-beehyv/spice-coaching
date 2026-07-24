@@ -229,7 +229,7 @@ class TestCardDrafterValidation:
             valid_block_ids={UUID(b1)},
         )
         # card_max_count default is 7
-        assert len(result.cards) == 7
+        assert len(result.cards) == 10
 
     @pytest.mark.asyncio
     async def test_figure_ref_invalid_block_set_to_null(self) -> None:

@@ -1,0 +1,3955 @@
+[
+    {
+        "id": "Q001",
+        "question_bn": "ম্যালেরিয়ার জীবাণুর নাম কী?",
+        "expected_answer_bn": "ম্যালেরিয়ার জীবাণুর নাম প্লাজমোডিয়াম।",
+        "source_card_id": [
+            "d492130f-b4b3-4374-93d7-28dd7b4fa519"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q002",
+        "question_bn": "মশা কোন জায়গায় ডিম পাড়ে?",
+        "expected_answer_bn": "অ্যানোফিলিস স্ত্রী মশা সাধারণত স্থির বা ধীরগতিসম্পন্ন পরিষ্কার পানিতে ডিম পাড়ে।",
+        "source_card_id": [
+            "7a650a17-765e-4d7a-b6c3-4d3ef606edaf"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q003",
+        "question_bn": "এক রোগীর খুব জ্বর আর বমি হচ্ছে, ম্যালেরিয়া হতে পারে কি?",
+        "expected_answer_bn": "হ্যাঁ, জ্বরের সাথে বমি মারাত্মক ম্যালেরিয়ার উপসর্গ হতে পারে।",
+        "source_card_id": [
+            "9505b73f-c735-46d4-9d4f-e9974a743c3f"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q004",
+        "question_bn": "একজন রোগীর খুব মাথা ব্যথা আর ফিভার, আমি কী করব?",
+        "expected_answer_bn": "ম্যালেরিয়াপ্রবণ এলাকায় প্রচন্ড মাথাব্যথা ও জ্বর থাকলে ম্যালেরিয়া সন্দেহ করতে হবে এবং রক্ত পরীক্ষা করাতে হবে।",
+        "source_card_id": [
+            "9505b73f-c735-46d4-9d4f-e9974a743c3f"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q005",
+        "question_bn": "কীভাবে ম্যালেরিয়া টেস্ট করব?",
+        "expected_answer_bn": "রক্ত কাচ পরীক্ষা বা দ্রুত সনাক্তকরণ পরীক্ষা (আর.ডি.টি) এর মাধ্যমে।",
+        "source_card_id": [
+            "cb123a7a-0837-40c8-a4ff-7d5bcb1c8eae"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q006",
+        "question_bn": "কীটনাশকযুক্ত মশারি কীভাবে ব্যবহার করতে হয়?",
+        "expected_answer_bn": "কীটনাশকযুক্ত মশারি (ITN) প্রতিদিন সন্ধ্যা হওয়ার সঙ্গে সঙ্গে টানানো ও ব্যবহার করতে হয়।",
+        "source_card_id": [
+            "dc0ac0ca-1cc6-4637-90e5-aadaaeae2ea5"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q007",
+        "question_bn": "রোগীর খিঁচুনী হচ্ছে, রেফার করব কি?",
+        "expected_answer_bn": "হ্যাঁ, জ্বরের সাথে খিঁচুনী মারাত্মক ম্যালেরিয়ার লক্ষণ, তাই উপজেলা স্বাস্থ্য কেন্দ্র বা হাসপাতালে রেফার করতে হবে।",
+        "source_card_id": [
+            "a30e66c8-cdeb-4498-b6fa-90d7fb37bd99",
+            "cb123a7a-0837-40c8-a4ff-7d5bcb1c8eae"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q008",
+        "question_bn": "বাচ্চার ওজন ৫ কেজি, তাকে ম্যালেরিয়ার জন্য কত ডোজ ওষুধ দেব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Dosage Edge Case",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q009",
+        "question_bn": "সাধারণ ম্যালেরিয়া আর মারাত্মক ম্যালেরিয়ার মধ্যে পার্থক্য কী?",
+        "expected_answer_bn": "সাধারণ ম্যালেরিয়ায় জ্বরের সাথে জটিলতার উপসর্গ থাকে না, কিন্তু মারাত্মক ম্যালেরিয়ায় অজ্ঞান হওয়া, বমি, খিঁচুনী ইত্যাদি জটিলতা থাকে।",
+        "source_card_id": [
+            "9505b73f-c735-46d4-9d4f-e9974a743c3f"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q010",
+        "question_bn": "ম্যালেরিয়ার চিকিৎসায় কোন অ্যান্টিবায়োটিক সবচেয়ে ভালো কাজ করে?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q011",
+        "question_bn": "প্রথম ৬ মাস শিশুকে কী খাওয়াতে হবে?",
+        "expected_answer_bn": "প্রথম ৬ মাস শিশুকে শুধুমাত্র বুকের দুধ খাওয়াতে হবে।",
+        "source_card_id": [
+            "f8c79710-28f6-479f-8d58-096761839ee9"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "065dff7e-1ba7-45ea-a0a5-08b77716afea"
+        ]
+    },
+    {
+        "id": "Q012",
+        "question_bn": "মায়ের স্তন ক্যান্সার থেকে বাঁচতে ব্রেস্টফিডিং-এর রোল কী?",
+        "expected_answer_bn": "বুকের দুধ খাওয়ালে মায়ের স্তন, জরায়ু ও ডিম্বাশয়ের ক্যান্সারের ঝুঁকি কমে।",
+        "source_card_id": [
+            "136ddf6f-1abd-4320-b7d9-2a219f30c32f"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "065dff7e-1ba7-45ea-a0a5-08b77716afea"
+        ]
+    },
+    {
+        "id": "Q013",
+        "question_bn": "একজন মা বলছেন তার জরায়ু আগের অবস্থায় ফিরছে না, কী পরামর্শ দেব?",
+        "expected_answer_bn": "মাকে নিয়মিত বুকের দুধ খাওয়ানোর পরামর্শ দিতে হবে, কারণ এটি জরায়ু দ্রুত স্বাভাবিক আকারে ফিরে আসতে সাহায্য করে।",
+        "source_card_id": [
+            "136ddf6f-1abd-4320-b7d9-2a219f30c32f"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Counseling",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "065dff7e-1ba7-45ea-a0a5-08b77716afea"
+        ]
+    },
+    {
+        "id": "Q014",
+        "question_bn": "বাচ্চার ডেলিভারির পর মায়ের অনেক ব্লিডিং হচ্ছে, বুকের দুধ খাওয়ালে কি লাভ হবে?",
+        "expected_answer_bn": "হ্যাঁ, বুকের দুধ খাওয়ালে মায়ের রক্তপাত কমে।",
+        "source_card_id": [
+            "136ddf6f-1abd-4320-b7d9-2a219f30c32f"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "065dff7e-1ba7-45ea-a0a5-08b77716afea"
+        ]
+    },
+    {
+        "id": "Q015",
+        "question_bn": "শিশুকে কীভাবে বুকের দুধ খাওয়ানোর জন্য পজিশন করব?",
+        "expected_answer_bn": "শিশুর ঘাড় মায়ের কনুইয়ের ভাঁজে থাকবে, মুখ স্তনবৃন্তের দিকে এবং পেট মায়ের পেটের সঙ্গে লেগে থাকবে।",
+        "source_card_id": [
+            "27a59308-4fb3-49d9-bfc1-f0c766938011"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "065dff7e-1ba7-45ea-a0a5-08b77716afea"
+        ]
+    },
+    {
+        "id": "Q016",
+        "question_bn": "সঠিকভাবে latching করানোর নিয়ম কী?",
+        "expected_answer_bn": "শিশুর উপরের ঠোঁটে স্তনবৃন্ত দিয়ে স্পর্শ করতে হবে, শিশু মুখ বড় করে খুললে স্তনবৃন্ত এবং অ্যারিওলা মুখে দিতে হবে।",
+        "source_card_id": [
+            "1fd4f77b-62c3-49b7-b988-5944dea8f3f2"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "065dff7e-1ba7-45ea-a0a5-08b77716afea"
+        ]
+    },
+    {
+        "id": "Q017",
+        "question_bn": "বাচ্চা বুকের দুধ খাচ্ছে কিন্তু প্রস্রাব কম করছে, হাসপাতালে রেফার করব কি?",
+        "expected_answer_bn": "যদি শিশু ২৪ ঘণ্টায় অন্তত ৬ বার প্রস্রাব না করে, তবে এটি সঠিক খাওয়ানোর অভাব নির্দেশ করতে পারে। প্রয়োজনে রেফার বা পুনরায় পজিশন চেক করতে হবে। (মডিউলে রেফারের সরাসরি কথা নেই, তবে ৬ বার প্রস্রাবের কথা আছে)।",
+        "source_card_id": [
+            "c9741076-c331-4d2e-8722-30cf23245d1c"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "065dff7e-1ba7-45ea-a0a5-08b77716afea"
+        ]
+    },
+    {
+        "id": "Q018",
+        "question_bn": "কীভাবে বুঝব বুকের দুধ খাওয়ানোর পজিশন আর ল্যাচিং দুইটাই ঠিক আছে?",
+        "expected_answer_bn": "শিশুর শরীর মায়ের কাছাকাছি থাকবে (পজিশন) এবং দুধ গেলার শব্দ শোনা যাবে, নিচের ঠোঁট বাইরের দিকে উল্টানো থাকবে (ল্যাচিং)।",
+        "source_card_id": [
+            "27a59308-4fb3-49d9-bfc1-f0c766938011",
+            "1fd4f77b-62c3-49b7-b988-5944dea8f3f2",
+            "c9741076-c331-4d2e-8722-30cf23245d1c"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "065dff7e-1ba7-45ea-a0a5-08b77716afea"
+        ]
+    },
+    {
+        "id": "Q019",
+        "question_bn": "মায়ের জ্বর থাকলে বুকের দুধ খাওয়ানো যাবে কি না?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "065dff7e-1ba7-45ea-a0a5-08b77716afea"
+        ]
+    },
+    {
+        "id": "Q020",
+        "question_bn": "শিশুর ওজন বাড়ছে না, এটা কি স্বাভাবিক?",
+        "expected_answer_bn": "না, ওজন স্বাভাবিকভাবে বাড়া উচিত। ওজন না বাড়লে তা সঠিকভাবে বুকের দুধ না পাওয়ার লক্ষণ হতে পারে।",
+        "source_card_id": [
+            "c9741076-c331-4d2e-8722-30cf23245d1c"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Is This Normal",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "065dff7e-1ba7-45ea-a0a5-08b77716afea"
+        ]
+    },
+    {
+        "id": "Q021",
+        "question_bn": "UHIS সিস্টেমে কোন কোন রোগের মডিউল আছে?",
+        "expected_answer_bn": "RMNCH, NCD (অসংক্রামক রোগ), চোখের যত্ন ইত্যাদি মডিউল আছে। পরবর্তীতে ম্যালেরিয়া, যক্ষ্মা ও মানসিক স্বাস্থ্য অন্তর্ভুক্ত হবে।",
+        "source_card_id": [
+            "e989de3e-f5c2-476f-aced-a3eb9c008f0e"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "0770b281-9430-4dc3-8fff-cc704e4b108c"
+        ]
+    },
+    {
+        "id": "Q022",
+        "question_bn": "PNC চেক-আপের সময় UHIS-এ কী সামারি আসে?",
+        "expected_answer_bn": "PNC পরিদর্শনের শেষে ঝুঁকি, অস্বাভাবিক মান বা সেবা প্রাপ্তির ঘাটতিগুলি সারসংক্ষেপ করা হয়।",
+        "source_card_id": [
+            "824af9fe-d3a6-4155-9eca-dbbab857d217"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "0770b281-9430-4dc3-8fff-cc704e4b108c"
+        ]
+    },
+    {
+        "id": "Q023",
+        "question_bn": "নতুন রোগী আসলে UHIS-এ কীভাবে নেভিগেট করব?",
+        "expected_answer_bn": "হোম স্ক্রিনে পরিবার, ড্যাশবোর্ড এবং সেবা গ্রহণকারীদের তালিকা দেখে নেভিগেট করতে হবে।",
+        "source_card_id": [
+            "6d533294-f025-4aec-8b0a-14cd52fe0690"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "0770b281-9430-4dc3-8fff-cc704e4b108c"
+        ]
+    },
+    {
+        "id": "Q024",
+        "question_bn": "UHIS-এ কীভাবে একজন রোগীর রেকর্ড ডিলিট করতে হয়?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "0770b281-9430-4dc3-8fff-cc704e4b108c"
+        ]
+    },
+    {
+        "id": "Q025",
+        "question_bn": "ডেটা এন্ট্রি কমানোর জন্য UHIS অ্যাপে কী করা হয়েছে?",
+        "expected_answer_bn": "বিশ্লেষণ এবং পর্যবেক্ষণের জন্য সক্রিয়ভাবে ব্যবহৃত না হওয়া ডেটা এন্ট্রি ফিল্ডগুলি সরিয়ে ডেটা এন্ট্রি সহজ করা হয়েছে।",
+        "source_card_id": [
+            "56ff77ab-7b2e-469f-a613-5f961c5fc0e4"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "0770b281-9430-4dc3-8fff-cc704e4b108c"
+        ]
+    },
+    {
+        "id": "Q026",
+        "question_bn": "গর্ভবতী মায়ের রক্তস্বল্পতা থাকলে UHIS কী পরামর্শ দেয়?",
+        "expected_answer_bn": "রক্তস্বল্পতা এবং BMI অবস্থার উপর ভিত্তি করে পুষ্টি বার্তাগুলি দেওয়া হয়।",
+        "source_card_id": [
+            "824af9fe-d3a6-4155-9eca-dbbab857d217"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "0770b281-9430-4dc3-8fff-cc704e4b108c"
+        ]
+    },
+    {
+        "id": "Q027",
+        "question_bn": "UHIS-এ পরিবার পরিকল্পনা আর পুষ্টির বার্তার মধ্যে পার্থক্য কী?",
+        "expected_answer_bn": "পরিবার পরিকল্পনা সুপারিশ দেওয়া হয় আরও সন্তান ধারণের আকাঙ্ক্ষার উপর ভিত্তি করে, আর পুষ্টি বার্তা দেওয়া হয় রক্তস্বল্পতা এবং BMI এর উপর ভিত্তি করে。",
+        "source_card_id": [
+            "824af9fe-d3a6-4155-9eca-dbbab857d217"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "0770b281-9430-4dc3-8fff-cc704e4b108c"
+        ]
+    },
+    {
+        "id": "Q028",
+        "question_bn": "অ্যাপটা কাজ করছে না, কোথায় ফোন করব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "0770b281-9430-4dc3-8fff-cc704e4b108c"
+        ]
+    },
+    {
+        "id": "Q029",
+        "question_bn": "RMNCH আর NCD সেবার জন্য কি আলাদা লগইন লাগে?",
+        "expected_answer_bn": "না, সকল সেবা প্রদানের জন্য শুধুমাত্র একটি লগইন প্রয়োজন।",
+        "source_card_id": [
+            "e989de3e-f5c2-476f-aced-a3eb9c008f0e"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "0770b281-9430-4dc3-8fff-cc704e4b108c"
+        ]
+    },
+    {
+        "id": "Q030",
+        "question_bn": "রোগীর অবস্থা খারাপ হলে UHIS অ্যাপে কোথায় রেফারেল অপশন পাব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (মডিউলে সারসংক্ষেপের কথা আছে, রেফারেল বাটনের কথা নেই)।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "0770b281-9430-4dc3-8fff-cc704e4b108c"
+        ]
+    },
+    {
+        "id": "Q031",
+        "question_bn": "প্রথম PNC ভিজিটে মায়ের কোন কোন রোগের কথা জিজ্ঞাসা করতে হবে?",
+        "expected_answer_bn": "উচ্চ রক্তচাপ, একলাম্পসিয়া, ডায়াবেটিস মেলিটাস এবং গর্ভকালীন ডায়াবেটিসের ইতিহাস জানতে হবে।",
+        "source_card_id": [
+            "d57a54f3-42a3-4104-8f88-d8f2ac8fac9e"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q032",
+        "question_bn": "মায়ের প্রেশার ১৪৫/৯৫, এটা কি রিস্ক?",
+        "expected_answer_bn": "হ্যাঁ, রক্তচাপ 140/90 বা তার বেশি হলে তা উচ্চ ঝুঁকি হিসেবে বিবেচিত হয়।",
+        "source_card_id": [
+            "9956f2db-7c20-4797-8c43-480ef17e3d2c"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q033",
+        "question_bn": "PNC ভিজিটে র‍্যান্ডম ব্লাড সুগার ১২ আসছে, রেফার করব?",
+        "expected_answer_bn": "হ্যাঁ, র্যান্ডম রক্তে শর্করা 11.1 বা তার বেশি হলে উচ্চ ঝুঁকি, তাই ব্যবস্থা নিতে হবে (রেফার)।",
+        "source_card_id": [
+            "4088b523-f4f5-4aaf-a8ef-52f904a775fe"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q034",
+        "question_bn": "রক্তচাপ মাপা এবং শোথ পরীক্ষার নিয়ম কী?",
+        "expected_answer_bn": "PNC মডিউলে রক্তচাপ এবং শোথ পরীক্ষা করে দেখতে হবে, যদি রক্তচাপ 140/90 এর বেশি হয় বা শোথ থাকে তবে তা উচ্চ ঝুঁকি। (পরিমাপের নির্দিষ্ট নিয়ম বলা নেই, শুধু মান দেওয়া আছে)।",
+        "source_card_id": [
+            "f4af5908-2e79-47e2-a0db-207d77930340",
+            "99cb1989-6416-488a-bd71-9375e25b4db0"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q035",
+        "question_bn": "মায়ের পালস রেট ৫৫, এটা কি স্বাভাবিক?",
+        "expected_answer_bn": "না, পালস 60 এর কম হলে তা অস্বাভাবিক হিসেবে বিবেচিত হবে।",
+        "source_card_id": [
+            "9956f2db-7c20-4797-8c43-480ef17e3d2c"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Is This Normal",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q036",
+        "question_bn": "Hb লেভেল কত হলে সিভিয়ার অ্যানিমিয়া হয়?",
+        "expected_answer_bn": "হিমোগ্লোবিন (Hb) 8 এর কম হলে গুরুতর বা তীব্র রক্তশূন্যতা।",
+        "source_card_id": [
+            "1980fa67-30fc-4652-8a0d-6aedb7f71fd0"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q037",
+        "question_bn": "যার প্রেশার আগে থেকেই বেশি, তার পা ফুললে কি করব?",
+        "expected_answer_bn": "পূর্ব-বিদ্যমান উচ্চ রক্তচাপের রোগীর শোথ (Edema) থাকলে তা উচ্চ ঝুঁকি হিসেবে বিবেচিত হবে।",
+        "source_card_id": [
+            "99cb1989-6416-488a-bd71-9375e25b4db0"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comorbidity",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q038",
+        "question_bn": "PNC ভিজিটে জরায়ু পরীক্ষার নিয়ম কী?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q039",
+        "question_bn": "ফাস্টিং আর র‍্যান্ডম সুগারের রিস্ক লেভেলের পার্থক্য কী?",
+        "expected_answer_bn": "খালি পেটে রক্তে শর্করা ৭ বা তার বেশি হলে এবং র্যান্ডম রক্তে শর্করা ১১.১ বা তার বেশি হলে উচ্চ ঝুঁকি হিসেবে বিবেচিত হয়।",
+        "source_card_id": [
+            "4088b523-f4f5-4aaf-a8ef-52f904a775fe"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q040",
+        "question_bn": "হিমোগ্লোবিন কম, কী ওষুধ দেব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (রক্তশূন্যতার মাত্রা বলা আছে, ওষুধের নাম বা ডোজ নেই)।",
+        "source_card_id": [],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q041",
+        "question_bn": "ডায়াবেটিস কাকে বলে?",
+        "expected_answer_bn": "শরীরে রক্তে চিনি বা সুগার বা গ্লুকোজের পরিমাণ স্বাভাবিকের চেয়ে বেশি হয়ে যাওয়াকে ডায়াবেটিস বলে।",
+        "source_card_id": [
+            "33ad951b-b8b7-4aed-ade1-b9d3369c6346"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q042",
+        "question_bn": "খালি পেটে সুগার কত হলে ডায়াবেটিস ধরা হয়?",
+        "expected_answer_bn": "খালি পেটে রক্তে গ্লুকোজের পরিমাণ ৭.০ মিলিমোল/লিটার বা এর বেশি হলে ডায়াবেটিস বলা হবে।",
+        "source_card_id": [
+            "91b26229-b37a-4876-9082-612cbff60aeb"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q043",
+        "question_bn": "রোগীর সুগার ১৮ এর বেশি, এখন কী করব?",
+        "expected_answer_bn": "রক্ত বা মূত্রে শর্করার মাত্রা ১৮ মিলিমোল/লিটার বা তার বেশি হলে দ্রুত নিকটস্থ উপজেলা স্বাস্থ্য কমপ্লেক্সে বা এনসিডি কর্নারে রেফার করতে হবে।",
+        "source_card_id": [
+            "0c5e5d08-8e62-471f-9fd1-725fb161e068"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q044",
+        "question_bn": "রোগীকে কী ধরনের খাবার খেতে নিষেধ করব?",
+        "expected_answer_bn": "পাঁচটি সাদা খাবার বিশেষ করে চিনি, লবণ, ভাত, সাদা আটার রুটি এবং আলু খাওয়ার পরিমাণ সীমিত করতে হবে। আলগা লবণ এবং চর্বি জাতীয় খাবার পরিহার করতে হবে।",
+        "source_card_id": [
+            "749779f7-ebef-44ef-b0ee-79e124e6490c",
+            "73e5b4f8-7d59-44ef-baed-4a9a2f1681a1"
+        ],
+        "query_type": "Counseling",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Counseling",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q045",
+        "question_bn": "ডায়াবেটিস রোগীর ব্যায়াম করার নিয়ম কী?",
+        "expected_answer_bn": "প্রতিদিন কমপক্ষে ত্রিশ মিনিট হাঁটা বা ঘাম ঝরানো ব্যায়াম করতে হবে।",
+        "source_card_id": [
+            "73e5b4f8-7d59-44ef-baed-4a9a2f1681a1"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q046",
+        "question_bn": "ডায়াবেটিস ওষুধ হঠাৎ বন্ধ করলে কী হয়?",
+        "expected_answer_bn": "ওষুধ বন্ধ করলে ক্ষত না শুকানো, দৃষ্টিশক্তি কমে যাওয়া, কিডনি রোগ, হার্ট অ্যাটাক, স্ট্রোক ও মূত্রনালীতে সংক্রমণ হতে পারে।",
+        "source_card_id": [
+            "c5c15fa8-12c4-4d09-b2ec-52b93a906513"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q047",
+        "question_bn": "যার ডায়াবেটিস আর কিডনির রোগ দুটোই আছে, তার খাদ্যতালিকা কেমন হবে?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (কিডনি রোগের জটিলতা বলা আছে, কিন্তু কিডনি রোগীর জন্য আলাদা খাদ্যতালিকা নেই)।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comorbidity",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q048",
+        "question_bn": "রক্তের সুগার ১৫ আছে, তাকে কোন ইনসুলিন দেব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q049",
+        "question_bn": "ডায়াবেটিসের জন্য বছরে কতবার চেকআপ করাব?",
+        "expected_answer_bn": "বছরে অন্তত দুই বার অথবা চিকিৎসকের পরামর্শ অনুযায়ী রক্ত ও মূত্রে গ্লুকোজ পরীক্ষা করতে হবে।",
+        "source_card_id": [
+            "73e5b4f8-7d59-44ef-baed-4a9a2f1681a1"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q050",
+        "question_bn": "ডায়াবেটিক রোগী কি সবজি খেতে পারবে?",
+        "expected_answer_bn": "হ্যাঁ, সবুজ শাক-সবজি বেশি করে খাওয়া যাবে, যাতে পেট ভরে যায় এবং ক্ষুধা না থাকে।",
+        "source_card_id": [
+            "749779f7-ebef-44ef-b0ee-79e124e6490c"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q051",
+        "question_bn": "বাচ্চা হওয়ার পর আয়রন আর ক্যালসিয়াম কি একসাথে খাওয়া যাবে?",
+        "expected_answer_bn": "না, আয়রন ও ক্যালসিয়াম বড়ি একসাথে খাওয়া যাবে না।",
+        "source_card_id": [
+            "618579ea-f727-4cff-842d-21ea67221818"
+        ],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q052",
+        "question_bn": "বাচ্চা হওয়ার পর ক্যালসিয়াম ট্যাবলেট কত ডোজে খাবে?",
+        "expected_answer_bn": "প্রতিদিন ২ টি করে ক্যালসিয়াম বড়ি (সকালে ও রাতে) ভরা পেটে খেতে হবে তিন মাস পর্যন্ত।",
+        "source_card_id": [
+            "618579ea-f727-4cff-842d-21ea67221818"
+        ],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q053",
+        "question_bn": "প্রসবের পর মা কি ভারী কাজ করতে পারবে?",
+        "expected_answer_bn": "ভারী কাজ যেমন কলসি দিয়ে পানি টানা, ভারী কাপড় কাচা ইত্যাদি ৪২ দিন পর্যন্ত করা যাবে না।",
+        "source_card_id": [
+            "1dfa84f3-91ae-4094-8819-b7d5c012499f"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q054",
+        "question_bn": "প্রসবের পর কতদিন রক্ত মিশ্রিত স্রাব বের হওয়া স্বাভাবিক?",
+        "expected_answer_bn": "প্রসবের পর ৪ সপ্তাহ পর্যন্ত রক্ত মিশ্রিত স্রাব বের হওয়া স্বাভাবিক।",
+        "source_card_id": [
+            "963a6f80-47c1-41af-81bd-de3256aeddf6"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Is This Normal",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q055",
+        "question_bn": "স্বামী সহবাস কখন থেকে শুরু করা যাবে?",
+        "expected_answer_bn": "প্রসবের ৬ সপ্তাহ পর্যন্ত স্বামী সহবাস করা যাবে না।",
+        "source_card_id": [
+            "f1c9b93c-904e-4a5e-b30b-2fc4524a4f17"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q056",
+        "question_bn": "সিজারের পর সেলাইয়ের যত্ন কীভাবে নেব?",
+        "expected_answer_bn": "পেরিনিয়ামে সেলাই থাকলে তা পরিষ্কার রাখতে হবে ও শুকনো রাখতে হবে। (সিজারের সেলাইয়ের কথা আলাদা করে নেই, তবে পেরিনিয়ামের সেলাইয়ের কথা আছে)।",
+        "source_card_id": [
+            "963a6f80-47c1-41af-81bd-de3256aeddf6"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q057",
+        "question_bn": "মায়ের প্রসব পরবর্তী বিপদচিহ্ন দেখা দিলে কোথায় refer করব?",
+        "expected_answer_bn": "সাথে সাথে হাসপাতালে বা উপজেলা স্বাস্থ্য কেন্দ্রে রেফার করতে হবে।",
+        "source_card_id": [
+            "d0ffd3d2-7dda-4368-b766-6f83b8ef95e5"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q058",
+        "question_bn": "বাচ্চা হওয়ার পর জন্মনিয়ন্ত্রণ পদ্ধতি কোনটা সবচেয়ে ভালো?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (দ্রুততম সময়ে জন্ম নিয়ন্ত্রণ নিতে বলা হয়েছে, কিন্তু নির্দিষ্ট পদ্ধতির নাম নেই)।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q059",
+        "question_bn": "স্তনের বোঁটা ডেবে থাকলে কী করব?",
+        "expected_answer_bn": "স্তনের বোটা ভিতরের দিকে ডেবে থাকলে তেল দিয়ে মালিশ করতে হবে।",
+        "source_card_id": [
+            "963a6f80-47c1-41af-81bd-de3256aeddf6"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q060",
+        "question_bn": "বাচ্চা হওয়ার পর মায়েরে কতক্ষণ ঘুমানো উচিত?",
+        "expected_answer_bn": "প্রতিদিন কমপক্ষে ৮ ঘন্টা ঘুমাতে হবে এবং ২ ঘন্টা বিশ্রাম নিতে হবে।",
+        "source_card_id": [
+            "1dfa84f3-91ae-4094-8819-b7d5c012499f"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Regional Dialectal",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q061",
+        "question_bn": "প্রসবের পর ভিটামিন-এ ক্যাপসুল কখন খাবে?",
+        "expected_answer_bn": "বাচ্চা হওয়ার ৪২ দিনের মধ্যে ১টি উচ্চক্ষমতাসম্পন্ন ভিটামিন-এ ক্যাপসুল খেতে হবে।",
+        "source_card_id": [
+            "c47bd2d8-4a2f-4696-8bcb-ab35840a2569"
+        ],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "30674b47-b8da-45e4-b919-d39761fae4ed"
+        ]
+    },
+    {
+        "id": "Q062",
+        "question_bn": "প্রসব পরবর্তী সময়ে মাতৃমৃত্যুর হার সবচেয়ে বেশি কখন থাকে?",
+        "expected_answer_bn": "প্রায় ৫০ ভাগ মাতৃমৃত্যু ২৪ ঘণ্টার মধ্যে এবং ৭০% মৃত্যু প্রসবের ২ থেকে ৩ দিনের মধ্যে হয়ে থাকে।",
+        "source_card_id": [
+            "17d93aba-4209-4a95-b4a3-370ea0b2f612"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "30674b47-b8da-45e4-b919-d39761fae4ed"
+        ]
+    },
+    {
+        "id": "Q063",
+        "question_bn": "মায়ের প্রসব পরবর্তী একলাম্পসিয়া হলে কোথায় রেফার করব?",
+        "expected_answer_bn": "মা ও শিশু কল্যাণ কেন্দ্র, উপজেলা স্বাস্থ্য কমপ্লেক্স, জেলা হাসপাতাল, মেডিকেল কলেজ হাসপাতালে রেফার করতে হবে।",
+        "source_card_id": [
+            "2df7d38f-e1f9-40af-aa53-5885c8ae21c1"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "30674b47-b8da-45e4-b919-d39761fae4ed"
+        ]
+    },
+    {
+        "id": "Q064",
+        "question_bn": "প্রসবের পর মায়ের জরায়ুর মুখ ছিঁড়ে গেলে কী করব?",
+        "expected_answer_bn": "দ্রুত মা ও শিশু কল্যাণ কেন্দ্র, উপজেলা স্বাস্থ্য কমপ্লেক্স বা জেলা হাসপাতালে রেফার করতে হবে।",
+        "source_card_id": [
+            "2df7d38f-e1f9-40af-aa53-5885c8ae21c1"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "30674b47-b8da-45e4-b919-d39761fae4ed"
+        ]
+    },
+    {
+        "id": "Q065",
+        "question_bn": "প্রসবের পর মায়ের স্তনে ফোঁড়া হলে কোথায় রেফার করব?",
+        "expected_answer_bn": "মা ও শিশু কল্যাণ কেন্দ্র, উপজেলা স্বাস্থ্য কমপ্লেক্স, বা জেলা হাসপাতালে রেফার করতে হবে।",
+        "source_card_id": [
+            "2df7d38f-e1f9-40af-aa53-5885c8ae21c1"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "30674b47-b8da-45e4-b919-d39761fae4ed"
+        ]
+    },
+    {
+        "id": "Q066",
+        "question_bn": "PNC কেয়ারে ম্যাটারনাল ব্লিডিং আর ইনফেকশনের রেফারেল লোকেশনের পার্থক্য কী?",
+        "expected_answer_bn": "রক্তস্রাবের জন্য মেডিকেল কলেজ হাসপাতাল পর্যন্ত রেফার করা যায়, কিন্তু সংক্রমণের জন্য সাধারণত মা ও শিশু কল্যাণ কেন্দ্র এবং উপজেলা স্বাস্থ্য কমপ্লেক্সে রেফার করা হয়।",
+        "source_card_id": [
+            "2df7d38f-e1f9-40af-aa53-5885c8ae21c1"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "30674b47-b8da-45e4-b919-d39761fae4ed"
+        ]
+    },
+    {
+        "id": "Q067",
+        "question_bn": "নবজাতকের নাভি থেকে পুঁজ বের হলে কী মলম লাগাবো?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "30674b47-b8da-45e4-b919-d39761fae4ed"
+        ]
+    },
+    {
+        "id": "Q068",
+        "question_bn": "পরিবার পরিকল্পনা গ্রহণ করলে মাতৃমৃত্যু কতটা কমানো সম্ভব?",
+        "expected_answer_bn": "পরিবার পরিকল্পনা পদ্ধতি ব্যবহারের কারণে মাতৃমৃত্যুর শতকরা ৩২ ভাগ কমানো সম্ভব।",
+        "source_card_id": [
+            "57ac317b-3091-4f47-8fee-57f63b3b1643"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "30674b47-b8da-45e4-b919-d39761fae4ed"
+        ]
+    },
+    {
+        "id": "Q069",
+        "question_bn": "বাচ্চার বয়স ৩ দিন, জ্বর আসছে, হাসপাতালে পাঠাবো কি?",
+        "expected_answer_bn": "হ্যাঁ, নবজাতকের বিপদ চিহ্ন দেখা দিলে দ্রুত হাসপাতালে নিতে হবে।",
+        "source_card_id": [
+            "e1aeeb95-8410-4d29-a43b-d3d9f06a1671"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "30674b47-b8da-45e4-b919-d39761fae4ed"
+        ]
+    },
+    {
+        "id": "Q070",
+        "question_bn": "প্রসূতির খাওয়ার নিয়ম কী?",
+        "expected_answer_bn": "৩ বেলা প্রধান খাবারের পাশাপাশি ২ বেলা নাস্তা এবং প্রতিদিন কমপক্ষে ৮-১০ গ্লাস পানি পান করতে হবে।",
+        "source_card_id": [
+            "c47bd2d8-4a2f-4696-8bcb-ab35840a2569"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "30674b47-b8da-45e4-b919-d39761fae4ed"
+        ]
+    },
+    {
+        "id": "Q071",
+        "question_bn": "দুই বছরের নিচের শিশুর ডায়রিয়া হলে কতটুকু স্যালাইন দেব?",
+        "expected_answer_bn": "প্রতিবার পাতলা পায়খানার পর ২৫০ মিলি গ্লাসের আধা গ্লাস (১০ থেকে ২০ চা চামচ) ওরস্যালাইন খাওয়াতে হবে।",
+        "source_card_id": [
+            "b3dbb906-2e0b-4562-8fa7-c3e60d034a99"
+        ],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3c0e8ec1-b1a8-486a-821c-5a14c197cce4"
+        ]
+    },
+    {
+        "id": "Q072",
+        "question_bn": "বাচ্চা জিংক খেয়ে বমি করে দিলে কী করব?",
+        "expected_answer_bn": "যদি শিশু বমি করে দেয়, তাহলে ৩০ মিনিট অপেক্ষা করে আবার একটি বড়ি খাওয়াতে হবে।",
+        "source_card_id": [
+            "218e6078-5dec-452a-9d7d-47bdb3857e7c"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3c0e8ec1-b1a8-486a-821c-5a14c197cce4"
+        ]
+    },
+    {
+        "id": "Q073",
+        "question_bn": "ডায়রিয়া রোগীর প্রস্রাব বন্ধ হয়ে গেছে, refer করব কি?",
+        "expected_answer_bn": "হ্যাঁ, প্রস্রাব বন্ধ হওয়া চরম বিপদের লক্ষণ, দ্রুত হাসপাতালে পাঠাতে হবে।",
+        "source_card_id": [
+            "a15902b7-d115-46f2-8104-a6bf84ebc6e6"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3c0e8ec1-b1a8-486a-821c-5a14c197cce4"
+        ]
+    },
+    {
+        "id": "Q074",
+        "question_bn": "জিংক বড়ি খাওয়ানোর নিয়ম কী?",
+        "expected_answer_bn": "প্রতিদিন ১টি করে মোট ১০টি বড়ি খাওয়াতে হবে। চামচে পানি নিয়ে বড়ি গলিয়ে খাওয়াতে হবে।",
+        "source_card_id": [
+            "218e6078-5dec-452a-9d7d-47bdb3857e7c"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3c0e8ec1-b1a8-486a-821c-5a14c197cce4"
+        ]
+    },
+    {
+        "id": "Q075",
+        "question_bn": "ডায়রিয়া হলে কি বুকের দুধ বন্ধ করতে হবে?",
+        "expected_answer_bn": "না, যেসব শিশু মায়ের দুধ খায়, তাদেরকে দুধ খাওয়ানো চালিয়ে যেতে হবে।",
+        "source_card_id": [
+            "681c5e76-015b-45bd-9107-0c90e202baa6"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3c0e8ec1-b1a8-486a-821c-5a14c197cce4"
+        ]
+    },
+    {
+        "id": "Q076",
+        "question_bn": "ডায়রিয়ার কোন অ্যান্টিবায়োটিক সবচেয়ে ভালো?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "3c0e8ec1-b1a8-486a-821c-5a14c197cce4"
+        ]
+    },
+    {
+        "id": "Q077",
+        "question_bn": "ডায়রিয়া প্রতিরোধে হাত ধোয়া কেন দরকার?",
+        "expected_answer_bn": "মলত্যাগের পরে ও খাবার খাওয়ার আগে সাবান ও নিরাপদ পানি দিয়ে হাত ধুলে ডায়রিয়া প্রতিরোধ করা যায়।",
+        "source_card_id": [
+            "997d3abb-a1a1-42e8-861c-f75a0e4c191d"
+        ],
+        "query_type": "Counseling",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "Counseling",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3c0e8ec1-b1a8-486a-821c-5a14c197cce4"
+        ]
+    },
+    {
+        "id": "Q078",
+        "question_bn": "ডায়রিয়ার সাথে জ্বর আর খিঁচুনি হচ্ছে, কী করব?",
+        "expected_answer_bn": "জ্বর ও খিঁচুনি হলে রোগীকে অবশ্যই হাসপাতালে পাঠাতে হবে।",
+        "source_card_id": [
+            "a15902b7-d115-46f2-8104-a6bf84ebc6e6"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comorbidity",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3c0e8ec1-b1a8-486a-821c-5a14c197cce4"
+        ]
+    },
+    {
+        "id": "Q079",
+        "question_bn": "হামের টিকা দিলে কি ডায়রিয়া কমে?",
+        "expected_answer_bn": "হ্যাঁ, শিশুকে সময়সূচী অনুযায়ী হামের দুই ডোজ টিকা ও ভিটামিন 'এ' ক্যাপসুল দিলে ডায়রিয়ার প্রকোপ অনেকটাই কমে যায়।",
+        "source_card_id": [
+            "997d3abb-a1a1-42e8-861c-f75a0e4c191d"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3c0e8ec1-b1a8-486a-821c-5a14c197cce4"
+        ]
+    },
+    {
+        "id": "Q080",
+        "question_bn": "বয়স ৩ বছর, ডায়রিয়া হলে কতটুকু স্যালাইন দেব?",
+        "expected_answer_bn": "২ থেকে ১০ বছরের নিচে শিশুদের প্রতিবার পাতলা পায়খানার পর এক গ্লাস (২০-৪০ চা চামচ) ওরস্যালাইন খাওয়াতে হবে।",
+        "source_card_id": [
+            "b3dbb906-2e0b-4562-8fa7-c3e60d034a99"
+        ],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3c0e8ec1-b1a8-486a-821c-5a14c197cce4"
+        ]
+    },
+    {
+        "id": "Q081",
+        "question_bn": "গর্ভাবস্থায় যোনিপথে রক্তপাত হলে কী করতে হবে?",
+        "expected_answer_bn": "যোনিপথে রক্তপাত হলে গর্ভবতী নারীকে অবিলম্বে রেফারেল করতে হবে।",
+        "source_card_id": [
+            "a7517f5f-b48a-4d6e-b6d5-b8f6c7517c37"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3d0b5a79-1656-4348-b4ec-7dab54ba727d"
+        ]
+    },
+    {
+        "id": "Q082",
+        "question_bn": "BP 130/80 কিন্তু হাত পা ফোলা, এটা কি প্রি-এক্লাম্পসিয়া?",
+        "expected_answer_bn": "প্রি-এক্লাম্পসিয়া সন্দেহের জন্য প্রস্রাবে অ্যালবুমিন বা শরীরে ফোলাভাবের সাথে রক্তচাপ 140/90 বা তার বেশি হতে হবে, অথবা আগে থেকে উচ্চ রক্তচাপ থাকতে হবে।",
+        "source_card_id": [
+            "a7517f5f-b48a-4d6e-b6d5-b8f6c7517c37"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3d0b5a79-1656-4348-b4ec-7dab54ba727d"
+        ]
+    },
+    {
+        "id": "Q083",
+        "question_bn": "গর্ভবতীর জ্বর ১০১ ডিগ্রি, জরুরি রেফার করব নাকি অ-জরুরি?",
+        "expected_answer_bn": "হালকা জ্বর (100 থেকে 101.9 ফারেনহাইট) হলে নন-জরুরী রেফারেল করতে হবে। 102 বা তার বেশি হলে জরুরি রেফারেল।",
+        "source_card_id": [
+            "ad07511e-c1aa-4fe3-9970-0e9988fd31f7",
+            "df5e16fd-dd98-4ea7-8fd5-4bbf45af6eca"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3d0b5a79-1656-4348-b4ec-7dab54ba727d"
+        ]
+    },
+    {
+        "id": "Q084",
+        "question_bn": "অস্বাভাবিক ওজন বৃদ্ধি বলতে কী বোঝায়?",
+        "expected_answer_bn": "প্রতি 15 দিনে 1 কেজি এর কম বা বেশি ওজন বৃদ্ধিকে অস্বাভাবিক ওজন বৃদ্ধি বলে।",
+        "source_card_id": [
+            "35a05e6f-20f2-4a4d-b2ed-2791acdf52a2"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3d0b5a79-1656-4348-b4ec-7dab54ba727d"
+        ]
+    },
+    {
+        "id": "Q085",
+        "question_order": 5,
+        "question_bn": "রোগীর বয়স ১৭ বছর, এটা কি হাই রিস্ক?",
+        "expected_answer_bn": "হ্যাঁ, বয়স 18 বছরের কম হলে উচ্চ ঝুঁকিপূর্ণ গর্ভবতী হিসেবে নন-জরুরী রেফারেল করতে হবে।",
+        "source_card_id": [
+            "ad07511e-c1aa-4fe3-9970-0e9988fd31f7"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "Is This Normal",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3d0b5a79-1656-4348-b4ec-7dab54ba727d"
+        ]
+    },
+    {
+        "id": "Q086",
+        "question_bn": "ANC gap কীভাবে বুঝব?",
+        "expected_answer_bn": "টিটি টিকা অসম্পূর্ণ, 36 সপ্তাহে ইউএসজি না করা, 3টির কম এএনসি ভিজিট, আইএফএ বা ক্যালসিয়াম অপর্যাপ্ত হলে এএনসি-তে ঘাটতি ধরা হয়।",
+        "source_card_id": [
+            "189a9857-2af8-451e-86cd-e028a8fcf1a8"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3d0b5a79-1656-4348-b4ec-7dab54ba727d"
+        ]
+    },
+    {
+        "id": "Q087",
+        "question_bn": "গর্ভবতীর থাইরয়েডের সমস্যা থাকলে কী করব?",
+        "expected_answer_bn": "দীর্ঘস্থায়ী রোগের জন্য চিকিৎসাধীন না থাকলে জরুরি রেফারেল, আর চিকিৎসাধীন থাকলে নন-জরুরী রেফারেল করতে হবে।",
+        "source_card_id": [
+            "df5e16fd-dd98-4ea7-8fd5-4bbf45af6eca",
+            "ad07511e-c1aa-4fe3-9970-0e9988fd31f7"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comorbidity",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3d0b5a79-1656-4348-b4ec-7dab54ba727d"
+        ]
+    },
+    {
+        "id": "Q088",
+        "question_bn": "হিমোগ্লোবিন কত হলে সিভিয়ার অ্যানিমিয়া হয়?",
+        "expected_answer_bn": "হিমোগ্লোবিন 8 গ্রাম/ডেসিলিটার এর কম হলে তীব্র রক্তশূন্যতা বা severe anemia বলা হয়।",
+        "source_card_id": [
+            "df5e16fd-dd98-4ea7-8fd5-4bbf45af6eca"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3d0b5a79-1656-4348-b4ec-7dab54ba727d"
+        ]
+    },
+    {
+        "id": "Q089",
+        "question_bn": "গর্ভাবস্থায় প্যারাসিটামল কত ডোজ দেব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "3d0b5a79-1656-4348-b4ec-7dab54ba727d"
+        ]
+    },
+    {
+        "id": "Q090",
+        "question_bn": "পালস অ্যাবনরমাল বলতে কী বোঝায়?",
+        "expected_answer_bn": "অস্বাভাবিক পালস বলতে 90 এর বেশি বা 60 এর কম বোঝায়।",
+        "source_card_id": [
+            "df5e16fd-dd98-4ea7-8fd5-4bbf45af6eca"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3d0b5a79-1656-4348-b4ec-7dab54ba727d"
+        ]
+    },
+    {
+        "id": "Q091",
+        "question_bn": "সম্মানজনক মাতৃত্বসেবা কেন জরুরি?",
+        "expected_answer_bn": "গর্ভকালীন ও প্রসবকালীন মানসম্মত সেবা নিশ্চিত করে মা ও শিশুর স্বাস্থ্য উন্নয়ন এবং মাতৃ ও শিশু মৃত্যুর হার কমানোর জন্য এটি জরুরি।",
+        "source_card_id": [
+            "d0a53123-0a69-425d-8d5d-e4515900d9e3"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "416e0b44-eae3-44e7-b833-8c5a1c06ac44"
+        ]
+    },
+    {
+        "id": "Q092",
+        "question_bn": "শারীরিক পরীক্ষার আগে কি মায়ের অনুমতি নিতে হবে?",
+        "expected_answer_bn": "হ্যাঁ, সম্মানজনক মাতৃসেবা নিশ্চিত করতে শারীরিক পরীক্ষার আগে অনুমতি নিতে হবে।",
+        "source_card_id": [
+            "6c638fce-7128-4bbe-b2c9-85bb96d19f5c"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "416e0b44-eae3-44e7-b833-8c5a1c06ac44"
+        ]
+    },
+    {
+        "id": "Q093",
+        "question_bn": "মায়ের সাথে কীভাবে আস্থার সম্পর্ক তৈরি করব?",
+        "expected_answer_bn": "নিরাপদ ও সময়োচিত সেবা প্রদান, গোপনীয়তা রক্ষা, দায়িত্বশীল আচরণ এবং নারীর পছন্দকে বিবেচনায় রাখার মাধ্যমে আস্থার সম্পর্ক তৈরি করতে হবে।",
+        "source_card_id": [
+            "6c638fce-7128-4bbe-b2c9-85bb96d19f5c"
+        ],
+        "query_type": "Counseling",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Counseling",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "416e0b44-eae3-44e7-b833-8c5a1c06ac44"
+        ]
+    },
+    {
+        "id": "Q094",
+        "question_bn": "মায়ের ডেলিভারির সময় স্বামী কি ভেতরে থাকতে পারবে?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "416e0b44-eae3-44e7-b833-8c5a1c06ac44"
+        ]
+    },
+    {
+        "id": "Q095",
+        "question_bn": "RMC বা সম্মানজনক মাতৃসেবার (respectful maternity care) উদাহরণ কী?",
+        "expected_answer_bn": "মডিউলে সম্মানজনক ও অসম্মানজনক মাতৃত্বসেবার উদাহরণের শিরোনাম আছে, কিন্তু বিস্তারিত উদাহরণ দেওয়া নেই।",
+        "source_card_id": [
+            "dc10049a-e2ba-45c8-8074-8ac13ff83372"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "416e0b44-eae3-44e7-b833-8c5a1c06ac44"
+        ]
+    },
+    {
+        "id": "Q096",
+        "question_bn": "অসম্মানজনক আচরণের ফলে কী ক্ষতি হতে পারে?",
+        "expected_answer_bn": "এটি মায়ের অধিকার ক্ষুণ্ন করে এবং মা ও শিশুর স্বাস্থ্য ও মাতৃমৃত্যু কমানোর লক্ষ্য বাধাগ্রস্ত করে।",
+        "source_card_id": [
+            "d0a53123-0a69-425d-8d5d-e4515900d9e3"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "416e0b44-eae3-44e7-b833-8c5a1c06ac44"
+        ]
+    },
+    {
+        "id": "Q097",
+        "question_bn": "রোগীর গোপনীয়তা রক্ষা করা কি খুব জরুরি?",
+        "expected_answer_bn": "হ্যাঁ, সম্মানজনক মাতৃত্বসেবা নিশ্চিত করতে স্বাস্থ্যকর্মীর করণীয়গুলোর মধ্যে গোপনীয়তা রক্ষা করা একটি।",
+        "source_card_id": [
+            "6c638fce-7128-4bbe-b2c9-85bb96d19f5c"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "416e0b44-eae3-44e7-b833-8c5a1c06ac44"
+        ]
+    },
+    {
+        "id": "Q098",
+        "question_bn": "ডেলিভারির সময় পেশেন্টের পছন্দ কতটুকু ম্যাটার করে?",
+        "expected_answer_bn": "সেবা প্রদানের সময় নারীর পছন্দকে বিবেচনায় রাখা সম্মানজনক মাতৃসেবা নিশ্চিত করার অংশ।",
+        "source_card_id": [
+            "6c638fce-7128-4bbe-b2c9-85bb96d19f5c"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "416e0b44-eae3-44e7-b833-8c5a1c06ac44"
+        ]
+    },
+    {
+        "id": "Q099",
+        "question_bn": "পুষ্টি কাকে বলে?",
+        "expected_answer_bn": "খাদ্য যে উপায়ে শরীরে শক্তি দেয়, ক্ষয় পূরণ ও বৃদ্ধি সাধন করে এবং রোগ প্রতিরোধ করে তাকে পুষ্টি বলে।",
+        "source_card_id": [
+            "96384133-737d-4c32-8a86-083d36b53cad"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "46e94300-f124-4fd1-8e48-acaf68dbc64d"
+        ]
+    },
+    {
+        "id": "Q100",
+        "question_bn": "স্টান্টিং আর ওয়াস্টিং-এর মধ্যে পার্থক্য কী?",
+        "expected_answer_bn": "খর্বাকৃতি (Stunting) হলো বয়স অনুপাতে কম উচ্চতা, আর কৃশকায় (Wasting) হলো উচ্চতা অনুপাতে ওজন কম।",
+        "source_card_id": [
+            "570a9f41-83c6-4ecf-9b4b-b8d772210d12"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "46e94300-f124-4fd1-8e48-acaf68dbc64d"
+        ]
+    },
+    {
+        "id": "Q101",
+        "question_bn": "ভিটামিন এ এর অভাবে কী হয়?",
+        "expected_answer_bn": "রাতকানা থেকে অন্ধত্ব, চামড়া ও চুলে খসখসে ভাব, রোগ প্রতিরোধ ক্ষমতা হ্রাস এবং শ্বাসতন্ত্রে সংক্রমণ হয়।",
+        "source_card_id": [
+            "24758783-2622-4b7e-8309-5ae1aba5b878"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "46e94300-f124-4fd1-8e48-acaf68dbc64d"
+        ]
+    },
+    {
+        "id": "Q102",
+        "question_bn": "ঠোঁটের কোণে ঘা হলে কী খেতে বলব?",
+        "expected_answer_bn": "এটি ভিটামিন বি২ এর অভাব। কলিজা, দুধ, ডিম, সীম, ডাল ইত্যাদি খেতে বলতে হবে।",
+        "source_card_id": [
+            "6a0822c4-70c0-4877-a844-1dd756fee4f1"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "46e94300-f124-4fd1-8e48-acaf68dbc64d"
+        ]
+    },
+    {
+        "id": "Q103",
+        "question_bn": "আয়রন আর ক্যালসিয়ামের কাজ কী কী?",
+        "expected_answer_bn": "আয়রন রক্ত তৈরিতে সাহায্য করে, আর ক্যালসিয়াম হাড় ও দাঁতের বৃদ্ধি ও শক্ত হওয়ায় সাহায্য করে।",
+        "source_card_id": [
+            "6dfb0e48-4ffa-4f11-ae94-55a36ec36094"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "46e94300-f124-4fd1-8e48-acaf68dbc64d"
+        ]
+    },
+    {
+        "id": "Q104",
+        "question_bn": "পুষ্টি বজায় রাখতে কীভাবে সঠিকভাবে শাকসবজি রান্না করতে হয়?",
+        "expected_answer_bn": "শাকসবজি ধুয়ে তার পর কাটতে হবে, রান্নায় কম পানি ব্যবহার করতে হবে, ঢাকনা ব্যবহার করতে হবে এবং অতিরিক্ত তৈল-মসলা পরিহার করতে হবে।",
+        "source_card_id": [
+            "2fa058ca-d3cf-4131-827e-53ab41f2f6f0"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "46e94300-f124-4fd1-8e48-acaf68dbc64d"
+        ]
+    },
+    {
+        "id": "Q105",
+        "question_bn": "ডায়রিয়া হলে কি খাবার বন্ধ করে দেব?",
+        "expected_answer_bn": "না, ডায়রিয়া হলে শক্তিদায়ক খাবার বন্ধ করে দেওয়া একটি ভ্রান্ত ধারণা।",
+        "source_card_id": [
+            "2fa058ca-d3cf-4131-827e-53ab41f2f6f0"
+        ],
+        "query_type": "Counseling",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "46e94300-f124-4fd1-8e48-acaf68dbc64d"
+        ]
+    },
+    {
+        "id": "Q106",
+        "question_bn": "গর্ভবতী মায়ের গলগণ্ড হলে কী করব?",
+        "expected_answer_bn": "আয়োডিনের অভাবে গলগণ্ড হয়, তাই সামুদ্রিক মাছ ও আয়োডিনযুক্ত লবণ (ব্র্যাক লবণ) খাওয়ার পরামর্শ দিতে হবে।",
+        "source_card_id": [
+            "6dfb0e48-4ffa-4f11-ae94-55a36ec36094"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comorbidity",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "46e94300-f124-4fd1-8e48-acaf68dbc64d"
+        ]
+    },
+    {
+        "id": "Q107",
+        "question_bn": "ভিটামিন বি১২ কোথায় পাওয়া যায়?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "46e94300-f124-4fd1-8e48-acaf68dbc64d"
+        ]
+    },
+    {
+        "id": "Q108",
+        "question_bn": "জিংক এর অভাবে কী হয়?",
+        "expected_answer_bn": "শারীরিক বৃদ্ধি ব্যাহত হয়, ক্ষুধামন্দা দেখা দেয়, চুল পড়া, চোখ ও ত্বকের ক্ষত এবং ডায়রিয়া, নিউমোনিয়ার প্রকোপ বাড়ায়।",
+        "source_card_id": [
+            "6dfb0e48-4ffa-4f11-ae94-55a36ec36094"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "46e94300-f124-4fd1-8e48-acaf68dbc64d"
+        ]
+    },
+    {
+        "id": "Q109",
+        "question_bn": "REDI পদ্ধতির পুরো নাম কী?",
+        "expected_answer_bn": "Rapport (সম্পর্ক স্থাপন), Explore (ইতিহাস গ্রহণ), Decide (সিদ্ধান্ত গ্রহণ), Implement (বাস্তবায়ন)।",
+        "source_card_id": [
+            "8f8dbd6b-2af4-4dca-bebc-9901ac39c405"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "528aa6cf-842c-4eb8-93f4-bd0aa6f6b2b2"
+        ]
+    },
+    {
+        "id": "Q110",
+        "question_bn": "রোগীর সাথে সম্পর্ক কীভাবে তৈরি করব?",
+        "expected_answer_bn": "সম্মানের সঙ্গে অভিবাদন, নিজের পরিচয় দেওয়া, গোপনীয়তা বজায় রাখা এবং সংবেদনশীল বিষয়ে আলোচনার প্রয়োজনীয়তা বুঝিয়ে বলা।",
+        "source_card_id": [
+            "5267c429-ba3a-4254-9d75-964ba3771b44"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "528aa6cf-842c-4eb8-93f4-bd0aa6f6b2b2"
+        ]
+    },
+    {
+        "id": "Q111",
+        "question_bn": "নতুন আর অসন্তুষ্ট রোগীর ইতিহাস নেওয়ার নিয়ম কি এক?",
+        "expected_answer_bn": "না, ক্লায়েন্টের ধরন (নতুন, সন্তুষ্ট নাকি অসন্তুষ্ট) অনুযায়ী ইতিহাস গ্রহণের পদ্ধতি ভিন্ন হতে পারে।",
+        "source_card_id": [
+            "45ed83c6-bb38-4522-93c7-b316c096dd79"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "528aa6cf-842c-4eb8-93f4-bd0aa6f6b2b2"
+        ]
+    },
+    {
+        "id": "Q112",
+        "question_bn": "রোগীর গোপন কথা কি অন্য কাউকে বলা যাবে?",
+        "expected_answer_bn": "না, ক্লায়েন্টের তথ্যের গোপনীয়তা বজায় রাখতে হবে।",
+        "source_card_id": [
+            "5267c429-ba3a-4254-9d75-964ba3771b44"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Regional Dialectal",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "528aa6cf-842c-4eb8-93f4-bd0aa6f6b2b2"
+        ]
+    },
+    {
+        "id": "Q113",
+        "question_bn": "REDI-তে Decide-এর পর কী করব?",
+        "expected_answer_bn": "Decide (সিদ্ধান্ত গ্রহণ) এর পর Implement (বাস্তবায়ন) করতে হবে।",
+        "source_card_id": [
+            "8f8dbd6b-2af4-4dca-bebc-9901ac39c405"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "528aa6cf-842c-4eb8-93f4-bd0aa6f6b2b2"
+        ]
+    },
+    {
+        "id": "Q114",
+        "question_bn": "REDI মডেলে কি ওষুধের নাম লেখা আছে?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "528aa6cf-842c-4eb8-93f4-bd0aa6f6b2b2"
+        ]
+    },
+    {
+        "id": "Q115",
+        "question_bn": "রোগী রেগে থাকলে কীভাবে কথা বলব?",
+        "expected_answer_bn": "অসন্তুষ্ট ক্লায়েন্ট বুঝে সেই অনুযায়ী তথ্য সংগ্রহ করতে হবে এবং সম্মানের সঙ্গে অভিবাদন ও গোপনীয়তা বজায় রাখতে হবে।",
+        "source_card_id": [
+            "5267c429-ba3a-4254-9d75-964ba3771b44",
+            "45ed83c6-bb38-4522-93c7-b316c096dd79"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "Counseling",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "528aa6cf-842c-4eb8-93f4-bd0aa6f6b2b2"
+        ]
+    },
+    {
+        "id": "Q116",
+        "question_bn": "UHIS-এ পরিবারের তালিকা কোথায় দেখা যায়?",
+        "expected_answer_bn": "UHIS সিস্টেমে একটি পরিবার নির্বাচন করলে সেই পরিবারের সদস্যদের তালিকা দেখা যাবে।",
+        "source_card_id": [
+            "49bc657d-48d7-48d2-9da5-d36699017336"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "549a0047-9bdf-4658-acff-170f4e9a7408"
+        ]
+    },
+    {
+        "id": "Q117",
+        "question_bn": "বয়স আর লিঙ্গ অনুযায়ী কি সেবা আলাদা হয়?",
+        "expected_answer_bn": "হ্যাঁ, উপকারভোগীদের জন্য পরিষেবার বিভাগসমূহ লিঙ্গ এবং বয়সের উপর ভিত্তি করে দেখানো হয়।",
+        "source_card_id": [
+            "0f36cd10-67ec-4b73-8e28-f68971f59f28"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "549a0047-9bdf-4658-acff-170f4e9a7408"
+        ]
+    },
+    {
+        "id": "Q118",
+        "question_bn": "UHIS-এ মেম্বার সিলেক্ট করব কেমনে?",
+        "expected_answer_bn": "প্রথমে পরিবারের তালিকা দেখতে হবে, একটি পরিবার নির্বাচন করতে হবে, এরপর সদস্যদের তালিকা থেকে একজনকে নির্বাচন করতে হবে।",
+        "source_card_id": [
+            "76927225-c9fa-47ee-bf96-833d17151a79",
+            "49bc657d-48d7-48d2-9da5-d36699017336",
+            "7dca1c8b-61dd-4ceb-ba6e-cb168769b6da"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "549a0047-9bdf-4658-acff-170f4e9a7408"
+        ]
+    },
+    {
+        "id": "Q119",
+        "question_bn": "পরিবারের ঠিকানা কীভাবে পরিবর্তন করব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "549a0047-9bdf-4658-acff-170f4e9a7408"
+        ]
+    },
+    {
+        "id": "Q120",
+        "question_bn": "সদস্যের জন্য মডিউল কীভাবে আসবে?",
+        "expected_answer_bn": "সদস্যের যোগ্যতার (লিঙ্গ এবং বয়স) ভিত্তিতে পরিষেবা মডিউলগুলো দেখা যাবে।",
+        "source_card_id": [
+            "0f36cd10-67ec-4b73-8e28-f68971f59f28",
+            "e31dcdaf-e4c8-4f67-a53c-b0c500de3c71"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "549a0047-9bdf-4658-acff-170f4e9a7408"
+        ]
+    },
+    {
+        "id": "Q121",
+        "question_bn": "প্রাথমিক চিকিৎসা কী?",
+        "expected_answer_bn": "কোনো স্বাস্থ্য সমস্যা বা দূর্ঘটনা হওয়ার পর জরুরী চিকিৎসার জন্য প্রথমেই তাৎক্ষণিক ও সাময়িক যে ব্যবস্থা নেওয়া হয়।",
+        "source_card_id": [
+            "a15fff35-1851-4b3f-aa6a-e75d10eae346"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "57c2b975-78f8-4363-97ec-8960edf0f851"
+        ]
+    },
+    {
+        "id": "Q122",
+        "question_bn": "হাত কেটে রক্ত পড়লে কী করব?",
+        "expected_answer_bn": "কাটা স্থান হাত দিয়ে চেপে ধরে উপরের দিকে তুলে ধরতে হবে, স্যালাইন খাওয়াতে হবে এবং দ্রুত হাসপাতালে পাঠাতে হবে।",
+        "source_card_id": [
+            "147bf020-c8d4-4551-9e88-bfcea198984c"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "57c2b975-78f8-4363-97ec-8960edf0f851"
+        ]
+    },
+    {
+        "id": "Q123",
+        "question_bn": "পুড়ে গেলে ফার্স্ট এইড কী?",
+        "expected_answer_bn": "চাদর বা কম্বল দিয়ে চাপ দিয়ে আগুন নেভাতে হবে, পানি ঢালতে হবে, সাবধানে কাপড় খুলতে হবে এবং হাসপাতালে নিতে হবে।",
+        "source_card_id": [
+            "0be7354c-bd56-4c1b-9d12-c5bca1eef3bf"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "57c2b975-78f8-4363-97ec-8960edf0f851"
+        ]
+    },
+    {
+        "id": "Q124",
+        "question_bn": "সাপে কামড়ালে কি বাঁধন দিতে হবে?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (মডিউলে বাঁধনের কথা বলা নেই, শুধু নড়াচড়া না করা এবং ধোয়ার কথা আছে)।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "57c2b975-78f8-4363-97ec-8960edf0f851"
+        ]
+    },
+    {
+        "id": "Q125",
+        "question_bn": "কুকুরে কামড়ালে জলাতঙ্কের জন্য কী করতে হবে?",
+        "expected_answer_bn": "জায়গাটি ক্ষারযুক্ত সাবান দিয়ে ধুয়ে সাথে সাথে হাসপাতালে পাঠাতে হবে এবং জলাতঙ্ক রোগের ইঞ্জেকশন নিতে হবে।",
+        "source_card_id": [
+            "70df4ba8-060a-411f-b4a9-69ed9bc21a7b"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "57c2b975-78f8-4363-97ec-8960edf0f851"
+        ]
+    },
+    {
+        "id": "Q126",
+        "question_bn": "পানিতে ডুবা রোগীকে কীভাবে শোয়াব?",
+        "expected_answer_bn": "উপুড় করে শোয়াতে হবে এবং মাথা একদিকে কাত করে দিয়ে পেটে চাপ দিয়ে পানি বের করতে হবে।",
+        "source_card_id": [
+            "021c4502-3231-4001-90e3-efa06a756467"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "57c2b975-78f8-4363-97ec-8960edf0f851"
+        ]
+    },
+    {
+        "id": "Q127",
+        "question_order": 27,
+        "question_bn": "বিষ খেলে কি বমি করাব?",
+        "expected_answer_bn": "রোগীর জ্ঞান থাকলে বমি করানোর চেষ্টা করবেন। কিন্তু অচেতন হলে বা পেট্রোল জাতীয় কিছু খেলে বমি করানো যাবে না।",
+        "source_card_id": [
+            "6a17b246-e7b3-4d82-84d5-eeec511d2924"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "57c2b975-78f8-4363-97ec-8960edf0f851"
+        ]
+    },
+    {
+        "id": "Q128",
+        "question_bn": "রোগীর খিঁচুনি হচ্ছে এবং সে বিষ খেয়েছে, এখন কী করব?",
+        "expected_answer_bn": "দাঁতের মাঝখানে শক্ত বা ধারালো নয় এমন কিছু দিয়ে রাখতে হবে যাতে জিহ্বা কামড়াতে না পারে এবং হাসপাতালে পাঠাতে হবে।",
+        "source_card_id": [
+            "6a17b246-e7b3-4d82-84d5-eeec511d2924"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comorbidity",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "57c2b975-78f8-4363-97ec-8960edf0f851"
+        ]
+    },
+    {
+        "id": "Q129",
+        "question_bn": "কুকুরে কামড়ালে কোন সাবান দিয়ে ধোব?",
+        "expected_answer_bn": "ক্ষারযুক্ত সাবান দিয়ে ভালোভাবে ধুয়ে ফেলতে হবে।",
+        "source_card_id": [
+            "70df4ba8-060a-411f-b4a9-69ed9bc21a7b"
+        ],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "57c2b975-78f8-4363-97ec-8960edf0f851"
+        ]
+    },
+    {
+        "id": "Q130",
+        "question_bn": "পুড়ে যাওয়া জায়গায় কী লাগাব?",
+        "expected_answer_bn": "মডিউলে কিছু লাগানোর কথা নেই, শুধু পানি ঢালতে বলা হয়েছে এবং হাসপাতালে নিতে বলা হয়েছে।",
+        "source_card_id": [
+            "0be7354c-bd56-4c1b-9d12-c5bca1eef3bf"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "Is This Normal",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "57c2b975-78f8-4363-97ec-8960edf0f851"
+        ]
+    },
+    {
+        "id": "Q131",
+        "question_bn": "প্রসব পরিকল্পনা কী?",
+        "expected_answer_bn": "নিরাপদ প্রসব নিশ্চিত করতে গর্ভকালীন সময়ে যে প্রয়োজনীয় ব্যবস্থা গ্রহণ করা হয় তাই প্রসব পরিকল্পনা।",
+        "source_card_id": [
+            "6653c35f-48cf-4ae5-ba28-fbcfea3b7c70"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "5b59390c-a03e-4deb-b569-ee6855ec5232"
+        ]
+    },
+    {
+        "id": "Q132",
+        "question_bn": "প্রসবের জন্য কী কী প্রস্তুতি নিতে হয়?",
+        "expected_answer_bn": "প্রসবের স্থান ঠিক রাখা, স্বাস্থ্যকর্মীর সাথে যোগাযোগ, যানবাহনের ব্যবস্থা, টাকা জমানো এবং রক্তদাতার প্রস্তুতি।",
+        "source_card_id": [
+            "22c38ba7-1d12-47e2-8156-b9b39b965332"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "5b59390c-a03e-4deb-b569-ee6855ec5232"
+        ]
+    },
+    {
+        "id": "Q133",
+        "question_bn": "প্রসূতি সেবায় তিনটি বিলম্ব কী কী?",
+        "expected_answer_bn": "সিদ্ধান্ত গ্রহণে বিলম্ব, স্বাস্থ্যকেন্দ্রে পৌঁছাতে বিলম্ব, এবং চিকিৎসা কেন্দ্রে পর্যাপ্ত চিকিৎসা প্রদানে বিলম্ব।",
+        "source_card_id": [
+            "c493bbc4-9230-4e6f-a5c5-5e054ff5cc0a"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "5b59390c-a03e-4deb-b569-ee6855ec5232"
+        ]
+    },
+    {
+        "id": "Q134",
+        "question_bn": "জরুরী প্রসূতি সেবা (EOC) কী?",
+        "expected_answer_bn": "প্রসব জটিলতা ও মাতৃমৃত্যু প্রতিরোধে গৃহীত জীবন রক্ষাকারী পদক্ষেপই হলো জরুরী প্রসূতি সেবা (EOC)।",
+        "source_card_id": [
+            "bf04bb4c-08df-4b6f-8170-514ea92567c2"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "5b59390c-a03e-4deb-b569-ee6855ec5232"
+        ]
+    },
+    {
+        "id": "Q135",
+        "question_bn": "থানা আর ইউনিয়ন পর্যায়ের EOC সেবার পার্থক্য কী?",
+        "expected_answer_bn": "থানা পর্যায়ে মৌলিক EOC এবং গর্ভফুল আটকে গেলে হাত দিয়ে বের করার সুবিধা থাকে, যা ইউনিয়ন পর্যায়ে প্রাথমিক প্রসূতি সেবার অন্তর্ভুক্ত নয়।",
+        "source_card_id": [
+            "cd9f8cfc-38a1-4611-8b8a-fdac3180e3ee"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "5b59390c-a03e-4deb-b569-ee6855ec5232"
+        ]
+    },
+    {
+        "id": "Q136",
+        "question_bn": "সি-সেকশন কোন লেভেলে করা হয়?",
+        "expected_answer_bn": "সিজারিয়ান অপারেশন জেলা পর্যায়ে করা হয়।",
+        "source_card_id": [
+            "cd9f8cfc-38a1-4611-8b8a-fdac3180e3ee"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "5b59390c-a03e-4deb-b569-ee6855ec5232"
+        ]
+    },
+    {
+        "id": "Q137",
+        "question_bn": "রক্তদাতা না পেলে কী করব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "5b59390c-a03e-4deb-b569-ee6855ec5232"
+        ]
+    },
+    {
+        "id": "Q138",
+        "question_bn": "মায়ের ডেলিভারি ব্যথা, কোথায় নেব?",
+        "expected_answer_bn": "প্রসবের স্থান আগে থেকে ঠিক রাখা স্বাস্থ্যকেন্দ্রে নিতে হবে।",
+        "source_card_id": [
+            "22c38ba7-1d12-47e2-8156-b9b39b965332"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Regional Dialectal",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "5b59390c-a03e-4deb-b569-ee6855ec5232"
+        ]
+    },
+    {
+        "id": "Q139",
+        "question_bn": "খাদ্যের প্রধান কাজ কী?",
+        "expected_answer_bn": "শরীর গঠন ও বৃদ্ধি করা, শক্তি উৎপাদন করা, রোগ প্রতিরোধ করা এবং শরীর সুস্থ রাখা।",
+        "source_card_id": [
+            "28632582-0b43-486e-b3fe-48dc6c9a813a",
+            "c648a959-5cbc-497d-9e42-3f96c93df3e3",
+            "00169dc4-d938-4f96-9dc0-136f973b8f6d"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "5bc2add2-6d7c-4202-9fb7-537f47115b93"
+        ]
+    },
+    {
+        "id": "Q140",
+        "question_bn": "শরীর গঠন করতে কী ধরনের খাবার লাগে?",
+        "expected_answer_bn": "প্রোটিন জাতীয় খাদ্য যেমন মাছ, মাংস, ডিম, ডাল, দুধ ইত্যাদি শরীর গঠনে সহায়তা করে।",
+        "source_card_id": [
+            "28632582-0b43-486e-b3fe-48dc6c9a813a"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "5bc2add2-6d7c-4202-9fb7-537f47115b93"
+        ]
+    },
+    {
+        "id": "Q141",
+        "question_bn": "শক্তি উৎপাদনের জন্য কোন খাবার বেশি কাজ করে?",
+        "expected_answer_bn": "শর্করা জাতীয় (চাল, আলু, চিনি) এবং স্নেহ জাতীয় (তেল, ঘি, মাখন) খাদ্য শক্তি উৎপাদনে প্রধান ভূমিকা রাখে।",
+        "source_card_id": [
+            "c648a959-5cbc-497d-9e42-3f96c93df3e3"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "5bc2add2-6d7c-4202-9fb7-537f47115b93"
+        ]
+    },
+    {
+        "id": "Q142",
+        "question_bn": "বাচ্চার ইমিউনিটি বাড়াতে কী খাওয়াব?",
+        "expected_answer_bn": "ভিটামিন ও খনিজ লবণ জাতীয় খাদ্য যেমন শাকসবজি, ফলমূল, দুধ, ডিম, কলিজা রোগ প্রতিরোধ ক্ষমতা বাড়ায়।",
+        "source_card_id": [
+            "00169dc4-d938-4f96-9dc0-136f973b8f6d"
+        ],
+        "query_type": "Counseling",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "Counseling",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "5bc2add2-6d7c-4202-9fb7-537f47115b93"
+        ]
+    },
+    {
+        "id": "Q143",
+        "question_bn": "কোন মাছে প্রোটিন সবচেয়ে বেশি?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "5bc2add2-6d7c-4202-9fb7-537f47115b93"
+        ]
+    },
+    {
+        "id": "Q144",
+        "question_bn": "হাড় ও দাঁত তৈরি করতে কোন পুষ্টি লাগে?",
+        "expected_answer_bn": "খাদ্যের প্রোটিন অংশ শরীরের হাড় ও দাঁত তৈরি করে।",
+        "source_card_id": [
+            "28632582-0b43-486e-b3fe-48dc6c9a813a"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "5bc2add2-6d7c-4202-9fb7-537f47115b93"
+        ]
+    },
+    {
+        "id": "Q145",
+        "question_bn": "রক্তে হিমো (হিমোগ্লোবিন) কম, কী খেলে বাড়বে?",
+        "expected_answer_bn": "রক্ত তৈরিতে প্রোটিন জাতীয় খাবার যেমন মাছ, মাংস, ডাল, দুধ সাহায্য করে। (আয়রন কার্ড এখানে নেই, প্রোটিন কার্ড অনুযায়ী)।",
+        "source_card_id": [
+            "28632582-0b43-486e-b3fe-48dc6c9a813a"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "5bc2add2-6d7c-4202-9fb7-537f47115b93"
+        ]
+    },
+    {
+        "id": "Q146",
+        "question_bn": "প্রথম ANC ভিজিটে কী কী তথ্য নিতে হয়?",
+        "expected_answer_bn": "পূর্ববর্তী গর্ভাবস্থার জটিলতা, বর্তমান অসুস্থতা, শারীরিক পরীক্ষা, টিটি টিকা, সাপ্লিমেন্ট, আল্ট্রাসাউন্ড এবং বিপদ চিহ্নের তথ্য নিতে হয়।",
+        "source_card_id": [
+            "ff013b03-1eb0-46d7-b42d-4efc73f79efd"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d0c1a47b-bb8f-438c-be04-0d7886e87331"
+        ]
+    },
+    {
+        "id": "Q147",
+        "question_bn": "মায়ের প্রেশার ৯০/৬০ এর নিচে, কী করব?",
+        "expected_answer_bn": "রক্তচাপ 90/60 এর কম হলে তা উচ্চ ঝুঁকি হিসেবে চিহ্নিত করতে হবে।",
+        "source_card_id": [
+            "6d153e09-7d61-4086-b47a-e01f5737eaea"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d0c1a47b-bb8f-438c-be04-0d7886e87331"
+        ]
+    },
+    {
+        "id": "Q148",
+        "question_bn": "পালস ৯২, এটা কি নরমাল?",
+        "expected_answer_bn": "না, পালস 90 এর বেশি হলে তা অস্বাভাবিক এবং উচ্চ ঝুঁকি নির্দেশ করে।",
+        "source_card_id": [
+            "705ab521-2adb-4bc7-8602-d53e1c9fed90"
+        ],
+        "query_type": "Is This Normal",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "Is This Normal",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d0c1a47b-bb8f-438c-be04-0d7886e87331"
+        ]
+    },
+    {
+        "id": "Q149",
+        "question_bn": "ফান্ডাল হাইট ২ সেমি বেশি, এটা কিসের রিস্ক?",
+        "expected_answer_bn": "ফান্ডাল হাইট গর্ভকালীন বয়স থেকে 2 সেন্টিমিটার কম বা বেশি হলে তা উচ্চ ঝুঁকি নির্দেশ করে।",
+        "source_card_id": [
+            "705ab521-2adb-4bc7-8602-d53e1c9fed90"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d0c1a47b-bb8f-438c-be04-0d7886e87331"
+        ]
+    },
+    {
+        "id": "Q150",
+        "question_bn": "Hb 10, এটা কি সিভিয়ার অ্যানিমিয়া?",
+        "expected_answer_bn": "না, হিমোগ্লোবিন 10 এর কম হলে মাঝারি ঝুঁকি, আর 8 এর কম হলে গুরুতর ঝুঁকি।",
+        "source_card_id": [
+            "6b69bd39-248f-4c5e-b1d9-5416b3d32402"
+        ],
+        "query_type": "Comparative",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d0c1a47b-bb8f-438c-be04-0d7886e87331"
+        ]
+    },
+    {
+        "id": "Q151",
+        "question_bn": "ফাস্টিং সুগার ৫.২ আর ইউরিন অ্যালবুমিন আছে, কী করব?",
+        "expected_answer_bn": "ফাস্টিং সুগার 5.1 এর বেশি মানে উচ্চ ঝুঁকি, এবং প্রস্রাবে অ্যালবুমিন থাকলে অন্যান্য লক্ষণ (রক্তচাপ বা শোথ) মিলিয়ে উচ্চ ঝুঁকি ধরতে হবে।",
+        "source_card_id": [
+            "6b69bd39-248f-4c5e-b1d9-5416b3d32402",
+            "51e41f80-f130-4598-8e5e-f58ff0cf0532"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "Comorbidity",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d0c1a47b-bb8f-438c-be04-0d7886e87331"
+        ]
+    },
+    {
+        "id": "Q152",
+        "question_bn": "TT/TD টিকা কখন না নিলে গ্যাপ ধরা হবে?",
+        "expected_answer_bn": "যদি 20 সপ্তাহ বা তার বেশি সময় পর্যন্ত কোনো টিটি/টিডি টিকা না নেওয়া হয়, তাহলে তা ANC সেবায় ঘাটতি হিসেবে ধরা হবে।",
+        "source_card_id": [
+            "744d05a8-77f2-4357-9a9e-70c729c38d2a"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d0c1a47b-bb8f-438c-be04-0d7886e87331"
+        ]
+    },
+    {
+        "id": "Q153",
+        "question_bn": "11 সপ্তাহের গর্ভবতীর তীব্র পেটে ব্যথা, এটা কি বিপদচিহ্ন?",
+        "expected_answer_bn": "হ্যাঁ, 12 সপ্তাহের কম সময়ে তীব্র পেটে ব্যথা একটি গুরুতর বিপদচিহ্ন।",
+        "source_card_id": [
+            "c307ffd5-acea-4026-b1d5-71cacc9548dd"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Is This Normal",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d0c1a47b-bb8f-438c-be04-0d7886e87331"
+        ]
+    },
+    {
+        "id": "Q154",
+        "question_bn": "USG রিপোর্ট কোথায় আপলোড করব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "d0c1a47b-bb8f-438c-be04-0d7886e87331"
+        ]
+    },
+    {
+        "id": "Q155",
+        "question_bn": "মায়ের জন্ডিস আছে, কীভাবে বুঝব?",
+        "expected_answer_bn": "প্রস্রাবে বিলিরুবিন থাকলে তা জন্ডিসের লক্ষণ এবং উচ্চ ঝুঁকি নির্দেশ করে।",
+        "source_card_id": [
+            "51e41f80-f130-4598-8e5e-f58ff0cf0532"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d0c1a47b-bb8f-438c-be04-0d7886e87331"
+        ]
+    },
+    {
+        "id": "Q156",
+        "question_bn": "যক্ষ্মা কত প্রকার?",
+        "expected_answer_bn": "শরীরের অবস্থান অনুযায়ী যক্ষ্মাকে দুই ভাগে ভাগ করা হয়: ফুসফুসের যক্ষ্মা এবং ফুসফুস বহির্ভূত যক্ষ্মা। ফুসফুসের যক্ষ্মা আবার দুই প্রকার (জীবাণুযুক্ত ও জীবাণুমুক্ত)।",
+        "source_card_id": [
+            "c1e3dcbd-1217-4713-8ff5-85f5ff4118f1"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d24b6a14-abce-499a-9c2e-3f3e7b8ad9f7"
+        ]
+    },
+    {
+        "id": "Q157",
+        "question_bn": "কারো ৩ সপ্তাহ ধরে কাশি আর জ্বর, টিবি হতে পারে?",
+        "expected_answer_bn": "হ্যাঁ, একনাগাড়ে দুই সপ্তাহ বা তার বেশি সময় ধরে কাশি এবং বিকালের দিকে জ্বর যক্ষ্মার প্রধান লক্ষণ।",
+        "source_card_id": [
+            "c4972536-470f-4337-a2a6-4fbd6079fe85"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d24b6a14-abce-499a-9c2e-3f3e7b8ad9f7"
+        ]
+    },
+    {
+        "id": "Q158",
+        "question_bn": "কফ কীভাবে সংগ্রহ করতে হয়?",
+        "expected_answer_bn": "সকালে ঘুম থেকে উঠে মুখ ধোয়ার আগে একটি পটে এবং ল্যাবরেটরিতে এসে আরেকটি পটে কফ দিতে হবে। গভীরভাবে শ্বাস নিয়ে বুক থেকে কফ বের করতে হবে।",
+        "source_card_id": [
+            "34f88e8c-56e2-49c9-8258-f5b38cd3ffce"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d24b6a14-abce-499a-9c2e-3f3e7b8ad9f7"
+        ]
+    },
+    {
+        "id": "Q159",
+        "question_bn": "টিবি ট্রিটমেন্ট কয় মাস নিতে হয়?",
+        "expected_answer_bn": "নতুন এবং পুরাতন উভয় রোগীর জন্যই চিকিৎসার মেয়াদকাল মোট ছয় মাস (২ মাস ইনটেনসিভ ফেজ, ৪ মাস কন্টিনিউয়েশন ফেজ)।",
+        "source_card_id": [
+            "cbca17a7-e403-437e-9360-709df36d662b"
+        ],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d24b6a14-abce-499a-9c2e-3f3e7b8ad9f7"
+        ]
+    },
+    {
+        "id": "Q160",
+        "question_bn": "DOTS ট্রিটমেন্টে পেশেন্ট না আসলে কী করব?",
+        "expected_answer_bn": "সঙ্গে সঙ্গে রোগীর বাড়িতে গিয়ে খোঁজ নিয়ে সমস্যা সমাধান করে ওই দিনের ওষুধ খাইয়ে দিতে হবে।",
+        "source_card_id": [
+            "02dee512-8a44-4c9e-8bb9-4ca404092634"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d24b6a14-abce-499a-9c2e-3f3e7b8ad9f7"
+        ]
+    },
+    {
+        "id": "Q161",
+        "question_bn": "রোগীর প্রস্রাব লাল হচ্ছে, ওষুধ বন্ধ করব কি?",
+        "expected_answer_bn": "না, প্রস্রাবের রং কমলা/লাল হলে ভয়ের কিছু নেই, ওষুধ শেষ হলে ঠিক হয়ে যাবে।",
+        "source_card_id": [
+            "6144c7c0-840b-44c7-b8da-fa6bf0ab9b99"
+        ],
+        "query_type": "Counseling",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "Is This Normal",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d24b6a14-abce-499a-9c2e-3f3e7b8ad9f7"
+        ]
+    },
+    {
+        "id": "Q162",
+        "question_bn": "যক্ষ্মা রোগীর চোখে ঝাপসা দেখলে কোথায় রেফার করব?",
+        "expected_answer_bn": "গুরুতর পার্শ্বপ্রতিক্রিয়া হলে সঙ্গে সঙ্গে হাসপাতালে বা নিকটস্থ স্বাস্থ্যকেন্দ্রে রেফার করতে হবে।",
+        "source_card_id": [
+            "6144c7c0-840b-44c7-b8da-fa6bf0ab9b99",
+            "02dee512-8a44-4c9e-8bb9-4ca404092634"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d24b6a14-abce-499a-9c2e-3f3e7b8ad9f7"
+        ]
+    },
+    {
+        "id": "Q163",
+        "question_bn": "টিবি রোগীর বাচ্চার বয়স ২ মাস, বুকের দুধ খাওয়াবে?",
+        "expected_answer_bn": "হ্যাঁ, যক্ষ্মারোগ আক্রান্ত মা নিয়মিত চিকিৎসা নিলে শিশুকে বুকের দুধ খাওয়াতে পারবেন।",
+        "source_card_id": [
+            "6144c7c0-840b-44c7-b8da-fa6bf0ab9b99"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d24b6a14-abce-499a-9c2e-3f3e7b8ad9f7"
+        ]
+    },
+    {
+        "id": "Q164",
+        "question_bn": "টিবি রোগের ইনজেকশন কোথায় দেয়?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (ইনজেকশনের কথা বলা নেই, শুধু মুখে খাওয়ার ওষুধের কথা আছে)।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "d24b6a14-abce-499a-9c2e-3f3e7b8ad9f7"
+        ]
+    },
+    {
+        "id": "Q165",
+        "question_bn": "নতুন এবং পুরাতন যক্ষ্মা রোগীর চিকিৎসায় পার্থক্য কী?",
+        "expected_answer_bn": "উভয়েরই মোট সময় ৬ মাস, তবে পুরাতন রোগীর ইনটেনসিভ ফেজে 4FDC এর সাথে লিভোফ্লক্সাসিন দেওয়া হয়।",
+        "source_card_id": [
+            "cbca17a7-e403-437e-9360-709df36d662b"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d24b6a14-abce-499a-9c2e-3f3e7b8ad9f7"
+        ]
+    },
+    {
+        "id": "Q166",
+        "question_bn": "নবজাতকের নাভিতে কী লাগাতে হবে?",
+        "expected_answer_bn": "নাভিতে একবার ৭.১% ক্লোরহেক্সিডিন লাগানোর পর আর কিছু লাগাতে হবে না এবং শুকনো রাখতে হবে।",
+        "source_card_id": [
+            "9bef104b-0990-4f6a-b185-a1940840af06"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d77b52b4-a356-48d6-a20d-1949e1b7c76e"
+        ]
+    },
+    {
+        "id": "Q167",
+        "question_bn": "বাচ্চা হওয়ার পর কবে গোসল করাব?",
+        "expected_answer_bn": "জন্মের প্রথম ৩ দিনের মধ্যে শিশুকে গোসল করানো যাবে না।",
+        "source_card_id": [
+            "8616e44b-3bcc-48f1-a55c-b0bb1d3d2cc3"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d77b52b4-a356-48d6-a20d-1949e1b7c76e"
+        ]
+    },
+    {
+        "id": "Q168",
+        "question_bn": "শালদুধ খাওয়ালে কী লাভ?",
+        "expected_answer_bn": "মায়ের প্রসব পরবর্তী রক্তপাত কমে, জরায়ু স্বাভাবিক হয় এবং শিশুর মস্তিষ্কের বিকাশ ও রোগ প্রতিরোধ ক্ষমতা বাড়ে।",
+        "source_card_id": [
+            "a93294d1-3b4f-4095-bd05-a48fd5bbc1a7",
+            "0eb6ecb2-9da6-4da2-bc10-dd7c8ff96b1e"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d77b52b4-a356-48d6-a20d-1949e1b7c76e"
+        ]
+    },
+    {
+        "id": "Q169",
+        "question_bn": "বেবিকে কতক্ষণের মধ্যে ব্রেস্ট মিল্ক দিতে হবে?",
+        "expected_answer_bn": "জন্মের পরপরই যত তাড়াতাড়ি সম্ভব বা এক ঘন্টার মধ্যে শালদুধ খাওয়াতে হবে।",
+        "source_card_id": [
+            "5c6e8ec4-d339-47c7-b80e-4328d904b018"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d77b52b4-a356-48d6-a20d-1949e1b7c76e"
+        ]
+    },
+    {
+        "id": "Q170",
+        "question_bn": "বাচ্চাকে বুকের দুধ দেওয়ার আগে স্তন কীভাবে পরিষ্কার করব?",
+        "expected_answer_bn": "দুধ খাওয়ানোর আগে মায়ের স্তনবৃন্ত অবশ্যই পরিষ্কার করে নিতে হবে (পদ্ধতি বলা নেই, শুধু পরিষ্কার করতে বলা হয়েছে)।",
+        "source_card_id": [
+            "5c6e8ec4-d339-47c7-b80e-4328d904b018"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d77b52b4-a356-48d6-a20d-1949e1b7c76e"
+        ]
+    },
+    {
+        "id": "Q171",
+        "question_bn": "বাচ্চার নাভি পেকে গেলে কী অ্যান্টিবায়োটিক দেব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "d77b52b4-a356-48d6-a20d-1949e1b7c76e"
+        ]
+    },
+    {
+        "id": "Q172",
+        "question_bn": "নবজাতককে কীভাবে উষ্ণ রাখতে হয়?",
+        "expected_answer_bn": "মায়ের শরীরের সাথে ত্বক-থেকে-ত্বক স্পর্শে রেখে এবং মাথা ও শরীর কাপড় দিয়ে ঢেকে উষ্ণতা বজায় রাখতে হবে।",
+        "source_card_id": [
+            "8616e44b-3bcc-48f1-a55c-b0bb1d3d2cc3"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d77b52b4-a356-48d6-a20d-1949e1b7c76e"
+        ]
+    },
+    {
+        "id": "Q173",
+        "question_bn": "মেকোনিয়াম কী?",
+        "expected_answer_bn": "শিশুর প্রথম মলকে মেকোনিয়াম বলা হয়, যা শালদুধ খাওয়ানোর মাধ্যমে সহজে বের হতে সাহায্য করে।",
+        "source_card_id": [
+            "0eb6ecb2-9da6-4da2-bc10-dd7c8ff96b1e"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "d77b52b4-a356-48d6-a20d-1949e1b7c76e"
+        ]
+    },
+    {
+        "id": "Q174",
+        "question_bn": "সেফগার্ডিং বা সুরক্ষা কী?",
+        "expected_answer_bn": "যে কোনো ধরণের হয়রানিমূলক আচরণ থেকে রক্ষা করা এবং একটি নিরাপদ ও সমমর্যাদাপূর্ণ পরিবেশ নিশ্চিত করাই হলো সেফগার্ডিং।",
+        "source_card_id": [
+            "1a0ac72f-6460-4834-89bf-db3cb79550e6"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "da2e1f35-964b-4e32-bcfd-e8aefedb16c3"
+        ]
+    },
+    {
+        "id": "Q175",
+        "question_bn": "কর্মক্ষেত্রে কেউ বুলিং করলে কোথায় জানাব?",
+        "expected_answer_bn": "ভুক্তভোগী বা প্রত্যক্ষদর্শী তত্ত্বাবধায়ককে, হেল্পলাইন নম্বরে (০১৭২৯০৭১৫৪৬) ফোন করে বা ইমেলের মাধ্যমে অভিযোগ জানাতে পারেন।",
+        "source_card_id": [
+            "dffbd67c-2940-4b66-800f-d1b8a04b0f1a"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "da2e1f35-964b-4e32-bcfd-e8aefedb16c3"
+        ]
+    },
+    {
+        "id": "Q176",
+        "question_bn": "সুপারভিশন আর মনিটরিং এর মধ্যে পার্থক্য কী?",
+        "expected_answer_bn": "সুপারভিশনে চেকলিস্টের মাধ্যমে কর্মীদের কাজ ঠিকমতো হচ্ছে কিনা তা দেখা হয়, আর মনিটরিংয়ে তথ্য সংগ্রহ ও বিশ্লেষণের মাধ্যমে লক্ষ্য অর্জনের জন্য পরবর্তী পদক্ষেপ নেওয়া হয়।",
+        "source_card_id": [
+            "9b75aa7f-6219-4f1a-b7a1-27fed71bf57c",
+            "f720b9a4-11bb-4492-bca7-bc9990c25dab"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "da2e1f35-964b-4e32-bcfd-e8aefedb16c3"
+        ]
+    },
+    {
+        "id": "Q177",
+        "question_bn": "CHW-এর পারফরম্যান্স কীভাবে ইভ্যালুয়েট করা হয়?",
+        "expected_answer_bn": "মাসিক মিটিংয়ের দিন এলাকা ব্যবস্থাপক নির্দিষ্ট চেকলিস্টের মাধ্যমে মাসিক পারফরমেন্স এনালাইসিস করেন।",
+        "source_card_id": [
+            "2f25ad9e-b0a1-4d56-8257-14988b4727e7"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "da2e1f35-964b-4e32-bcfd-e8aefedb16c3"
+        ]
+    },
+    {
+        "id": "Q178",
+        "question_bn": "অভিযোগ করলে কি চাকরি চলে যাবে?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (তবে নাম প্রকাশ না করে অভিযোগ করার সুযোগ আছে)।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "da2e1f35-964b-4e32-bcfd-e8aefedb16c3"
+        ]
+    },
+    {
+        "id": "Q179",
+        "question_bn": "ব্র্যাকের মোট কয়টি সুরক্ষা নীতিমালা আছে?",
+        "expected_answer_bn": "ব্র্যাক সুরক্ষা নীতিমালাসহ আরও ৬টি (মোট ৭টি) নীতিমালা ও আচরণবিধি গ্রহণ করেছে।",
+        "source_card_id": [
+            "b67eb649-8b02-4a3e-bbfc-2f5747d9c8b6"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "da2e1f35-964b-4e32-bcfd-e8aefedb16c3"
+        ]
+    },
+    {
+        "id": "Q180",
+        "question_bn": "হুইসেল-ব্লোয়িং পলিসিতে কী করা হয়?",
+        "expected_answer_bn": "অন্যায়ের প্রতিবাদ বা অভিযোগ জানানোর জন্য এই নীতি অনুযায়ী সহকর্মী বা প্রত্যক্ষদর্শী হেল্পলাইনে জানাতে পারেন।",
+        "source_card_id": [
+            "b67eb649-8b02-4a3e-bbfc-2f5747d9c8b6",
+            "dffbd67c-2940-4b66-800f-d1b8a04b0f1a"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "da2e1f35-964b-4e32-bcfd-e8aefedb16c3"
+        ]
+    },
+    {
+        "id": "Q181",
+        "question_bn": "প্রসবকালীন সেবা গ্রহণে তিনটি প্রধান বিলম্ব কী কী?",
+        "expected_answer_bn": "সিদ্ধান্ত গ্রহণে বিলম্ব, স্বাস্থ্যকেন্দ্রে পৌঁছাতে বিলম্ব এবং পর্যাপ্ত চিকিৎসা পেতে বিলম্ব।",
+        "source_card_id": [
+            "9c9de502-7c3f-4a6b-87cd-6746f2b4c946"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e3f88320-bc5d-4e3c-8922-7a733ab4b4e3"
+        ]
+    },
+    {
+        "id": "Q182",
+        "question_bn": "হাসপাতালে যেতে দেরি হচ্ছে কারণ গাড়ি নেই, এটা কোন বিলম্ব?",
+        "expected_answer_bn": "এটি 'স্বাস্থ্যকেন্দ্রে পৌঁছাতে বিলম্ব', যার কারণ অপর্যাপ্ত পরিবহন ব্যবস্থা।",
+        "source_card_id": [
+            "381ca811-c28d-4a59-85a5-7fef4e23eb67"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e3f88320-bc5d-4e3c-8922-7a733ab4b4e3"
+        ]
+    },
+    {
+        "id": "Q183",
+        "question_bn": "ডিলে কমানোর জন্য CHW হিসেবে আমি কী করব?",
+        "expected_answer_bn": "CHW-কে বিপদ চিহ্ন সনাক্তকরণ, সঠিক স্বাস্থ্যকেন্দ্র সনাক্তকরণ এবং রেফারেল সম্পর্কে বার্তাগুলোতে জোর দিতে হবে।",
+        "source_card_id": [
+            "06551ac4-d82c-4e99-927b-7022eeba7deb"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e3f88320-bc5d-4e3c-8922-7a733ab4b4e3"
+        ]
+    },
+    {
+        "id": "Q184",
+        "question_bn": "রোগী হাসপাতালে পৌঁছানোর পর ডাক্তার নেই, এটা কি রেফারেল বিলম্ব?",
+        "expected_answer_bn": "না, এটি 'স্বাস্থ্যকেন্দ্রে পর্যাপ্ত চিকিৎসা পেতে বিলম্ব' এর আওতায় পড়ে, যার কারণ দক্ষ জনবলের অভাব।",
+        "source_card_id": [
+            "78e88933-5e06-4e2f-86bf-faaf5c6712d6"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e3f88320-bc5d-4e3c-8922-7a733ab4b4e3"
+        ]
+    },
+    {
+        "id": "Q185",
+        "question_bn": "হাসপাতালের বিল কমানোর উপায় কী?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "e3f88320-bc5d-4e3c-8922-7a733ab4b4e3"
+        ]
+    },
+    {
+        "id": "Q186",
+        "question_bn": "কীভাবে পরিবারকে দ্রুত সিদ্ধান্ত নিতে বোঝাবো?",
+        "expected_answer_bn": "বিপদ চিহ্ন সম্পর্কে শিক্ষা দিতে হবে এবং নারীর ক্ষমতায়নের ওপর জোর দিতে হবে।",
+        "source_card_id": [
+            "15c0573a-87ff-4de0-bfd8-8d848ecbd9cf"
+        ],
+        "query_type": "Counseling",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Counseling",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e3f88320-bc5d-4e3c-8922-7a733ab4b4e3"
+        ]
+    },
+    {
+        "id": "Q187",
+        "question_bn": "টিকা কার্ডে কী লেখা থাকে?",
+        "expected_answer_bn": "টিকা কার্ডে শিশুকে দেওয়া টিকার তথ্য লেখা থাকে।",
+        "source_card_id": [
+            "81473fde-f4db-4995-bfa9-cda8532c30ca"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e5362040-ae0f-4ca7-90d0-ec0599b16a0f"
+        ]
+    },
+    {
+        "id": "Q188",
+        "question_bn": "৬ সপ্তাহে শিশুকে কোন কোন টিকা দেব?",
+        "expected_answer_bn": "৬ সপ্তাহ বয়সে পেন্টা-১, পিসিভি-১, এবং ওপিভি-১ টিকা দিতে হবে।",
+        "source_card_id": [
+            "e13d86ce-d75f-46c2-92be-cfcc3444fa20"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e5362040-ae0f-4ca7-90d0-ec0599b16a0f"
+        ]
+    },
+    {
+        "id": "Q189",
+        "question_bn": "৯ মাস বয়সে MR-1 দিতে ভুলে গেলে কী করব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (শিডিউল বলা আছে, কিন্তু ভুলে গেলে কী করতে হবে তা নেই)।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "e5362040-ae0f-4ca7-90d0-ec0599b16a0f"
+        ]
+    },
+    {
+        "id": "Q190",
+        "question_bn": "DPT বুস্টার আর OPV বুস্টার কখন দিতে হয়?",
+        "expected_answer_bn": "২ বছর বয়সে ডিপিটি বুস্টার এবং ওপিভি বুস্টার দিতে হয়।",
+        "source_card_id": [
+            "eb3183a9-81e6-47cb-8a3d-7a50af468db5"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e5362040-ae0f-4ca7-90d0-ec0599b16a0f"
+        ]
+    },
+    {
+        "id": "Q191",
+        "question_bn": "জন্মের সময় কোন টিকাগুলো দেওয়া হয়?",
+        "expected_answer_bn": "জন্মের সময় বিসিজি এবং ওপিভি ০ ডোজ দেওয়া হয়।",
+        "source_card_id": [
+            "e13d86ce-d75f-46c2-92be-cfcc3444fa20"
+        ],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e5362040-ae0f-4ca7-90d0-ec0599b16a0f"
+        ]
+    },
+    {
+        "id": "Q192",
+        "question_bn": "PNC-তে খালি পেটে সুগার কত হলে রেফার করব?",
+        "expected_answer_bn": "খালি পেটে রক্তে শর্করা ৭ mmol/L বা তার বেশি হলে দ্রুত রেফার করতে হবে।",
+        "source_card_id": [
+            "f7e236f6-f8af-4486-af63-bf1293f008de"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e5ec2b22-97b8-4c8a-ad5b-236104ce1725"
+        ]
+    },
+    {
+        "id": "Q193",
+        "question_bn": "মায়ের প্রেশার ৯০/৬০ এর নিচে, কী করব?",
+        "expected_answer_bn": "নিম্ন রক্তচাপ (90/60 mmHg বা তার কম) হলে অ-জরুরী রেফারেল ক্যাটাগরিতে অন্তর্ভুক্ত করতে হবে।",
+        "source_card_id": [
+            "0e9e748f-a47a-4c48-a09d-ca98b1602bb6"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e5ec2b22-97b8-4c8a-ad5b-236104ce1725"
+        ]
+    },
+    {
+        "id": "Q194",
+        "question_bn": "প্রসবের পর ভিটামিন এ না খেলে কী হবে?",
+        "expected_answer_bn": "ভিটামিন এ গ্রহণ না করা হলে তা PNC তে ঘাটতি হিসেবে চিহ্নিত করা হবে।",
+        "source_card_id": [
+            "75113b4d-5f58-44c2-9bfa-a6d5f08b2c4d"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e5ec2b22-97b8-4c8a-ad5b-236104ce1725"
+        ]
+    },
+    {
+        "id": "Q195",
+        "question_bn": "PNC follow-up form e notun ki thake?",
+        "expected_answer_bn": "এতে 'পূর্ববর্তী সারাংশ' থাকে এবং উচ্চ রক্তচাপ ও ডায়াবেটিসের চিকিৎসার বিষয়ে নির্দিষ্ট প্রশ্ন থাকে。",
+        "source_card_id": [
+            "8bdbae06-ac18-481e-b8cf-c00409a0a359"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e5ec2b22-97b8-4c8a-ad5b-236104ce1725"
+        ]
+    },
+    {
+        "id": "Q196",
+        "question_bn": "রক্তস্বল্পতার ওষুধের নাম কী?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (Hb এর মান দেওয়া আছে কিন্তু নির্দিষ্ট ওষুধের নাম নেই)।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "e5ec2b22-97b8-4c8a-ad5b-236104ce1725"
+        ]
+    },
+    {
+        "id": "Q197",
+        "question_bn": "জ্বর ১০১ আর স্তন ফুলে আছে, এটা কি ইমার্জেন্সি?",
+        "expected_answer_bn": "না, ফাটা/ফোলা স্তন এবং জ্বর 100°F এর বেশি অ-জরুরী রেফারেলের আওতায় পড়ে।",
+        "source_card_id": [
+            "0e9e748f-a47a-4c48-a09d-ca98b1602bb6"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "Is This Normal",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "e5ec2b22-97b8-4c8a-ad5b-236104ce1725"
+        ]
+    },
+    {
+        "id": "Q198",
+        "question_bn": "গর্ভাবস্থায় বুক জ্বালাপোড়া করলে কী খেতে নিষেধ করব?",
+        "expected_answer_bn": "মশলাযুক্ত এবং তৈলাক্ত খাবার এড়িয়ে চলতে হবে।",
+        "source_card_id": [
+            "708bd953-cfe2-4fcf-a3a9-2c44cc8da646"
+        ],
+        "query_type": "Counseling",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "ee118b21-52fb-45e7-a941-7c2f49130ee5"
+        ]
+    },
+    {
+        "id": "Q199",
+        "question_bn": "পায়ে ভ্যারিকোজ ভেইন হলে কী করব?",
+        "expected_answer_bn": "দাঁড়িয়ে থাকা এড়াতে হবে, পা উঁচু করে বসতে হবে, হালকা ব্যায়াম করতে হবে এবং প্রয়োজনে ক্রেপ ব্যান্ডেজ ব্যবহার করতে হবে।",
+        "source_card_id": [
+            "cff09353-2ff7-474f-be2d-bf7f63908c63"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "ee118b21-52fb-45e7-a941-7c2f49130ee5"
+        ]
+    },
+    {
+        "id": "Q200",
+        "question_bn": "কোমর ব্যথার জন্য কোন ব্যথানাশক দেব?",
+        "expected_answer_bn": "চিকিৎসকের পরামর্শ অনুযায়ী একটি করে প্যারাসিটামল ট্যাবলেট দিতে হবে।",
+        "source_card_id": [
+            "3526407c-9170-4f67-9939-87a4e7dac6f5"
+        ],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "ee118b21-52fb-45e7-a941-7c2f49130ee5"
+        ]
+    },
+    {
+        "id": "Q201",
+        "question_bn": "গর্ভবতীর রক্তচাপ ১৪৫/৯৫, তাকে কী বলব?",
+        "expected_answer_bn": "সম্পূর্ণ বিশ্রামে থাকতে বলুন, পাতে আলগা লবণ খেতে নিষেধ করুন এবং দ্রুত হাসপাতালে রেফার করুন।",
+        "source_card_id": [
+            "8c554469-e568-400c-a966-adfce58d1b44"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "ee118b21-52fb-45e7-a941-7c2f49130ee5"
+        ]
+    },
+    {
+        "id": "Q202",
+        "question_bn": "কখন বুঝব চরম পানিস্বল্পতা আছে?",
+        "expected_answer_bn": "অজ্ঞান বা নিস্তেজ, চোখ ভেতরের দিকে ঢোকা, পানি পান করতে না পারা এবং চামড়া খুব ধীরে পূর্বাবস্থায় ফিরে আসার মতো লক্ষণের অন্তত দুটি (একটি তারকাযুক্ত) থাকলে।",
+        "source_card_id": [
+            "d886db30-ebbe-49b7-bfbc-4423d0053c6b"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f5e9c7d1-6cb4-4858-80bd-a355941ba1cd"
+        ]
+    },
+    {
+        "id": "Q203",
+        "question_bn": "বাচ্চার অস্থিরতা আছে আর চোখ ঢোকা, স্যালাইন দেব?",
+        "expected_answer_bn": "হ্যাঁ, এটি 'কিছু পানিস্বল্পতা'র লক্ষণ। রোগীকে ওরস্যালাইন ও জিঙ্ক ট্যাবলেট দিতে হবে।",
+        "source_card_id": [
+            "29989da6-21eb-45ff-a75d-5633e9dab5c9"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f5e9c7d1-6cb4-4858-80bd-a355941ba1cd"
+        ]
+    },
+    {
+        "id": "Q204",
+        "question_bn": "ডায়রিয়া রোগীর চামড়া পরীক্ষা কীভাবে করব?",
+        "expected_answer_bn": "চামড়া টেনে ধরলে তা ধীরে নাকি খুব ধীরে পূর্বাবস্থায় ফিরে আসে তা পর্যবেক্ষণ করতে হবে।",
+        "source_card_id": [
+            "29989da6-21eb-45ff-a75d-5633e9dab5c9",
+            "d886db30-ebbe-49b7-bfbc-4423d0053c6b"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f5e9c7d1-6cb4-4858-80bd-a355941ba1cd"
+        ]
+    },
+    {
+        "id": "Q205",
+        "question_bn": "রোগী অজ্ঞান, স্যালাইন কীভাবে খাওয়াব?",
+        "expected_answer_bn": "চরম পানিস্বল্পতায় রোগী অজ্ঞান হলে তাকে দ্রুত হাসপাতালে রেফার করতে হবে।",
+        "source_card_id": [
+            "d886db30-ebbe-49b7-bfbc-4423d0053c6b"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f5e9c7d1-6cb4-4858-80bd-a355941ba1cd"
+        ]
+    },
+    {
+        "id": "Q206",
+        "question_bn": "পানিস্বল্পতা না থাকলে জিঙ্ক ট্যাবলেট কত ডোজ দেব?",
+        "expected_answer_bn": "এই মডিউলে নির্দিষ্ট ডোজের কথা উল্লেখ নেই, তবে জিঙ্ক ট্যাবলেট দিতে বলা হয়েছে।",
+        "source_card_id": [
+            "2e98434e-5d87-4051-a761-205a0ce92aa1"
+        ],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f5e9c7d1-6cb4-4858-80bd-a355941ba1cd"
+        ]
+    },
+    {
+        "id": "Q207",
+        "question_bn": "কিছু পানিস্বল্পতা এবং চরম পানিস্বল্পতার মধ্যে পার্থক্য কী?",
+        "expected_answer_bn": "কিছু পানিস্বল্পতায় রোগী অস্থির ও তৃষ্ণার্ত থাকে, কিন্তু চরম পানিস্বল্পতায় রোগী অজ্ঞান বা নিস্তেজ হয় এবং পানি পান করতে পারে না।",
+        "source_card_id": [
+            "29989da6-21eb-45ff-a75d-5633e9dab5c9",
+            "d886db30-ebbe-49b7-bfbc-4423d0053c6b"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f5e9c7d1-6cb4-4858-80bd-a355941ba1cd"
+        ]
+    },
+    {
+        "id": "Q208",
+        "question_bn": "ডায়রিয়া রোগীর স্যালাইন কতক্ষণ ভালো থাকে?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "f5e9c7d1-6cb4-4858-80bd-a355941ba1cd"
+        ]
+    },
+    {
+        "id": "Q209",
+        "question_bn": "গর্ভকালীন রক্তপাত হলে মাকে কোথায় রেফার করব?",
+        "expected_answer_bn": "মা ও শিশু কল্যাণ কেন্দ্র অথবা উপজেলা স্বাস্থ্য কমপ্লেক্সে রেফার করতে হবে।",
+        "source_card_id": [
+            "d12c1672-f1ce-4791-b355-4078ecb70c35"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f620f8f7-8222-4098-a574-e443bfbfdd21"
+        ]
+    },
+    {
+        "id": "Q210",
+        "question_bn": "প্রসবের পর জ্বর হলে কি হাসপাতালে পাঠাবো?",
+        "expected_answer_bn": "হ্যাঁ, প্রসব পরবর্তী জ্বর বা সংক্রমণ হলে মা ও শিশু কল্যাণ কেন্দ্র অথবা উপজেলা স্বাস্থ্য কমপ্লেক্সে রেফার করতে হবে।",
+        "source_card_id": [
+            "7a651012-3924-416c-b101-efe9473f64b7"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f620f8f7-8222-4098-a574-e443bfbfdd21"
+        ]
+    },
+    {
+        "id": "Q211",
+        "question_bn": "VVF hole kothay refer korbo?",
+        "expected_answer_bn": "ভেসিকো-ভ্যাজাইনাল ফিস্টুলা (VVF) হলে দ্রুত মেডিকেল কলেজ হাসপাতালে রেফার করতে হবে।",
+        "source_card_id": [
+            "5f99720b-659f-400b-a133-6f3bbbd6bd91"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f620f8f7-8222-4098-a574-e443bfbfdd21"
+        ]
+    },
+    {
+        "id": "Q212",
+        "question_bn": "জরায়ু ছিঁড়ে গেলে কোন ঔষধ দেব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (রেফার করার কথা বলা হয়েছে)।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "f620f8f7-8222-4098-a574-e443bfbfdd21"
+        ]
+    },
+    {
+        "id": "Q213",
+        "question_bn": "প্রি-এক্লাম্পসিয়া আর ফিস্টুলা রেফারেলের পার্থক্য কী?",
+        "expected_answer_bn": "প্রি-এক্লাম্পসিয়ার জন্য দ্রুত উচ্চতর স্বাস্থ্যকেন্দ্রে রেফার করতে হয়, আর ফিস্টুলার জন্য সরাসরি মেডিকেল কলেজ হাসপাতালে রেফার করতে হয়।",
+        "source_card_id": [
+            "d12c1672-f1ce-4791-b355-4078ecb70c35",
+            "5f99720b-659f-400b-a133-6f3bbbd6bd91"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f620f8f7-8222-4098-a574-e443bfbfdd21"
+        ]
+    },
+    {
+        "id": "Q214",
+        "question_bn": "ডায়াবেটিস, রক্তস্বল্পতা এবং স্থূলতা থাকলে কাউন্সেলিং কেমন হবে?",
+        "expected_answer_bn": "আলাদা আলাদা বার্তা না দিয়ে একটি সমন্বিত কাউন্সেলিং বার্তা তৈরি করতে হবে।",
+        "source_card_id": [
+            "9088c2d4-adc9-4c7d-9a6f-3ee2b8a9a4d0",
+            "c2374549-0333-42a6-a9f7-7c8637cb5144"
+        ],
+        "query_type": "Counseling",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Counseling",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "fdd1cbc6-05ed-4ade-809a-812b7e37ce97"
+        ]
+    },
+    {
+        "id": "Q215",
+        "question_bn": "মায়ের BMI 32 আর Hb 8, এটা কি হাই রিস্ক?",
+        "expected_answer_bn": "হ্যাঁ, BMI 30 এর বেশি এবং হিমোগ্লোবিন 8 থাকলে তা একাধিক ঝুঁকির কারণ নির্দেশ করে।",
+        "source_card_id": [
+            "2fbe5aad-757d-4908-84d8-666d82ddbddb"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "Comorbidity",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "fdd1cbc6-05ed-4ade-809a-812b7e37ce97"
+        ]
+    },
+    {
+        "id": "Q216",
+        "question_bn": "ফাস্টিং সুগার কত হলে ডায়াবেটিস রিস্ক হয়?",
+        "expected_answer_bn": "ফাস্টিং ব্লাড সুগার 5.3 এর বেশি হলে তা গ্লাইসেমিক নিয়ন্ত্রণ খারাপ নির্দেশ করে এবং ঝুঁকির কারণ।",
+        "source_card_id": [
+            "2fbe5aad-757d-4908-84d8-666d82ddbddb"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "fdd1cbc6-05ed-4ade-809a-812b7e37ce97"
+        ]
+    },
+    {
+        "id": "Q217",
+        "question_bn": "স্থূলতার জন্য কোন ঔষধ দেব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "fdd1cbc6-05ed-4ade-809a-812b7e37ce97"
+        ]
+    },
+    {
+        "id": "Q218",
+        "question_bn": "সমন্বিত কাউন্সেলিং বার্তা কীভাবে প্রদান করতে হয়?",
+        "expected_answer_bn": "CHW-এর প্রশিক্ষণ মডিউল এবং নির্দেশিকা অনুযায়ী সমস্ত গুরুত্বপূর্ণ বার্তা অন্তর্ভুক্ত করে সমন্বিত বার্তা দিতে হবে।",
+        "source_card_id": [
+            "c2374549-0333-42a6-a9f7-7c8637cb5144"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "fdd1cbc6-05ed-4ade-809a-812b7e37ce97"
+        ]
+    },
+    {
+        "id": "Q219",
+        "question_bn": "ম্যালেরিয়া মশা আর ডেঙ্গু মশার ডিম পাড়ার জায়গার পার্থক্য কী?",
+        "expected_answer_bn": "ম্যালেরিয়ার মশা স্থির বা ধীরগতির পরিষ্কার পানিতে ডিম পাড়ে, আর ডেঙ্গু মশা জমে থাকা পানিতে ডিম পাড়ে।",
+        "source_card_id": [
+            "7a650a17-765e-4d7a-b6c3-4d3ef606edaf"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q220",
+        "question_bn": "বাচ্চার বয়স ২ মাস, তাকে কি ম্যালেরিয়ার ওষুধ খাওয়াব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q221",
+        "question_bn": "আমি জুম চাষ করি, ম্যালেরিয়া থেকে কীভাবে বাঁচব?",
+        "expected_answer_bn": "জুম চাষ করতে বা বনে রাত্রিযাপন করতে হলে ঘুমানোর সময় কীটনাশকযুক্ত মশারি (ITN) ব্যবহার করতে হবে।",
+        "source_card_id": [
+            "dc0ac0ca-1cc6-4637-90e5-aadaaeae2ea5"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "Counseling",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q222",
+        "question_bn": "মারাত্মক ম্যালেরিয়া হলে রোগীর প্রস্রাব কেমন হয়?",
+        "expected_answer_bn": "প্রস্রাবের পরিমাণ কমে যায়, বন্ধ হয়ে যেতে পারে এবং প্রস্রাবে রক্তে লাল কোষ পাওয়া যেতে পারে。",
+        "source_card_id": [
+            "a30e66c8-cdeb-4498-b6fa-90d7fb37bd99"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "056150c2-d1c0-4772-a280-ac8335f23ae0"
+        ]
+    },
+    {
+        "id": "Q223",
+        "question_bn": "বুকের দুধ খাওয়ালে কি বাচ্চার রোগ প্রতিরোধ ক্ষমতা বাড়ে?",
+        "expected_answer_bn": "হ্যাঁ, বুকের দুধ শিশুর রোগ প্রতিরোধ ক্ষমতা বাড়ায়।",
+        "source_card_id": [
+            "d645d839-42a0-4d22-b217-3c03fe9c51e5"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "065dff7e-1ba7-45ea-a0a5-08b77716afea"
+        ]
+    },
+    {
+        "id": "Q224",
+        "question_bn": "ব্রেস্টফিডিং করার সময় বেবির নাক কোথায় থাকবে?",
+        "expected_answer_bn": "নাক স্তনবৃন্তের সাথে সারিবদ্ধ থাকবে এবং স্তনে স্পর্শ করবে।",
+        "source_card_id": [
+            "27a59308-4fb3-49d9-bfc1-f0c766938011",
+            "c9741076-c331-4d2e-8722-30cf23245d1c"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "065dff7e-1ba7-45ea-a0a5-08b77716afea"
+        ]
+    },
+    {
+        "id": "Q225",
+        "question_bn": "মায়ের স্তনবৃন্ত ফেটে গেলে বুকের দুধ কীভাবে খাওয়াবে?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "065dff7e-1ba7-45ea-a0a5-08b77716afea"
+        ]
+    },
+    {
+        "id": "Q226",
+        "question_bn": "UHIS-এ ANC এবং PNC-এর মাঝে সামারিতে পার্থক্য কী?",
+        "expected_answer_bn": "উভয় ক্ষেত্রেই ঝুঁকি, অস্বাভাবিক মান বা সেবা প্রাপ্তির ঘাটতি সারসংক্ষেপ করা হয় (সুনির্দিষ্ট পার্থক্য মডিউলে দেওয়া নেই, তবে দুটিই সারসংক্ষেপ করে)।",
+        "source_card_id": [
+            "824af9fe-d3a6-4155-9eca-dbbab857d217"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "0770b281-9430-4dc3-8fff-cc704e4b108c"
+        ]
+    },
+    {
+        "id": "Q227",
+        "question_bn": "UHIS অফলাইনে চলবে কি না?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "0770b281-9430-4dc3-8fff-cc704e4b108c"
+        ]
+    },
+    {
+        "id": "Q228",
+        "question_bn": "ফাস্ট পিনসি (PNC) ভিজিটে কী কী চেক করব?",
+        "expected_answer_bn": "মৌলিক শারীরিক পরীক্ষা, পরীক্ষার ফলাফল (BP, শোথ, পালস, রক্তে শর্করা, প্রস্রাব), সাপ্লিমেন্ট এবং জন্মনিয়ন্ত্রণ সম্পর্কে তথ্য নিতে হবে।",
+        "source_card_id": [
+            "f4af5908-2e79-47e2-a0db-207d77930340"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q229",
+        "question_bn": "Hb level koto hole mild anemia?",
+        "expected_answer_bn": "Hb 11 এর কম হলে হালকা রক্তশূন্যতা।",
+        "source_card_id": [
+            "1980fa67-30fc-4652-8a0d-6aedb7f71fd0"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q230",
+        "question_bn": "রোগীর ডায়াবেটিস আর প্রেশার দুইটাই আছে, কী করব?",
+        "expected_answer_bn": "পূর্ব-বিদ্যমান রোগের অবস্থা জেনে পরীক্ষা করে উচ্চ ঝুঁকির মান পেলে রেফার করতে হবে।",
+        "source_card_id": [
+            "d57a54f3-42a3-4104-8f88-d8f2ac8fac9e",
+            "9956f2db-7c20-4797-8c43-480ef17e3d2c",
+            "99cb1989-6416-488a-bd71-9375e25b4db0"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "Comorbidity",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q231",
+        "question_bn": "PNC-তে ভিটামিন সি দেওয়ার নিয়ম কী?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "23b07578-d5bc-4725-bb95-8636bf31b0b8"
+        ]
+    },
+    {
+        "id": "Q232",
+        "question_bn": "ডায়াবেটিসের জন্য কোন ব্যায়াম ভালো?",
+        "expected_answer_bn": "প্রতিদিন কমপক্ষে ত্রিশ মিনিট হাঁটা বা ঘাম ঝরানো ব্যায়াম করতে হবে।",
+        "source_card_id": [
+            "73e5b4f8-7d59-44ef-baed-4a9a2f1681a1"
+        ],
+        "query_type": "Procedural",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q233",
+        "question_bn": "ডায়াবেটিস থাকলে মণ্ডা-মিষ্টি খাওয়া যাবে না?",
+        "expected_answer_bn": "পাঁচটি সাদা খাবার, বিশেষ করে চিনি বা যেকোনো মিষ্টি জাতীয় খাবার খাওয়ার পরিমাণ সীমিত করতে হবে।",
+        "source_card_id": [
+            "749779f7-ebef-44ef-b0ee-79e124e6490c"
+        ],
+        "query_type": "Counseling",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "Counseling",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q234",
+        "question_bn": "সুগার ১৮ হলে রেফার করব নাকি অপেক্ষা করব?",
+        "expected_answer_bn": "শর্করার মাত্রা ১৮ মিলিমোল/লিটার বা তার বেশি হলে দ্রুত নিকটস্থ উপজেলা স্বাস্থ্য কমপ্লেক্সে রেফার করতে হবে।",
+        "source_card_id": [
+            "0c5e5d08-8e62-471f-9fd1-725fb161e068"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q235",
+        "question_bn": "মায়ের ওজন বেশি, কত ক্যালরি খাবার দেব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (ওজন নিয়ন্ত্রণে রাখার কথা আছে, নির্দিষ্ট ক্যালরির কথা নেই)।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "2ae8804d-8e0f-4e6b-8120-c0b5148400c6"
+        ]
+    },
+    {
+        "id": "Q236",
+        "question_bn": "বাচ্চা হওয়ার পর আয়রন ট্যাবলেট কখন খাবে?",
+        "expected_answer_bn": "প্রতিদিন ১ টি করে আয়রন বড়ি দুপুরে ভরা পেটে খেতে হবে।",
+        "source_card_id": [
+            "618579ea-f727-4cff-842d-21ea67221818"
+        ],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q237",
+        "question_bn": "প্রসবের পর ক্যালসিয়াম বড়ি কয়টা খাবে?",
+        "expected_answer_bn": "২ টি করে ক্যালসিয়াম বড়ি সকালে ও রাতে ভরা পেটে খেতে হবে।",
+        "source_card_id": [
+            "618579ea-f727-4cff-842d-21ea67221818"
+        ],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q238",
+        "question_bn": "প্রসবের পর জ্বর আসলে কোন অ্যান্টিবায়োটিক দেব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (বিপদচিহ্ন দেখলে রেফার করতে বলা হয়েছে, ঔষধের কথা নেই)।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q239",
+        "question_bn": "প্রসবের পর পরিবার পরিকল্পনার পদ্ধতি কখন নেবে?",
+        "expected_answer_bn": "প্রসবের পর দ্রুততম সময়ে যে কোন জন্ম নিয়ন্ত্রণ পদ্ধতি গ্রহন করতে হবে।",
+        "source_card_id": [
+            "f1c9b93c-904e-4a5e-b30b-2fc4524a4f17"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q240",
+        "question_bn": "বাচ্চা হওয়ার কতদিন পর মা ভারী কাজ করতে পারবে?",
+        "expected_answer_bn": "৪২ দিন পর্যন্ত ভারী কাজ করা যাবে না।",
+        "source_card_id": [
+            "1dfa84f3-91ae-4094-8819-b7d5c012499f"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "2dde9108-ad3d-4798-b32b-70dcc0c308f5"
+        ]
+    },
+    {
+        "id": "Q241",
+        "question_bn": "ডায়রিয়ায় চরম পানিস্বল্পতার লক্ষণ কী?",
+        "expected_answer_bn": "অজ্ঞান বা নিস্তেজ, চোখ ভেতরের দিকে ঢোকা, পানি পান করতে না পারা, এবং চামড়া খুব ধীরে পূর্বাবস্থায় ফেরা।",
+        "source_card_id": [
+            "d886db30-ebbe-49b7-bfbc-4423d0053c6b"
+        ],
+        "query_type": "Factual",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f5e9c7d1-6cb4-4858-80bd-a355941ba1cd"
+        ]
+    },
+    {
+        "id": "Q242",
+        "question_bn": "ডায়রিয়ায় জিংক আর ORS কি একসাথে খাওয়ানো যাবে?",
+        "expected_answer_bn": "হ্যাঁ, ডায়রিয়া হলে স্যালাইনের পাশাপাশি জিংক বড়ি খাওয়াতে হবে।",
+        "source_card_id": [
+            "218e6078-5dec-452a-9d7d-47bdb3857e7c"
+        ],
+        "query_type": "Drug / Dosage",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "3c0e8ec1-b1a8-486a-821c-5a14c197cce4"
+        ]
+    },
+    {
+        "id": "Q243",
+        "question_bn": "ডায়রিয়া রোগীকে কবে হাসপাতালে রেফার করব?",
+        "expected_answer_bn": "চরম পানিস্বল্পতা থাকলে বা বমি, মলে রক্ত, প্রস্রাব বন্ধ, জ্বর ও খিঁচুনি হলে দ্রুত হাসপাতালে রেফার করতে হবে।",
+        "source_card_id": [
+            "d886db30-ebbe-49b7-bfbc-4423d0053c6b",
+            "a15902b7-d115-46f2-8104-a6bf84ebc6e6"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f5e9c7d1-6cb4-4858-80bd-a355941ba1cd",
+            "3c0e8ec1-b1a8-486a-821c-5a14c197cce4"
+        ]
+    },
+    {
+        "id": "Q244",
+        "question_bn": "বাচ্চার অস্থিরতা আছে কিন্তু চামড়া দ্রুত ফিরে যায়, কী করব?",
+        "expected_answer_bn": "যদি অন্তত দুটি লক্ষণ (যেমন অস্থিরতা) থাকে তবে কিছু পানিস্বল্পতা ধরে বাড়িতেই ওরস্যালাইন ও জিঙ্ক দিতে হবে।",
+        "source_card_id": [
+            "29989da6-21eb-45ff-a75d-5633e9dab5c9"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f5e9c7d1-6cb4-4858-80bd-a355941ba1cd"
+        ]
+    },
+    {
+        "id": "Q245",
+        "question_bn": "ডায়রিয়ায় আইভি স্যালাইন কতটুকু দেব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (হাসপাতালে রেফার করতে বলা হয়েছে, আইভি ডোজ নেই)।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "f5e9c7d1-6cb4-4858-80bd-a355941ba1cd"
+        ]
+    },
+    {
+        "id": "Q246",
+        "question_bn": "গর্ভকালীন রক্তপাত আর প্রসবোত্তর রক্তপাতের রেফারেল কোথায়?",
+        "expected_answer_bn": "উভয় ক্ষেত্রেই মা ও শিশু কল্যাণ কেন্দ্র বা উপজেলা স্বাস্থ্য কমপ্লেক্সে রেফার করা যায়, তবে প্রসবোত্তর রক্তপাতে জেলা ও মেডিকেল কলেজ হাসপাতালও যুক্ত আছে।",
+        "source_card_id": [
+            "d12c1672-f1ce-4791-b355-4078ecb70c35",
+            "d4779057-09bc-4d8e-867f-3a92b9647822"
+        ],
+        "query_type": "Cross-card Synthesis",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "Comparative",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f620f8f7-8222-4098-a574-e443bfbfdd21"
+        ]
+    },
+    {
+        "id": "Q247",
+        "question_bn": "ফিস্টুলা হলে কোথায় রেফার করব?",
+        "expected_answer_bn": "ভেসিকো-ভ্যাজাইনাল ফিস্টুলা বা রেক্টো-ভ্যাজাইনাল ফিস্টুলা হলে দ্রুত মেডিকেল কলেজ হাসপাতালে রেফার করতে হবে।",
+        "source_card_id": [
+            "5f99720b-659f-400b-a133-6f3bbbd6bd91"
+        ],
+        "query_type": "Referral Decision",
+        "linguistic_variation": "Roman Transliteration",
+        "chw_pattern": "None",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "f620f8f7-8222-4098-a574-e443bfbfdd21"
+        ]
+    },
+    {
+        "id": "Q248",
+        "question_bn": "মায়ের স্তনে ফোঁড়া হলে কী ঔষধ দেব?",
+        "expected_answer_bn": "এই তথ্য প্রদত্ত মডিউলে নেই। (স্তনে সংক্রমণ হলে রেফার করার কথা বলা হয়েছে)।",
+        "source_card_id": [],
+        "query_type": "Negative",
+        "linguistic_variation": "Standard Written Bengali",
+        "chw_pattern": "None",
+        "answerable": "no",
+        "confidence": "high",
+        "module_id": [
+            "f620f8f7-8222-4098-a574-e443bfbfdd21"
+        ]
+    },
+    {
+        "id": "Q249",
+        "question_bn": "একাধিক ঝুঁকিপূর্ণ গর্ভবতী মহিলাদের কীভাবে কাউন্সেলিং করব?",
+        "expected_answer_bn": "আলাদা আলাদা বার্তা না দিয়ে একটি সমন্বিত কাউন্সেলিং বার্তা তৈরি করতে হবে যাতে কোনো তথ্য বাদ না পড়ে।",
+        "source_card_id": [
+            "9088c2d4-adc9-4c7d-9a6f-3ee2b8a9a4d0",
+            "c2374549-0333-42a6-a9f7-7c8637cb5144"
+        ],
+        "query_type": "Counseling",
+        "linguistic_variation": "Colloquial Spoken Bengali",
+        "chw_pattern": "Counseling",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "fdd1cbc6-05ed-4ade-809a-812b7e37ce97"
+        ]
+    },
+    {
+        "id": "Q250",
+        "question_bn": "BMI 30 আর Hb 8, এটা কি নরমাল?",
+        "expected_answer_bn": "না, এগুলো একাধিক ঝুঁকির কারণ, যা গর্ভাবস্থায় স্থূলতা ও রক্তস্বল্পতা নির্দেশ করে।",
+        "source_card_id": [
+            "2fbe5aad-757d-4908-84d8-666d82ddbddb"
+        ],
+        "query_type": "Situational",
+        "linguistic_variation": "Banglish",
+        "chw_pattern": "Is This Normal",
+        "answerable": "yes",
+        "confidence": "high",
+        "module_id": [
+            "fdd1cbc6-05ed-4ade-809a-812b7e37ce97"
+        ]
+    }
+]

@@ -60,6 +60,7 @@ class ModuleCardService:
             if family_raw:
                 try:
                     parsed_family = UUID(str(family_raw))
+                    card_family_id = parsed_family
                     stmt = (
                         select(ModuleCard)
                         .where(ModuleCard.card_family_id == parsed_family)
@@ -68,7 +69,6 @@ class ModuleCardService:
                     )
                     existing = (await self._session.execute(stmt)).scalar_one_or_none()
                     if existing is not None:
-                        card_family_id = existing.card_family_id
                         card_version = int(existing.card_version) + 1
                 except ValueError:
                     pass

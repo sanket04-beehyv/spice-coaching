@@ -203,12 +203,27 @@ class TestChatFeedbackSummaryGenerator:
             negative_offline_recommendations=[],
         )
 
-        await generator.synthesize(
-            batch=batch,
-            period_start=datetime(2026, 5, 31, tzinfo=UTC),
-            period_end=datetime(2026, 6, 2, tzinfo=UTC),
-            previous_summary=previous,
-        )
+        from unittest.mock import patch
+        from uuid import uuid4 as _uuid4
+
+        from platform_service.services.prompt_template_service import PromptTemplateService, RenderedPrompt
+
+        async def _render(self, session, *, template_id, variant_key, variables):
+            return RenderedPrompt(
+                template_id=template_id,
+                template_version=1,
+                prompt_template_id=_uuid4(),
+                resolved_system_prompt=f"system:{template_id}",
+                resolved_human_message=variables["payload_json"],
+            )
+
+        with patch.object(PromptTemplateService, "render", _render):
+            await generator.synthesize(
+                batch=batch,
+                period_start=datetime(2026, 5, 31, tzinfo=UTC),
+                period_end=datetime(2026, 6, 2, tzinfo=UTC),
+                previous_summary=previous,
+            )
 
         request = ai_mock.generate.await_args.args[0]
         assert "Previous cumulative summary." in request.prompt.resolved_human_message

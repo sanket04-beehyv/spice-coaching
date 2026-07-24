@@ -22,19 +22,18 @@ from platform_service.services.module_gap_classifier import (
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_gaps(db_session: AsyncSession):
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text("TRUNCATE module_card, module, module_family, behavioural_gap RESTART IDENTITY CASCADE")
+    await truncate_tables(
+        db_session,
+        "module_card, module, module_family, behavioural_gap",
     )
-    await db_session.commit()
+    yield
 
 
 async def _seed_gap(

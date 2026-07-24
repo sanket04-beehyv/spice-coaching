@@ -22,35 +22,35 @@ from platform_service.services.run_state_service import (
 from platform_service.workers.card_search_metadata_worker import (
     generate_card_search_metadata_batch,
 )
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE module_card, ingestion_run_step, ingestion_run, module, module_family, "
-            "source_document RESTART IDENTITY CASCADE"
-        )
+    await truncate_tables(
+        db_session,
+        "module_card, ingestion_run_step, ingestion_run, module, module_family, source_document",
     )
-    await db_session.commit()
+    yield
 
 
 async def _seed_module(session: AsyncSession, *, cards: list[dict] | None = None) -> Module:
     fam = ModuleFamily(module_code=f"fam-{uuid4().hex[:8]}")
     session.add(fam)
     await session.flush()
-    cards_data = cards or [
-        {"title": {"bn": "T1"}, "body": {"bn": "body1"}},
-        {"title": {"bn": "T2"}, "body": {"bn": "body2"}},
-    ]
+    cards_data = (
+        cards
+        if cards is not None
+        else [
+            {"title": {"bn": "T1"}, "body": {"bn": "body1"}},
+            {"title": {"bn": "T2"}, "body": {"bn": "body2"}},
+        ]
+    )
     module = Module(
         module_family_id=fam.id,
         version=1,
@@ -233,6 +233,7 @@ class TestCardSearchMetadataWorker:
 
         assert count == 2
         mock_module_metadata.delay.assert_called_once()
+        await db_session.refresh(step)
         refreshed_step = await db_session.get(IngestionRunStep, step.id)
         assert refreshed_step is not None
         assert refreshed_step.status == "succeeded"
@@ -265,6 +266,7 @@ class TestCardSearchMetadataWorker:
         assert rows[0].search_metadata_jsonb["keywords"]["bn"] == ["cough"]
         assert rows[1].search_metadata_jsonb is None
         mock_module_metadata.delay.assert_called_once()
+        await db_session.refresh(step)
         refreshed_step = await db_session.get(IngestionRunStep, step.id)
         assert refreshed_step is not None
         assert refreshed_step.status == "succeeded"

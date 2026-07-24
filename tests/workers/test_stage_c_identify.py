@@ -35,10 +35,10 @@ from platform_service.services.module_identifier import (
     ModuleIdentifierResult,
 )
 from platform_service.workers.stage_c_identify import StageCOrchestrator
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
@@ -48,17 +48,13 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE module_candidate_draft, content_block, source_page, "
-            "source_document, ingestion_run_step, ingestion_run, "
-            "behavioural_gap, module, module_family "
-            "RESTART IDENTITY CASCADE"
-        )
+    await truncate_tables(
+        db_session,
+        "module_candidate_draft, content_block, source_page, "
+        "source_document, ingestion_run_step, ingestion_run, "
+        "behavioural_gap, module, module_family",
     )
-    await db_session.commit()
+    yield
 
 
 # ─── Seed helpers ─────────────────────────────────────────────────────────
@@ -286,8 +282,10 @@ class TestIngestionInstructionsPassedToIdentifier:
         await orch.run(ingestion_run_id=run.id, source_document_ids=[sd.id])
 
         rows = (
-            await db_session.execute(
-                select(ModuleCandidateDraft).where(ModuleCandidateDraft.ingestion_run_id == run.id)
+            (
+                await db_session.execute(
+                    select(ModuleCandidateDraft).where(ModuleCandidateDraft.ingestion_run_id == run.id)
+                )
             )
             .scalars()
             .all()

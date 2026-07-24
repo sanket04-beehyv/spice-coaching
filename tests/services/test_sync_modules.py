@@ -331,7 +331,9 @@ async def test_modules_bundle_assigned_module_ids(db_session: AsyncSession) -> N
 @pytest.mark.asyncio
 @requires_db
 async def test_modules_bundle_requested_modules(db_session: AsyncSession) -> None:
-    chw_id = 1313053891
+    # Use an ID outside the hardcoded user directory so geo/PO assignment
+    # leftovers from other tests cannot pollute assigned_module_ids.
+    chw_id = uuid4().int % (10**15) + 1
     module = await _make_published_module(db_session, source_document_ids=None)
     earlier = datetime.now(UTC) - timedelta(hours=2)
     later = datetime.now(UTC) - timedelta(hours=1)
@@ -376,7 +378,7 @@ async def test_modules_bundle_requested_modules(db_session: AsyncSession) -> Non
 @pytest.mark.asyncio
 @requires_db
 async def test_modules_bundle_requested_modules_tenant_scope(db_session: AsyncSession) -> None:
-    chw_id = 1313053892
+    chw_id = uuid4().int % (10**15) + 1
     tenant_a = uuid4()
     tenant_b = uuid4()
     global_row = CHWTrainingRequest(

@@ -27,6 +27,7 @@ from platform_service.services.module_demand_service import ModuleDemandService
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.api.conftest import wipe_api_tables
 from tests.conftest import platform_path, requires_db
 
 pytestmark = [requires_db, pytest.mark.asyncio]
@@ -39,16 +40,10 @@ USER_C = 1313053892
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE chw_training_request, chw_module_assignment, attribution_event, "
-            "module_demand_summary, module, module_family RESTART IDENTITY CASCADE"
-        )
-    )
+    await wipe_api_tables(db_session)
     await db_session.execute(text("DELETE FROM config_threshold WHERE key = 'module_demand_top_k'"))
     await db_session.commit()
+    yield
 
 
 @pytest_asyncio.fixture

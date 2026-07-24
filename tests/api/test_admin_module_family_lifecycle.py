@@ -25,10 +25,10 @@ from platform_service.db.models.module import Module
 from platform_service.db.models.trigger_definition import TriggerDefinition
 from platform_service.deps import get_ai_client, get_db, get_object_storage_client
 from platform_service.services.object_storage import PresignedObjectUrl
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.api.conftest import _seed_module, _unit_basis_vector
+from tests.api.conftest import _seed_module, _unit_basis_vector, wipe_api_tables
 from tests.conftest import platform_path, requires_db
 from tests.localized_helpers import loc, primary_from_response
 
@@ -37,17 +37,8 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
+    await wipe_api_tables(db_session)
     yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE module_lifecycle_event, chw_module_completion, "
-            "module_quiz_question, module_trigger_binding, trigger_definition, "
-            "module, module_family, content_block, source_page, source_document "
-            "RESTART IDENTITY CASCADE"
-        )
-    )
-    await db_session.commit()
 
 
 @pytest_asyncio.fixture
@@ -306,7 +297,7 @@ class TestDeactivatedExcludedFromRuntime:
             platform_path("/admin/trigger-bindings"),
             json={
                 "trigger_definition_id": str(trigger.id),
-                "module_family_id": str(mod.module_family_id),
+                "module_id": str(mod.id),
             },
         )
         assert bind.status_code == 409

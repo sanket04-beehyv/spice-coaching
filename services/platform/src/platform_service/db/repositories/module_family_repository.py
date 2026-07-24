@@ -36,4 +36,3 @@ class ModuleFamilyRepository:
             and module.lifecycle_status == LIFECYCLE_PUBLISHED
             and not module.chatbot_faqs_only
         )
-

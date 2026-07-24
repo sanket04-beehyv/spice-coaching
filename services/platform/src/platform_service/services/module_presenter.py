@@ -94,10 +94,7 @@ async def summary_from_module(
         thumbnail_storage_path=thumb_path,
         thumbnail_presigned_url=thumb_url,
         thumbnail_presigned_expires_seconds=thumb_expires,
-        source_document_ids=(
-            [str(doc_id) for doc_id in (module.source_document_ids or [])]
-            or None
-        ),
+        source_document_ids=([str(doc_id) for doc_id in (module.source_document_ids or [])] or None),
     )
 
 

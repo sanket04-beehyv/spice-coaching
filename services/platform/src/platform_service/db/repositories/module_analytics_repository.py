@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import case, func, select
@@ -32,6 +33,15 @@ class ModulePerformanceRow:
     total_attempts_in_range: int
 
 
+def _locale_title(title_localized: Any, locale: str) -> str | None:
+    if not isinstance(title_localized, dict):
+        return None
+    value = title_localized.get(locale)
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
 class ModuleAnalyticsRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -58,8 +68,7 @@ class ModuleAnalyticsRepository:
                 Module.first_activated_at,
                 Module.last_deactivated_at,
                 Module.last_reactivated_at,
-                Module.title_bn,
-                Module.title_en,
+                Module.title_localized,
                 func.count(func.distinct(case((attempt_in_range, CHWModuleCompletion.chw_id)))).label(
                     "unique_chws_attempted"
                 ),
@@ -80,8 +89,7 @@ class ModuleAnalyticsRepository:
                 Module.first_activated_at,
                 Module.last_deactivated_at,
                 Module.last_reactivated_at,
-                Module.title_bn,
-                Module.title_en,
+                Module.title_localized,
             )
             .order_by(ModuleFamily.created_at.desc())
             .limit(limit)
@@ -97,8 +105,8 @@ class ModuleAnalyticsRepository:
                 module_family_id=row.module_family_id,
                 module_id=row.module_id,
                 module_code=row.module_code,
-                title_bn=row.title_bn,
-                title_en=row.title_en,
+                title_bn=_locale_title(row.title_localized, "bn"),
+                title_en=_locale_title(row.title_localized, "en"),
                 lifecycle_status=row.lifecycle_status or "draft",
                 family_created_at=row.family_created_at,
                 first_activated_at=row.first_activated_at,

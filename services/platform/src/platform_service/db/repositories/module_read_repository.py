@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import Select, cast, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_behavioural_gap import ModuleBehaviouralGap
@@ -105,12 +106,8 @@ class ModuleReadRepository:
             stmt = stmt.where(Module.source_document_ids.contains([source_document_id]))
         stmt = self._apply_date_range(stmt, Module.created_at, created_from, created_to)
         stmt = self._apply_date_range(stmt, Module.published_at, published_from, published_to)
-        stmt = self._apply_date_range(
-            stmt, self._activated_at_expr(), activated_from, activated_to
-        )
-        stmt = self._apply_date_range(
-            stmt, Module.last_deactivated_at, deactivated_from, deactivated_to
-        )
+        stmt = self._apply_date_range(stmt, self._activated_at_expr(), activated_from, activated_to)
+        stmt = self._apply_date_range(stmt, Module.last_deactivated_at, deactivated_from, deactivated_to)
         if full_text_query:
             escaped = _escape_ilike_pattern(full_text_query)
             pattern = f"%{escaped}%"
@@ -226,11 +223,7 @@ class ModuleReadRepository:
         )
         # maintain_column_froms keeps the latest_version_only JOIN when we
         # project down to Module.id for counting.
-        id_subq = (
-            base.with_only_columns(Module.id, maintain_column_froms=True)
-            .order_by(None)
-            .subquery()
-        )
+        id_subq = base.with_only_columns(Module.id, maintain_column_froms=True).order_by(None).subquery()
         count_stmt = select(func.count()).select_from(id_subq)
         result = await self._session.execute(count_stmt)
         return int(result.scalar_one())
@@ -348,26 +341,23 @@ class ModuleReadRepository:
         *,
         tenant_id: UUID | None = None,
     ) -> list[ModuleFamily]:
+        published = aliased(Module)
+        existence = [
+            published.module_family_id == ModuleFamily.id,
+            published.lifecycle_status == "published",
+            published.chatbot_faqs_only.is_(False),
+        ]
+        if tenant_id is not None:
+            existence.append(tenant_scope_filter(published.tenant_id, tenant_id))
+
         stmt = (
             select(ModuleFamily)
             .where(
                 ModuleFamily.created_at > since,
-                exists(
-                    select(Module.id).where(
-                        Module.module_family_id == ModuleFamily.id,
-                        Module.lifecycle_status == "published",
-                        is_training_module_family(),
-                    )
-                ),
+                exists(select(published.id).where(*existence)),
             )
             .order_by(ModuleFamily.created_at.asc(), ModuleFamily.id.asc())
         )
-        if tenant_id is not None:
-            stmt = (
-                stmt.join(Module, Module.module_family_id == ModuleFamily.id)
-                .where(tenant_scope_filter(Module.tenant_id, tenant_id))
-                .distinct()
-            )
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def list_published_modules_updated_since(
@@ -475,14 +465,11 @@ class ModuleReadRepository:
             )
             .exists()
         )
-        stmt = (
-            select(Module)
-            .where(
-                Module.lifecycle_status == "published",
-                link_exists,
-                tenant_filter,
-                is_training_module_family(),
-            )
+        stmt = select(Module).where(
+            Module.lifecycle_status == "published",
+            link_exists,
+            tenant_filter,
+            is_training_module_family(),
         )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
@@ -613,10 +600,7 @@ class ModuleReadRepository:
         limit: int = 5,
     ) -> list[Module]:
         """Return newest published modules by published_at (desc), optionally tenant scoped."""
-        stmt = (
-            select(Module)
-            .where(Module.lifecycle_status == "published", is_training_module_family())
-        )
+        stmt = select(Module).where(Module.lifecycle_status == "published", is_training_module_family())
         if tenant_id is not None:
             stmt = stmt.where(tenant_scope_filter(Module.tenant_id, tenant_id))
         stmt = stmt.order_by(Module.published_at.desc().nullslast(), Module.id.asc()).limit(limit)

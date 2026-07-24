@@ -12,20 +12,17 @@ from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.services.module_search_metadata_generator import SearchMetadataResult
 from platform_service.workers.search_metadata_worker import generate_search_metadata_for_module
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe(db_session: AsyncSession) -> AsyncIterator[None]:
+    await truncate_tables(db_session, "module, module_family")
     yield
-    await db_session.rollback()
-    await db_session.execute(text("TRUNCATE module, module_family RESTART IDENTITY CASCADE"))
-    await db_session.commit()
 
 
 async def _seed_module(session: AsyncSession) -> Module:

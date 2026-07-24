@@ -20,21 +20,18 @@ from platform_service.workers.gap_classification_worker import classify_module_g
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE module_behavioural_gap, module, module_family, behavioural_gap RESTART IDENTITY CASCADE"
-        )
+    await truncate_tables(
+        db_session,
+        "module_behavioural_gap, module, module_family, behavioural_gap",
     )
-    await db_session.commit()
+    yield
 
 
 async def _seed_gap(
@@ -147,7 +144,7 @@ class TestClassifyModuleGapsWorker:
         client.generate = AsyncMock(return_value=_inference_response(gap_codes=["referral_cbs"]))
 
         with patch(
-            "platform_service.services.module_gap_classifier.AIRuntimeClient",
+            "platform_service.services.module_gap_classifier.get_ai_client",
             return_value=client,
         ):
             count = await classify_module_gaps_for_module(module.id)

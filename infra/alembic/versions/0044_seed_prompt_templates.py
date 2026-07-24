@@ -21,7 +21,8 @@ down_revision: str | None = "0043"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_SEED_PATH = Path(__file__).resolve().parents[2] / "seed" / "prompt_templates.json"
+# versions/ -> alembic/ -> infra/ -> repo root
+_SEED_PATH = Path(__file__).resolve().parents[3] / "seed" / "prompt_templates.json"
 
 
 def upgrade() -> None:

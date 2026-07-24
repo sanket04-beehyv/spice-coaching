@@ -23,9 +23,9 @@ from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.repositories.module_gap_repository import ModuleGapRepository
 from platform_service.deps import get_db
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.api.conftest import wipe_api_tables
 from tests.conftest import platform_path, requires_db
 
 pytestmark = [requires_db, pytest.mark.asyncio]
@@ -37,15 +37,8 @@ def _test_chw_id() -> int:
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
+    await wipe_api_tables(db_session)
     yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE chw_behavioural_gap_state, behavioural_gap, module, module_family "
-            "RESTART IDENTITY CASCADE"
-        )
-    )
-    await db_session.commit()
 
 
 @pytest_asyncio.fixture

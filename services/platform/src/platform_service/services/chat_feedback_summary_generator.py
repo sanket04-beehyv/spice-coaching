@@ -165,7 +165,7 @@ class ChatFeedbackSummaryGenerator:
         )
 
         rendered = await PromptTemplateService().render(
-            self._session,
+            None,
             template_id=CHAT_FEEDBACK_SUMMARY_TEMPLATE_ID,
             variant_key=None,
             variables=build_chat_feedback_summary_variables(payload=llm_input),

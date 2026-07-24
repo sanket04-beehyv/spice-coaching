@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
+from platform_service.services.coaching_rag_errors import CoachingRagError
 from platform_service.services.coaching_rag_service import CoachingRagService, parse_rag_json
 from platform_service.services.llm_text_utils import strip_json_fence
 
@@ -26,9 +26,8 @@ def test_parse_rag_json_parses_raw_string() -> None:
 
 
 def test_parse_rag_json_raises_on_garbage() -> None:
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(CoachingRagError, match="non-JSON answer"):
         parse_rag_json("not json {{{", None)
-    assert exc.value.status_code == 502
 
 
 class TestParseSuggestedQuestions:

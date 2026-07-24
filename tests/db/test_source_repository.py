@@ -21,22 +21,21 @@ import pytest_asyncio
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.db.models.source_page import SourcePage
 from platform_service.db.repositories.source_repository import SourceRepository
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text("TRUNCATE content_block, source_page, source_document RESTART IDENTITY CASCADE")
+    await truncate_tables(
+        db_session,
+        "content_block, source_page, source_document",
     )
-    await db_session.commit()
+    yield
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────

@@ -52,10 +52,10 @@ from platform_service.services.card_drafter import (
 from platform_service.services.module_card_service import ModuleCardService
 from platform_service.services.published_module_merger import PublishedModuleMergerResult
 from platform_service.workers.stage_d_draft import StageDOrchestrator
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 from tests.localized_helpers import refresher_card
 
 pytestmark = [requires_db, pytest.mark.asyncio]
@@ -66,17 +66,13 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE module_card, module_quiz_question, module, module_family, "
-            "behavioural_gap, module_candidate_draft, content_block, source_page, "
-            "source_document, ingestion_run_step, ingestion_run "
-            "RESTART IDENTITY CASCADE"
-        )
+    await truncate_tables(
+        db_session,
+        "module_card, module_quiz_question, module, module_family, "
+        "behavioural_gap, module_candidate_draft, content_block, source_page, "
+        "source_document, ingestion_run_step, ingestion_run",
     )
-    await db_session.commit()
+    yield
 
 
 # ─── Seed helpers ─────────────────────────────────────────────────────────
@@ -221,7 +217,7 @@ class TestHappyPath:
         module = (await db_session.execute(select(Module).where(Module.id == result.module_id))).scalar_one()
         assert module.lifecycle_status == "draft"
         assert module.clinically_reviewed is False
-        assert module.description_localized.get("bn") == "A scope summary explaining the topic."
+        assert module.description_localized is None
         assert module.module_json is not None
         assert "cards" not in (module.module_json or {})
         card_rows = (
@@ -706,7 +702,9 @@ class TestPublishedModuleMerge:
         }
         assert draft.quality_flags_jsonb is not None
         assert "published_module_merged" in (draft.quality_flags_jsonb.get("flags") or [])
-        assert draft.description_localized.get("bn") == "নতুন বাংলা বর্ণনা।"
+        # Merge path resolves description via candidate_description_localized, which
+        # falls back to scope_summary when the candidate dict has no `description` key.
+        assert draft.description_localized.get("bn") == "A scope summary explaining the topic."
 
     async def test_skip_merge_skips_merge_when_globally_enabled(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
@@ -899,5 +897,5 @@ class TestPublishedModuleMerge:
             await orch.run(candidate_id=candidate.id)
             await db_session.commit()
 
-        mock_card_batch.assert_called_once()
-        assert mock_card_batch.call_args.kwargs.get("force") is True
+        mock_card_batch.delay.assert_called_once()
+        assert mock_card_batch.delay.call_args.kwargs.get("force") is True

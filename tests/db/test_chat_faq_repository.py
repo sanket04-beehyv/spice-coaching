@@ -10,20 +10,17 @@ import pytest
 import pytest_asyncio
 from platform_service.db.repositories.chat_faq_repository import ChatFaqRepository, ChatFaqRow
 from platform_service.services.chat_faq_aggregator import stable_faq_id
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe(db_session: AsyncSession) -> AsyncIterator[None]:
+    await truncate_tables(db_session, "chat_frequent_question")
     yield
-    await db_session.rollback()
-    await db_session.execute(text("TRUNCATE chat_frequent_question RESTART IDENTITY CASCADE"))
-    await db_session.commit()
 
 
 class TestChatFaqRepository:
@@ -101,9 +98,16 @@ class TestChatFaqRepository:
         )
         await db_session.commit()
 
-        before = computed_at - timedelta(seconds=1)
+        rows = await repo.list_updated_since(
+            tenant_id=tenant_id,
+            since=datetime(1970, 1, 1, tzinfo=UTC),
+        )
+        assert len(rows) == 1
+        updated_at = rows[0].updated_at
+
+        before = updated_at - timedelta(seconds=1)
         assert await repo.list_updated_since(tenant_id=tenant_id, since=before)
-        assert not await repo.list_updated_since(tenant_id=tenant_id, since=computed_at)
+        assert not await repo.list_updated_since(tenant_id=tenant_id, since=updated_at)
 
     async def test_list_updated_since_without_tenant_returns_all_tenants(
         self, db_session: AsyncSession

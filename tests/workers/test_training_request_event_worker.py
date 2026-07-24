@@ -15,10 +15,10 @@ from platform_service.db.models.chw_training_request import CHWTrainingRequest
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.workers import training_request_event_worker
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [pytest.mark.asyncio, requires_db]
 
@@ -29,15 +29,11 @@ def _test_chw_id() -> int:
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE chw_training_request, chw_module_assignment, module, module_family "
-            "RESTART IDENTITY CASCADE"
-        )
+    await truncate_tables(
+        db_session,
+        "chw_training_request, chw_module_assignment, module, module_family",
     )
-    await db_session.commit()
+    yield
 
 
 @pytest.fixture
@@ -45,15 +41,23 @@ def patch_session_local(db_session: AsyncSession):
     @asynccontextmanager
     async def _factory():
         original_commit = db_session.commit
+        original_rollback = db_session.rollback
 
         async def _commit_as_flush() -> None:
             await db_session.flush()
 
+        async def _rollback_noop() -> None:
+            # Worker rollbacks must not undo prior flushed work in the shared
+            # test session (e.g. first create before a duplicate no-op).
+            return None
+
         db_session.commit = _commit_as_flush  # type: ignore[method-assign]
+        db_session.rollback = _rollback_noop  # type: ignore[method-assign]
         try:
             yield db_session
         finally:
             db_session.commit = original_commit  # type: ignore[method-assign]
+            db_session.rollback = original_rollback  # type: ignore[method-assign]
 
     with patch.object(training_request_event_worker, "SessionLocal", _factory):
         yield

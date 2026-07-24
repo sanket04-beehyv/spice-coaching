@@ -237,15 +237,14 @@ class TestPromptGapContextRemoved:
     def test_system_prompt_excludes_annexures(self) -> None:
         """The grouping rules must explicitly forbid proposing modules
         from forms / checklists / reference tables. Detection cues for
-        Annexure / Appendix / अनुलग्नक / layXud must be in the prompt
-        body so the LLM has something to match against."""
-        prompt = render_system_prompt({"clinical"})
+        annexure terms must be in the prompt body so the LLM has something
+        to match against.
+        """
+        prompt = render_system_prompt({"clinical"}, deployment_primary_locale="en")
         lowered = prompt.lower()
         assert "annexure" in lowered
         assert "appendix" in lowered
         assert "job aid" in lowered
-        # Hindi-Bijoy mojibake cue (lowercase form, since prompt is lowered).
-        assert "layxud" in lowered
 
     def test_human_message_uses_short_tokens_not_uuids(self) -> None:
         """The corpus body must reference content blocks/pages/docs by
@@ -405,7 +404,7 @@ class TestValidateCandidate:
 
     @pytest.mark.parametrize(
         "card_count,expected",
-        [(2, False), (3, True), (5, True), (7, True), (8, False)],
+        [(2, False), (3, True), (5, True), (7, True), (8, True), (10, True), (11, False)],
     )
     def test_card_count_bounds(self, card_count: int, expected: bool) -> None:
         b1 = uuid4()

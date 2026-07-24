@@ -264,8 +264,7 @@ async def list_module_domains(
     status: str | None = Query(
         None,
         description=(
-            "draft | published | retired | deactivated — omit for All "
-            "(retired + deactivated excluded)"
+            "draft | published | retired | deactivated — omit for All (retired + deactivated excluded)"
         ),
     ),
     tenant_id: UUID | None = Query(

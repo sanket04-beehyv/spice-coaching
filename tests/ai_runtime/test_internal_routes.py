@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -21,7 +21,15 @@ from mc_contracts.internal_ai import (
 
 
 def _internal_headers() -> dict[str, str]:
-    return {"X-Internal-Token": get_settings().internal_token}
+    return {"X-Internal-Token": get_settings().internal_token.get_secret_value()}
+
+
+@pytest.fixture(autouse=True)
+def _configure_internal_token(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setenv("INTERNAL_TOKEN", "test-internal-token")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def _sample_request(*, generation_type: GenerationType = GenerationType.QUIZ_DRAFTING) -> InferenceRequest:

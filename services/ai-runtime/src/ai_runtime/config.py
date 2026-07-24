@@ -89,8 +89,10 @@ class Settings(BaseAppSettings):
         if len(internal_token) < 32 or internal_token in _PLACEHOLDER_VALUES:
             errors.append("INTERNAL_TOKEN must be at least 32 chars and not a placeholder")
         google_api_key = self.google_api_key.get_secret_value().strip()
-        if self.ai_provider == "google" and not self.google_use_vertex and (
-            not google_api_key or google_api_key in _PLACEHOLDER_VALUES
+        if (
+            self.ai_provider == "google"
+            and not self.google_use_vertex
+            and (not google_api_key or google_api_key in _PLACEHOLDER_VALUES)
         ):
             errors.append("GOOGLE_API_KEY or Vertex credentials are required in production")
         if errors:

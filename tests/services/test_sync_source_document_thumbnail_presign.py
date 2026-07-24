@@ -66,7 +66,7 @@ async def test_presign_source_document_thumbnail_found(db_session: AsyncSession)
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            "platform_service.services.source_thumbnail_service.presign_thumbnail",
+            "platform_service.services.sync.presign_service.presign_thumbnail",
             AsyncMock(return_value=("https://minio.example/thumb", 600)),
         )
         resp = await SyncService(db_session).get_source_document_thumbnail_presigned_urls(
@@ -110,7 +110,7 @@ async def test_presign_source_document_thumbnail_unknown_id(db_session: AsyncSes
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            "platform_service.services.source_thumbnail_service.presign_thumbnail",
+            "platform_service.services.sync.presign_service.presign_thumbnail",
             AsyncMock(return_value=("https://minio.example/thumb", 600)),
         )
         resp = await SyncService(db_session).get_source_document_thumbnail_presigned_urls(

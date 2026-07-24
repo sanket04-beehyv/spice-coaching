@@ -20,22 +20,20 @@ from platform_service.services.run_state_service import (
     STAGE_QUIZ_GENERATION,
     RunStateService,
 )
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text("TRUNCATE source_document, ingestion_run_step, ingestion_run RESTART IDENTITY CASCADE")
+    await truncate_tables(
+        db_session,
+        "source_document, ingestion_run_step, ingestion_run",
     )
-    await db_session.commit()
+    yield
 
 
 async def _seed_run(session: AsyncSession) -> tuple[RunStateService, object]:

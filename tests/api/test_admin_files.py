@@ -34,8 +34,8 @@ async def storage_mock() -> MagicMock:
             bucket_name=_TEST_BUCKET,
             object_name="uploads/test.txt",
             storage_path=f"{_TEST_BUCKET}/uploads/test.txt",
-            content_type="text/plain",
-            size_bytes=5,
+            content_type="application/pdf",
+            size_bytes=len(_TEST_PDF_BYTES),
         )
     )
     storage.stat_object = AsyncMock()

@@ -7,13 +7,16 @@ surface as VisionExtractionError.
 import base64
 from typing import Any
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import InferenceRequest, InferenceResponse, TraceContext
+from platform_service.services.prompt_template_service import PromptTemplateService, RenderedPrompt
 from platform_service.workers.extractors.vision_extractor import (
     VisionExtractionError,
     VisionExtractor,
+    _unwrap_envelope,
 )
 
 
@@ -39,6 +42,20 @@ def mock_client() -> AsyncMock:
     client = AsyncMock()
     client.generate = AsyncMock(return_value=_make_mock_response())
     return client
+
+
+@pytest.fixture(autouse=True)
+def mock_vision_prompt_template(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _render(*_args: Any, **_kwargs: Any) -> RenderedPrompt:
+        return RenderedPrompt(
+            template_id="vision",
+            template_version=1,
+            prompt_template_id=uuid4(),
+            resolved_system_prompt="Extract verbatim. Do not translate.",
+            resolved_human_message="Extract the supplied page image.",
+        )
+
+    monkeypatch.setattr(PromptTemplateService, "render", _render)
 
 
 class TestVisionExtractorRequest:
@@ -184,9 +201,6 @@ class TestVisionHtmlNormalization:
 # unwrapping, downstream `markdown_outline_parser` finds zero `#`-prefixed
 # lines and Stage 1 fails on outline_empty. The `_unwrap_envelope` helper
 # is a defensive normalisation layer over the response.
-
-
-from platform_service.workers.extractors.vision_extractor import _unwrap_envelope  # noqa: E402
 
 
 class TestUnwrapEnvelopePure:
