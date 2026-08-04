@@ -43,3 +43,4 @@ Thumbs.db
 # uv
 .python-version
 .claude/
+.cursor/

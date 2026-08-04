@@ -648,7 +648,7 @@ override).
 - ⚠️ Extra network hop and operational surface (two services to deploy/monitor)
 - ⚠️ Platform must assemble fully-resolved `InferenceRequest` objects (more contract surface)
 
-**Alternatives considered**: Monolith with inline SDK calls — rejected to prevent platform from importing `google.generativeai` (see `.cursor/rules/repo-overview.mdc`).
+**Alternatives considered**: Monolith with inline SDK calls — rejected to prevent platform from importing `google.generativeai` (see `CLAUDE.md` service boundaries).
 
 ### 9.2 — Module-Centric Model (Not Scenario-Centric)
 
@@ -765,7 +765,7 @@ Headers: `Authorization: Bearer <jwt>`, optional `client` (`web` for admin, `mob
 
 ## Appendix A — Dependency Graph
 
-Allowed import boundaries (enforced by convention and `.cursor/rules/repo-overview.mdc`):
+Allowed import boundaries (enforced by convention; see `CLAUDE.md`):
 
 ```mermaid
 graph LR
