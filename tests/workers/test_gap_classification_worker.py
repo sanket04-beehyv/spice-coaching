@@ -20,21 +20,15 @@ from platform_service.workers.gap_classification_worker import classify_module_g
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe(db_session: AsyncSession) -> AsyncIterator[None]:
+    await truncate_tables(db_session, "module_behavioural_gap, module, module_family, behavioural_gap")
     yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE module_behavioural_gap, module, module_family, behavioural_gap RESTART IDENTITY CASCADE"
-        )
-    )
-    await db_session.commit()
 
 
 async def _seed_gap(
@@ -94,8 +88,10 @@ def _inference_response(*, gap_codes: list[str], rationale: str = "test") -> Inf
     return InferenceResponse(
         request_id="r-gap",
         generation_type=GenerationType.MODULE_GAP_CLASSIFICATION,
-        provider="openai",
-        model="gpt-4o-mini",
+        provider="google",
+        model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text="",
         parsed_json={
             "associated_gap_codes": gap_codes,

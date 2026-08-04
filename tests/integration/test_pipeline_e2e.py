@@ -26,7 +26,7 @@ Scenarios covered:
 |---|---|---|
 | 1 | Happy path | Module published; cards in module_json; quiz rows; embedding set |
 | 2 | Outline-empty (Stage 1 fails) | Run failed, no module created |
-| 3 | Stage 2 returns 0 candidates | Run succeeded, Stage D step skipped |
+| 3 | Stage 2 returns 0 candidates | Run partially_succeeded, identify step failed |
 | 4 | One Stage D candidate fails | partially_succeeded, surviving candidates published |
 | 5 | Resume after Stage 2 failure | Stage 1 not re-run; pipeline picks up at Stage 2 |
 | 6 | Embedding worker AI-runtime down | Module still published; embedding stays NULL |
@@ -52,6 +52,7 @@ from platform_service.config import get_settings
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.ingestion_run import IngestionRun, IngestionRunStep
 from platform_service.db.models.module import Module
+from platform_service.db.models.module_card import ModuleCard
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.services.card_drafter import (
@@ -72,42 +73,23 @@ from platform_service.workers.quiz_generation_worker import generate_quiz_for_mo
 from platform_service.workers.stage_a_extract import StageAExtractor
 from platform_service.workers.stage_c_identify import StageCOrchestrator
 from platform_service.workers.stage_d_draft import StageDOrchestrator
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db]
-
 
 # ─── Cleanup ──────────────────────────────────────────────────────────────
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    tables = (
-        "TRUNCATE module_quiz_question, module, module_family, "
-        "behavioural_gap, module_candidate_draft, content_block, source_page, "
-        "source_document, ingestion_run_step, ingestion_run, "
-        "llm_call_cache "
-        "RESTART IDENTITY CASCADE"
+    await truncate_tables(
+        db_session,
+        "module_quiz_question, module, module_family, behavioural_gap, module_candidate_draft, content_block, source_page, source_document, ingestion_run_step, ingestion_run, llm_call_cache",
     )
-
-    async def _wipe() -> None:
-        await db_session.rollback()
-        await db_session.execute(text(tables))
-        await db_session.commit()
-
-    await _wipe()
     yield
-    await _wipe()
-
-
-@pytest.fixture(autouse=True)
-def _disable_published_merge(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Merge calls ai-runtime; keep integration tests offline."""
-    monkeypatch.setenv("STAGE_D_PUBLISHED_MERGE_ENABLED", "false")
-    get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)
@@ -204,8 +186,6 @@ async def _seed_source_doc(session: AsyncSession) -> UUID:
         source_type="pdf",
         primary_language="en",
         content_domain="clinical",
-        assessment_mode="with_quiz",
-        authority_label="BRAC",
         original_storage_path="/tmp/fake.pdf",
     )
     session.add(sd)
@@ -265,6 +245,7 @@ async def _run_orchestrator(
             card_drafter = MagicMock()
             card_drafter.draft = AsyncMock(return_value=_draft_response())
         stage_d = StageDOrchestrator(own_session, card_drafter=card_drafter)
+        stage_d._propose_published_merge = AsyncMock(return_value=None)
 
         orch = PipelineOrchestrator(own_session, stage_a=stage_a, stage_c=stage_c, stage_d=stage_d)
         result = await orch.run(
@@ -288,6 +269,8 @@ def _make_card_drafter_with_canned_response(cards: list[dict]) -> CardDrafter:
             generation_type=GenerationType.CARD_DRAFTING,
             provider="google",
             model="gemini-2.5-flash",
+            max_tokens=8192,
+            temperature=0.2,
             raw_text="",
             parsed_json={"cards": cards},
             latency_ms=10,
@@ -330,6 +313,8 @@ async def _run_post_publish_inproc(
         generation_type=GenerationType.QUIZ_DRAFTING,
         provider="google",
         model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text=quiz_raw_text or "",
         parsed_json=None if quiz_raw_text is not None else {"questions": quiz_questions or []},
         latency_ms=10,
@@ -353,14 +338,18 @@ async def _run_post_publish_inproc(
             return [vec]
 
     with patch(
-        "platform_service.workers.quiz_generation_worker.get_ai_client", return_value=_QuizClientStub()
+        "platform_service.workers.quiz_generation_worker.get_ai_client",
+        return_value=_QuizClientStub(),
     ):
         try:
             await generate_quiz_for_module(module_id)
         except Exception:  # noqa: BLE001 — workers must not propagate
             pass
 
-    with patch("platform_service.workers.embedding_worker.get_ai_client", return_value=_EmbedClientStub()):
+    with patch(
+        "platform_service.workers.embedding_worker.get_ai_client",
+        return_value=_EmbedClientStub(),
+    ):
         try:
             await generate_embedding_for_module(module_id)
         except Exception:  # noqa: BLE001
@@ -371,6 +360,8 @@ async def _run_post_publish_inproc(
         generation_type=GenerationType.MODULE_GAP_CLASSIFICATION,
         provider="google",
         model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text="",
         parsed_json={"associated_gap_codes": [], "rationale": "e2e stub"},
         latency_ms=10,
@@ -425,8 +416,9 @@ class TestHappyPath:
         )
         assert len(modules) >= 1
         m = modules[0]
-        assert m.module_json is not None
-        cards = m.module_json.get("cards", [])
+        cards = (
+            (await db_session.execute(select(ModuleCard).where(ModuleCard.module_id == m.id))).scalars().all()
+        )
         assert len(cards) >= 3
         assert m.clinically_reviewed is False
         assert m.primary_gap_id is not None
@@ -434,7 +426,7 @@ class TestHappyPath:
         # module and source_block_ids on each card so /coaching/rag-query can
         # surface page references downstream.
         assert m.source_document_ids
-        assert all(card.get("source_block_ids") for card in cards)
+        assert all(card.source_block_ids for card in cards)
 
         # Run post-publish workers and verify their effects.
         await _run_post_publish_inproc(m.id)
@@ -455,7 +447,7 @@ class TestHappyPath:
 
 
 class TestOutlineEmptyFailsRun:
-    async def test_no_heading_markers_still_runs_identifier_on_body(
+    async def test_no_heading_markers_fails_run_no_module(
         self,
         db_session: AsyncSession,
         patch_count_pages: Callable[[int], None],
@@ -467,6 +459,8 @@ class TestOutlineEmptyFailsRun:
         result, _ = await _run_orchestrator(source_document_id=sd_id, text_pages=text_pages)
 
         assert result.final_status == "succeeded"
+        modules = (await db_session.execute(select(Module))).scalars().all()
+        assert modules
         run = (
             await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
         ).scalar_one()
@@ -476,8 +470,8 @@ class TestOutlineEmptyFailsRun:
 # ─── Scenario 3: Stage C zero candidates ──────────────────────────────────
 
 
-class TestStageCZeroCandidatesSkipsStageD:
-    async def test_run_succeeds_with_card_draft_skipped(
+class TestStageCZeroCandidatesFailsIdentify:
+    async def test_run_partially_succeeds_with_identify_failed(
         self,
         db_session: AsyncSession,
         patch_count_pages: Callable[[int], None],
@@ -492,23 +486,32 @@ class TestStageCZeroCandidatesSkipsStageD:
             identify_candidates_fn=lambda _bids: [],
         )
 
-        assert result.final_status == "succeeded"
+        assert result.final_status == "partially_succeeded"
         modules = (await db_session.execute(select(Module))).scalars().all()
         assert modules == []
         steps = (
             (
                 await db_session.execute(
-                    select(IngestionRunStep)
-                    .where(IngestionRunStep.ingestion_run_id == result.run_id)
-                    .where(IngestionRunStep.stage == "card_draft")
+                    select(IngestionRunStep).where(IngestionRunStep.ingestion_run_id == result.run_id)
                 )
             )
             .scalars()
             .all()
         )
-        assert len(steps) == 1
-        assert steps[0].status == "skipped"
-        assert steps[0].output_summary_jsonb["skipped_reason"] == "no_candidates_from_stage_c"
+        assert {step.stage: step.status for step in steps} == {
+            "extract": "succeeded",
+            "module_identify": "failed",
+        }
+
+        run = (
+            await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
+        ).scalar_one()
+        assert run.status == "partially_succeeded"
+        assert run.error_jsonb == {
+            "code": "identify_no_candidates",
+            "failed_stage": "module_identify",
+            "message": "zero candidates were identified",
+        }
 
 
 # ─── Scenario 4: Per-candidate Stage D failure ────────────────────────────
@@ -544,9 +547,12 @@ class TestStageDPerCandidateFailure:
         )
 
         assert result.final_status == "partially_succeeded"
-        modules = (await db_session.execute(select(Module))).scalars().all()
+        modules = (
+            (await db_session.execute(select(Module).where(Module.lifecycle_status == "draft")))
+            .scalars()
+            .all()
+        )
         assert len(modules) == 2
-        assert all(m.lifecycle_status == "draft" for m in modules)
         run = (
             await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
         ).scalar_one()
@@ -683,9 +689,15 @@ class TestEmbeddingWorkerFailureNonBlocking:
         result, _ = await _run_orchestrator(source_document_id=sd_id, text_pages=text_pages)
 
         assert result.final_status == "succeeded"
-        modules = (await db_session.execute(select(Module))).scalars().all()
+        modules = (
+            (await db_session.execute(select(Module).where(Module.lifecycle_status == "draft")))
+            .scalars()
+            .all()
+        )
         assert len(modules) >= 1
         m = modules[0]
+
+        # Run embedding worker with the AI-runtime raising.
         await _run_post_publish_inproc(m.id, embed_raises=RuntimeError("Vertex 503"))
 
         await db_session.refresh(m)
@@ -708,7 +720,11 @@ class TestQuizWorkerMalformedJsonNonBlocking:
         result, _ = await _run_orchestrator(source_document_id=sd_id, text_pages=text_pages)
 
         assert result.final_status == "succeeded"
-        modules = (await db_session.execute(select(Module))).scalars().all()
+        modules = (
+            (await db_session.execute(select(Module).where(Module.lifecycle_status == "draft")))
+            .scalars()
+            .all()
+        )
         assert len(modules) >= 1
         m = modules[0]
 

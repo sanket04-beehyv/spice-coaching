@@ -48,6 +48,8 @@ def candidate_description_localized(
     s = settings or get_settings()
     primary = deployment_locales(s)
     data = dict(candidate)
+    if "description" not in data and isinstance(data.get("description_localized"), dict):
+        data["description"] = data["description_localized"]
     if "description" not in data:
         migrate_legacy_suffix_field(data, "description", primary=primary)
     desc = data.get("description")
@@ -136,6 +138,16 @@ def migrate_legacy_card(
     return out
 
 
+def _is_flat_synonym_dict(value: Any) -> bool:
+    """Return True when value looks like a flat abbrev→expansion map (not a locale map)."""
+    if not isinstance(value, dict) or not value:
+        return False
+    for key, item in value.items():
+        if not isinstance(key, str) or not isinstance(item, str):
+            return False
+    return True
+
+
 def migrate_legacy_search_metadata(
     metadata: dict[str, Any],
     *,
@@ -145,6 +157,21 @@ def migrate_legacy_search_metadata(
     out = dict(metadata)
     for field in LOCALIZED_SEARCH_METADATA_LIST_FIELDS:
         migrate_legacy_suffix_list_field(out, field, primary=primary, legacy_mirror=legacy_mirror)
+        raw = out.get(field)
+        if isinstance(raw, list):
+            cleaned = [item.strip() for item in raw if isinstance(item, str) and item.strip()]
+            if cleaned:
+                out[field] = {primary: cleaned}
+            else:
+                out.pop(field, None)
+    legacy_synonyms = out.pop("synonyms_en", None)
+    if legacy_synonyms is not None and "synonyms" not in out:
+        if _is_flat_synonym_dict(legacy_synonyms):
+            locale_key = legacy_mirror or "en"
+            out["synonyms"] = {locale_key: legacy_synonyms}
+    synonyms = out.get("synonyms")
+    if _is_flat_synonym_dict(synonyms):
+        out["synonyms"] = {primary: synonyms}
     return out
 
 
@@ -235,3 +262,39 @@ def localized_list_field_has_content(
     data = migrate_legacy_search_metadata(dict(metadata), primary=primary)
     value = data.get(field)
     return isinstance(value, dict) and any(value.values())
+
+
+def localized_synonyms_has_content(
+    metadata: dict[str, Any],
+    field: str = "synonyms",
+    *,
+    settings: Settings | None = None,
+) -> bool:
+    """Return True when the primary locale has a non-empty synonym abbrev map."""
+    return bool(primary_synonyms(metadata, field=field, settings=settings))
+
+
+def primary_synonyms(
+    metadata: dict[str, Any],
+    field: str = "synonyms",
+    *,
+    settings: Settings | None = None,
+) -> dict[str, str]:
+    """Return the deployment-primary synonym abbrev map from search metadata."""
+    s = settings or get_settings()
+    primary = deployment_locales(s)
+    data = migrate_legacy_search_metadata(dict(metadata), primary=primary)
+    value = data.get(field)
+    if not isinstance(value, dict):
+        return {}
+    primary_map = value.get(primary)
+    if not isinstance(primary_map, dict):
+        return {}
+    out: dict[str, str] = {}
+    for abbrev, expanded in primary_map.items():
+        if isinstance(abbrev, str) and isinstance(expanded, str):
+            a = abbrev.strip()
+            e = expanded.strip()
+            if a and e:
+                out[a] = e
+    return out

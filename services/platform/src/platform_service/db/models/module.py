@@ -12,9 +12,9 @@ Per `docs/ARCHITECTURE_RESET.md`:
   a content change (not a routine correction) is published.
 - `clinically_reviewed` defaults false. Pipeline auto-publishes; admin
   flips this from the dashboard once a clinician has signed off.
-- `lifecycle_status` is the simplified set `draft | published | retired`.
-  Pipeline writes `published` directly (no `in_review` / `approved`
-  intermediate; the W-6 reviewer queue was deleted).
+- `lifecycle_status` is `draft | published | retired | deactivated | review_pending`.
+  Stage D dual-path merge writes primary/secondary as `review_pending`;
+  normal ingest drafts use `draft`.
 - `module_type` enum: refresher | content_update | digital_proficiency.
 - `urgent_publish` is a quality flag for the dashboard, not a publish gate.
 """
@@ -64,15 +64,17 @@ class Module(Base):
         ARRAY(UUID(as_uuid=True)), nullable=True
     )
 
-    # MinIO path to module preview PNG. Defaults from the first linked
+    # Object-storage path to module preview PNG. Defaults from the first linked
     # source_document thumbnail at creation; admins may override independently.
     thumbnail_storage_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     urgent_publish: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # When true, this module version is FAQ knowledge for chatbot retrieval only
+    # and is excluded from CHW training workflows.
+    chatbot_faqs_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # ── module content (cards inline; no per-card tables) ───────────
-    # Shape: {"cards": [{"title": {"bn": ...}, "body": {"bn": ...}, ...}, ...]}.
-    # Locale keys match deployment_primary_locale.
+    # ── module shell JSON (module-level attachments only; cards in module_card) ──
+    # Shape: {"attachments": [...]} or NULL.
     module_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     # Per-module embedding vector. The migration defines it as vector(N)
@@ -118,14 +120,24 @@ class Module(Base):
     clinically_reviewed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     # ── lifecycle ───────────────────────────────────────────────────────
-    # draft | published | retired
+    # draft | published | retired | deactivated | review_pending
     lifecycle_status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_reactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deactivated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    reactivated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # When this module-version was retired (admin action). Distinct from
     # `published_at` for the same row — a published module that is later
     # retired carries both timestamps.
     deprecated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     supersedes_module_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Dual-path merge links (Stage D). Primary points at secondary; secondary
+    # points at primary; both point at the matched tip used for the LLM merge.
+    merge_secondary_module_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    merge_primary_module_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    merge_source_module_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

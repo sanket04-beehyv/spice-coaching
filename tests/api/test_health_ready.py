@@ -1,4 +1,4 @@
-"""Health and readiness endpoint tests."""
+"""Readiness endpoint tests."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from platform_service.config import get_settings
 from platform_service.main import create_app
 
 from tests.conftest import platform_path, requires_db
@@ -17,22 +16,15 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture
-async def health_client() -> AsyncIterator[AsyncClient]:
+async def client() -> AsyncIterator[AsyncClient]:
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
 
-async def test_health_returns_ok(health_client: AsyncClient) -> None:
-    resp = await health_client.get(platform_path("/health"))
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "ok"
-    assert "service" in body
-
-
-async def test_ready_returns_ok_when_dependencies_healthy(health_client: AsyncClient) -> None:
+@pytest.mark.asyncio
+async def test_ready_returns_ok_when_dependencies_healthy(client: AsyncClient) -> None:
     ch_mock = MagicMock()
     ch_mock.query_rows = AsyncMock(return_value=[(1,)])
     storage_mock = MagicMock()
@@ -46,13 +38,13 @@ async def test_ready_returns_ok_when_dependencies_healthy(health_client: AsyncCl
         ai_client = AsyncMock()
         ai_resp = MagicMock()
         ai_resp.raise_for_status = MagicMock()
-        ai_resp.json = MagicMock(return_value={"provider": get_settings().ai_cloud_provider})
+        ai_resp.json = MagicMock(return_value={"provider": "google"})
         ai_client.get = AsyncMock(return_value=ai_resp)
         ai_client.__aenter__ = AsyncMock(return_value=ai_client)
         ai_client.__aexit__ = AsyncMock(return_value=None)
         httpx_cls.return_value = ai_client
 
-        resp = await health_client.get(platform_path("/ready"))
+        resp = await client.get(platform_path("/ready"))
 
     assert resp.status_code == 200
     body = resp.json()

@@ -9,10 +9,12 @@ from uuid import UUID
 
 from platform_service.config import get_settings
 from platform_service.workers.extractors.calibration import sample_calibration_for_document
+from platform_service.workers.extractors.extraction_markdown import persist_markdown_content
 from platform_service.workers.extractors.quality_heuristic import score_page
 from platform_service.workers.extractors.stage_a_outline_assembler import (
     assemble_outline_from_persisted_pages,
 )
+from platform_service.workers.extractors.stage_a_text_guard import assert_document_has_text
 from platform_service.workers.extractors.stage_a_vision_recovery import (
     run_vision_path,
     run_vision_recovery_pass,
@@ -41,7 +43,7 @@ async def _persist_page(
     await host._repo.create_source_page(
         source_document_id=source_document_id,
         page_number=page_number,
-        markdown_content=markdown,
+        markdown_content=persist_markdown_content(markdown),
         extraction_method=method,
         extraction_quality_score=score.composite_score,
         page_image_path=image_path,
@@ -147,6 +149,14 @@ async def run_document_path(
         total_pages=total_pages,
         primary_language=primary_language,
         pages_persisted=pages_persisted,
+    )
+    pages_rows = await host._repo.list_pages_for_document(source_document_id)
+    await assert_document_has_text(
+        host._repo,
+        host._session,
+        source_document_id=source_document_id,
+        page_markdowns=[p.markdown_content or "" for p in pages_rows],
+        total_pages=total_pages,
     )
     logger.info(
         "Stage 1 complete source_document_id=%s pages=%d sections=%d methods=%s",

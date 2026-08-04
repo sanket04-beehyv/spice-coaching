@@ -1,7 +1,7 @@
 """Module attachment refs stored inline in ``module.module_json``.
 
-Files are uploaded via ``POST /admin/v3/files`` (MinIO); this DTO holds the
-object path reference. YouTube links store a normalized URL only (no MinIO).
+Files are uploaded via ``POST /admin/files`` (object storage); this DTO holds the
+object path reference. YouTube links store a normalized URL only (no object storage).
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ class ModuleAttachmentFileRef(BaseModel):
 
 
 class ModuleAttachmentYoutubeRef(BaseModel):
-    """External YouTube link (no MinIO object)."""
+    """External YouTube link (no object-storage object)."""
 
     kind: Literal["youtube"] = "youtube"
     attachment_id: str = Field(..., description="UUID string; stable within a module version")

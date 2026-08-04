@@ -25,36 +25,29 @@ import pytest_asyncio
 from platform_service.config import get_settings
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.db.models.source_page import SourcePage
+from platform_service.workers.extractors.calibration import CalibrationDecision
 from platform_service.workers.extractors.media_splitter import MediaChunk
 from platform_service.workers.extractors.text_extractor import ExtractedPage
 from platform_service.workers.extractors.vision_extractor import VisionExtractionError, VisionExtractionResult
 from platform_service.workers.stage_a_extract import (
+    Stage1DocumentEmptyError,
     Stage1RecoveryFailedError,
     StageAExtractor,
 )
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE content_block, source_page, source_document, "
-            "ingestion_run_step, ingestion_run "
-            "RESTART IDENTITY CASCADE"
-        )
+    await truncate_tables(
+        db_session, "content_block, source_page, source_document, ingestion_run_step, ingestion_run"
     )
-    await db_session.commit()
-
-
-# ─── Helpers ──────────────────────────────────────────────────────────────
+    yield
 
 
 async def _seed_source_document(session: AsyncSession) -> UUID:
@@ -63,8 +56,6 @@ async def _seed_source_document(session: AsyncSession) -> UUID:
         source_type="pdf",
         primary_language="en",
         content_domain="clinical",
-        assessment_mode="with_quiz",
-        authority_label="BRAC",
         original_storage_path="/tmp/x.pdf",
     )
     session.add(sd)
@@ -124,8 +115,6 @@ class TestMediaTranscriptPath:
             source_type="audio",
             primary_language="bn",
             content_domain="clinical",
-            assessment_mode="with_quiz",
-            authority_label="BRAC",
             original_storage_path="/tmp/audio.mp3",
         )
         db_session.add(sd)
@@ -167,6 +156,46 @@ class TestMediaTranscriptPath:
             await db_session.execute(select(SourcePage).where(SourcePage.source_document_id == sd.id))
         ).scalar_one()
         assert row.extraction_method == "transcript"
+
+    async def test_empty_transcript_fails_stage_1(self, db_session: AsyncSession) -> None:
+        sd = SourceDocument(
+            title="silent-audio",
+            source_type="audio",
+            primary_language="bn",
+            content_domain="clinical",
+            original_storage_path="/tmp/silent.mp3",
+        )
+        db_session.add(sd)
+        await db_session.flush()
+        await db_session.commit()
+
+        media_transcriber = AsyncMock(return_value="   ")
+        stage_a = StageAExtractor(
+            db_session,
+            media_transcriber_fn=media_transcriber,
+        )
+        stage_a._extractors["audio"]._splitter_fn = lambda *_args, **_kwargs: [
+            MediaChunk(
+                index=0,
+                start_ms=0,
+                end_ms=60_000,
+                payload_bytes=b"fake-audio",
+                mime_type="audio/mpeg",
+            )
+        ]
+        with pytest.raises(Stage1DocumentEmptyError, match="The document is empty"):
+            await stage_a.run(
+                source_document_id=sd.id,
+                source_path="/tmp/silent.mp3",
+                source_type="audio",
+                primary_language="bn",
+            )
+
+        await db_session.rollback()
+        refreshed = (
+            await db_session.execute(select(SourceDocument).where(SourceDocument.id == sd.id))
+        ).scalar_one()
+        assert refreshed.status == "failed"
 
 
 # ─── Empty outline is acceptable (post-c5b6635 chunker contract) ─────────
@@ -374,18 +403,84 @@ class TestCalibrationAllVision:
         assert result.extraction_method_counts.get("text", 0) == 0
 
 
-# ─── Zero-page document ───────────────────────────────────────────────────
+# ─── Empty / below-threshold document text fails Stage 1 ─────────────────
 
 
-class TestZeroPageDocument:
-    async def test_zero_pages_returns_empty_result_no_raise(self, db_session: AsyncSession) -> None:
+class TestDocumentEmptyFails:
+    async def test_all_blank_pages_raise_and_mark_failed(self, db_session: AsyncSession) -> None:
         sd_id = await _seed_source_document(db_session)
+        text_pages = [
+            ExtractedPage(page_number=1, markdown=""),
+            ExtractedPage(page_number=2, markdown="   \n\t  "),
+        ]
 
         with patch(
             "platform_service.workers.stage_a_extract.count_pages",
-            return_value=0,
+            return_value=len(text_pages),
         ):
-            stage_a = _make_stage_a(db_session, text_pages=[])
+            stage_a = _make_stage_a(db_session, text_pages=text_pages, vision_markdown="")
+            with pytest.raises(Stage1DocumentEmptyError, match="The document is empty"):
+                await stage_a.run(
+                    source_document_id=sd_id,
+                    source_path="/tmp/x.pdf",
+                    source_type="pdf",
+                    primary_language="en",
+                )
+
+        await db_session.rollback()
+        sd = (await db_session.execute(select(SourceDocument).where(SourceDocument.id == sd_id))).scalar_one()
+        assert sd.status == "failed"
+
+    async def test_below_threshold_total_raises(self, db_session: AsyncSession) -> None:
+        sd_id = await _seed_source_document(db_session)
+        min_chars = get_settings().extraction_quality_text_empty_min_chars
+        short = "x" * (min_chars - 1)
+        text_pages = [ExtractedPage(page_number=1, markdown=short)]
+
+        with patch(
+            "platform_service.workers.stage_a_extract.count_pages",
+            return_value=1,
+        ):
+            # Force text_only so vision cannot inflate the char count.
+            stage_a = _make_stage_a(db_session, text_pages=text_pages)
+            with (
+                patch(
+                    "platform_service.workers.extractors.stage_a_document_path.sample_calibration_for_document",
+                ) as calib,
+                pytest.raises(Stage1DocumentEmptyError),
+            ):
+                calib.return_value = (
+                    CalibrationDecision(
+                        path="text_only",
+                        sample_pages_evaluated=[1],
+                        sample_pass_count=1,
+                        sample_fail_count=0,
+                        sample_fail_rate=0.0,
+                    ),
+                    {},
+                )
+                await stage_a.run(
+                    source_document_id=sd_id,
+                    source_path="/tmp/x.pdf",
+                    source_type="pdf",
+                    primary_language="en",
+                )
+
+        await db_session.rollback()
+        sd = (await db_session.execute(select(SourceDocument).where(SourceDocument.id == sd_id))).scalar_one()
+        assert sd.status == "failed"
+
+    async def test_vision_recovery_above_threshold_succeeds(self, db_session: AsyncSession) -> None:
+        """Empty text pages that vision recovers with enough text must pass."""
+        sd_id = await _seed_source_document(db_session)
+        text_pages = [ExtractedPage(page_number=1, markdown="")]
+        recovered = "# Recovered\n\n" + ("body " * 20)
+
+        with patch(
+            "platform_service.workers.stage_a_extract.count_pages",
+            return_value=1,
+        ):
+            stage_a = _make_stage_a(db_session, text_pages=text_pages, vision_markdown=recovered)
             result = await stage_a.run(
                 source_document_id=sd_id,
                 source_path="/tmp/x.pdf",
@@ -393,9 +488,35 @@ class TestZeroPageDocument:
                 primary_language="en",
             )
 
-        # Stage 1 returns cleanly with 0 pages_persisted; no raise.
-        assert result.total_pages == 0
-        assert result.pages_persisted == 0
+        assert result.pages_persisted == 1
+        await db_session.rollback()
+        sd = (await db_session.execute(select(SourceDocument).where(SourceDocument.id == sd_id))).scalar_one()
+        assert sd.status == "ingested"
+
+
+# ─── Zero-page document ───────────────────────────────────────────────────
+
+
+class TestZeroPageDocument:
+    async def test_zero_pages_raises_document_empty(self, db_session: AsyncSession) -> None:
+        sd_id = await _seed_source_document(db_session)
+
+        with patch(
+            "platform_service.workers.stage_a_extract.count_pages",
+            return_value=0,
+        ):
+            stage_a = _make_stage_a(db_session, text_pages=[])
+            with pytest.raises(Stage1DocumentEmptyError, match="The document is empty"):
+                await stage_a.run(
+                    source_document_id=sd_id,
+                    source_path="/tmp/x.pdf",
+                    source_type="pdf",
+                    primary_language="en",
+                )
+
+        await db_session.rollback()
+        sd = (await db_session.execute(select(SourceDocument).where(SourceDocument.id == sd_id))).scalar_one()
+        assert sd.status == "failed"
 
 
 # ─── Vision recovery pass ────────────────────────────────────────────────

@@ -29,11 +29,10 @@ from typing import Any
 from uuid import UUID
 
 from mc_contracts.enums import GenerationType
+from mc_contracts.errors import ErrorCode
 from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceRequest,
-    ModelPolicy,
-    PromptSpec,
     TraceContext,
 )
 from mc_foundation.locale import localized_primary_text
@@ -44,6 +43,7 @@ from platform_service.config import Settings, get_settings
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
+from platform_service.db.repositories.module_read_repository import ModuleReadRepository
 from platform_service.deps import get_ai_client
 from platform_service.localized import (
     deployment_locales,
@@ -52,71 +52,19 @@ from platform_service.localized import (
     migrate_legacy_card,
 )
 from platform_service.services.card_body_text import card_body_plain_text
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.llm_response_resolver import resolve_parsed_json
 from platform_service.services.post_publish_step import finish_post_publish_step
-from platform_service.services.prompts.symbol_verbalization import (
-    render_locale_list_map_field_schema,
-    render_locale_map_field_schema,
+from platform_service.services.prompt_registry import QUIZ_GENERATION_TEMPLATE_ID
+from platform_service.services.prompt_template_service import PromptTemplateService, prompt_spec_from_rendered
+from platform_service.services.prompt_variables.quiz_generation_variables import (
+    build_quiz_generation_variables,
 )
 from platform_service.services.quiz_explanation_sanitizer import (
     sanitize_explanation_localized,
 )
 
 logger = logging.getLogger(__name__)
-
-QUIZ_GENERATION_TEMPLATE_ID = "post-publish-quiz-generation"
-# v3: monolingual deployment — primary locale only.
-QUIZ_GENERATION_TEMPLATE_VERSION = 4
-
-
-def render_system_prompt(
-    *,
-    deployment_primary_locale: str | None = None,
-    deployment_region_context: str | None = None,
-) -> str:
-    settings = get_settings()
-    primary_locale = deployment_primary_locale or settings.deployment_primary_locale
-    region_context = deployment_region_context or settings.deployment_region_context
-
-    return f"""\
-You write scenario-based quiz questions for community health workers (CHWs)
-in {region_context}, using locale-keyed maps for all translatable fields.
-The questions are delivered by a low-spec mobile app — they cannot use rich
-media, only text.
-
-Rules:
-- One quiz item per question_index. Do NOT cluster sub-questions.
-- Each question references content present in the supplied module cards.
-  Do not invent facts.
-- Single-select questions only (no multi-select, no ordering).
-- 4 options per question. Exactly one is correct.
-- Distractors must be plausibly wrong — content the CHW could reasonably
-  pick if they had not internalised the card. No silly distractors.
-- All translatable fields use the deployment primary locale ({primary_locale}).
-- Explanations must stand alone: explain why the correct answer is correct in
-  clinical prose. Do NOT mention card numbers, card titles, or phrases like
-  "see Card N" / "কার্ড N". The `primary_card_index` field records which card
-  the question tests — do not echo it in `explanation`.
-
-Return STRICT JSON. The output must be a single object with this shape:
-{{
-  "questions": [
-    {{
-{render_locale_map_field_schema("case_setup", primary_locale=primary_locale, description="patient case, ~2 sentences")}
-{render_locale_map_field_schema("question", primary_locale=primary_locale, primary_required=True)}
-{render_locale_list_map_field_schema("options", primary_locale=primary_locale, max_items=4, description="exactly 4 options")}
-      "correct_index": integer (0-3),
-{render_locale_map_field_schema("explanation", primary_locale=primary_locale, description="why the correct answer is correct; no card references")}
-      "primary_card_index": integer (1-based card number this question tests),
-      "difficulty": "easy" | "moderate" | "hard"
-    }},
-    ...
-  ]
-}}
-
-Do not include markdown fences or commentary. Only the JSON object.
-"""
-
 
 _HUMAN_TEMPLATE = """\
 Module title: {module_title}
@@ -196,7 +144,12 @@ def _extract_localized_options(
     return extract_localized_options_from_raw(raw, settings=settings)
 
 
-async def generate_quiz_for_module(module_id: UUID, *, step_id: UUID | None = None) -> int:
+async def generate_quiz_for_module(
+    module_id: UUID,
+    *,
+    step_id: UUID | None = None,
+    quiz_size: int | None = None,
+) -> int:
     """Generate quiz questions for a published module. Returns count written.
 
     Idempotent on retry — existing rows for `module_id` are deleted before
@@ -212,10 +165,13 @@ async def generate_quiz_for_module(module_id: UUID, *, step_id: UUID | None = No
                 await finish_post_publish_step(
                     step_id=step_id,
                     success=False,
+                    error_code=ErrorCode.MODULE_NOT_FOUND.value,
+                    error_message=f"module {module_id} not found",
                     error={"type": "ModuleNotFound", "message": f"module {module_id} not found"},
                 )
                 return 0
-            cards = (module.module_json or {}).get("cards", [])
+            card_rows = await ModuleReadRepository(session).list_cards(module_id)
+            cards = [card_row_to_dict(row) for row in card_rows]
             if not cards:
                 logger.info("Quiz worker: module %s has no cards; skipping quiz", module_id)
                 await finish_post_publish_step(
@@ -229,13 +185,17 @@ async def generate_quiz_for_module(module_id: UUID, *, step_id: UUID | None = No
             primary = deployment_locales(settings)
             module_title = localized_primary_text(module.title_localized, primary) or ""
 
-            quiz_size = _target_quiz_size(len(cards))
+            resolved_quiz_size = (
+                _clamp_quiz_size(quiz_size, settings=settings)
+                if quiz_size is not None
+                else _target_quiz_size(len(cards))
+            )
             questions = await _call_llm(
                 module_id=module_id,
                 module_title=module_title,
                 domain=module.domain,
                 cards=cards,
-                quiz_size=quiz_size,
+                quiz_size=resolved_quiz_size,
                 settings=settings,
             )
             if not questions:
@@ -255,10 +215,21 @@ async def generate_quiz_for_module(module_id: UUID, *, step_id: UUID | None = No
                 await session.delete(existing)
             await session.flush()
 
+            card_family_by_index = {
+                idx: UUID(str(card["card_family_id"]))
+                for idx, card in enumerate(cards, start=1)
+                if card.get("card_family_id")
+            }
+
             for idx, q in enumerate(questions, start=1):
                 question_localized = _extract_localized_string(q, "question", settings=settings)
                 if not question_localized.get(primary):
                     continue
+                primary_card_index = q.get("primary_card_index")
+                primary_card_family_id = None
+                if isinstance(primary_card_index, int):
+                    primary_card_family_id = card_family_by_index.get(primary_card_index)
+
                 row = ModuleQuizQuestion(
                     module_id=module_id,
                     question_order=idx,
@@ -274,6 +245,7 @@ async def generate_quiz_for_module(module_id: UUID, *, step_id: UUID | None = No
                         _extract_localized_string(q, "explanation", settings=settings)
                     ),
                     difficulty=q.get("difficulty", "moderate"),
+                    primary_card_family_id=primary_card_family_id,
                 )
                 session.add(row)
                 written += 1
@@ -290,6 +262,8 @@ async def generate_quiz_for_module(module_id: UUID, *, step_id: UUID | None = No
         await finish_post_publish_step(
             step_id=step_id,
             success=False,
+            error_code=ErrorCode.QUIZ_GENERATION_FAILED.value,
+            error_message=str(exc)[:500],
             error={"type": type(exc).__name__, "message": str(exc)[:500]},
         )
         raise
@@ -300,6 +274,11 @@ def _target_quiz_size(card_count: int) -> int:
     toward 1 question per card up to the maximum."""
     settings = get_settings()
     return max(settings.quiz_min_questions, min(card_count, settings.quiz_max_questions))
+
+
+def _clamp_quiz_size(quiz_size: int, *, settings: Settings) -> int:
+    """Clamp an explicit ingest target to deployment quiz bounds."""
+    return max(settings.quiz_min_questions, min(quiz_size, settings.quiz_max_questions))
 
 
 async def _load_module(session: AsyncSession, module_id: UUID) -> Module | None:
@@ -321,25 +300,24 @@ async def _call_llm(
         _format_card_block(c, i, primary_locale=primary, settings=settings)
         for i, c in enumerate(cards, start=1)
     )
-    human_message = _HUMAN_TEMPLATE.format(
-        module_title=module_title,
-        domain=domain,
-        quiz_size=quiz_size,
-        cards_block=cards_block,
+    rendered = await PromptTemplateService().render(
+        None,
+        template_id=QUIZ_GENERATION_TEMPLATE_ID,
+        variant_key=None,
+        variables=build_quiz_generation_variables(
+            module_title=module_title,
+            domain=domain,
+            quiz_size=quiz_size,
+            cards_block=cards_block,
+            deployment_primary_locale=primary,
+            deployment_region_context=settings.deployment_region_context,
+            settings=settings,
+        ),
     )
     request = InferenceRequest(
         request_id=str(uuid.uuid4()),
         generation_type=GenerationType.QUIZ_DRAFTING,
-        model_policy=ModelPolicy(model=settings.text_model),
-        prompt=PromptSpec(
-            template_id=QUIZ_GENERATION_TEMPLATE_ID,
-            template_version=QUIZ_GENERATION_TEMPLATE_VERSION,
-            resolved_system_prompt=render_system_prompt(
-                deployment_primary_locale=primary,
-                deployment_region_context=settings.deployment_region_context,
-            ),
-            resolved_human_message=human_message,
-        ),
+        prompt=prompt_spec_from_rendered(rendered),
         constraints=GenerationConstraints(
             language=primary,
             output_format="json",

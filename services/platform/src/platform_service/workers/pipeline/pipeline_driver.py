@@ -4,52 +4,28 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID
+
+from mc_contracts.errors import ErrorCode
 
 from platform_service.services.run_state_service import (
     RUN_FAILED,
     RUN_PARTIALLY_SUCCEEDED,
     RUN_RUNNING,
     RUN_SUCCEEDED,
-    STAGE_CARD_DRAFT,
     STAGE_EXTRACT,
     STAGE_MODULE_IDENTIFY,
     ConcurrentRunError,
 )
 from platform_service.services.source_path_materialize import materialize_local_source_file
-from platform_service.workers.pipeline.types import PipelineResult, StageOutcome
+from platform_service.workers.pipeline.types import PipelineResult
 
 if TYPE_CHECKING:
     from platform_service.workers.pipeline_orchestrator import PipelineOrchestrator
 
 logger = logging.getLogger(__name__)
-
-
-def stage_progress_event(
-    run_id_str: str,
-    stage: str,
-    outcome: StageOutcome,
-    *,
-    ok: bool,
-) -> dict[str, Any] | None:
-    if outcome.status == "skipped":
-        return {"event": "stage_skipped", "run_id": run_id_str, "stage": stage}
-    if ok:
-        return {
-            "event": "stage_succeeded",
-            "run_id": run_id_str,
-            "stage": stage,
-            "summary": outcome.summary,
-        }
-    return {
-        "event": "stage_failed",
-        "run_id": run_id_str,
-        "stage": stage,
-        "error": outcome.error,
-    }
 
 
 async def drive_pipeline(
@@ -61,19 +37,32 @@ async def drive_pipeline(
     primary_language: str,
     triggered_by: UUID | None,
     resume: bool,
-    skip_merge: bool,
     staged_sessions: bool,
-    emit_events: bool,
-    result_box: list[PipelineResult] | None,
-) -> AsyncIterator[dict[str, Any]]:
-    """Single A→identify→draft state machine; optionally yields SSE progress dicts."""
-    run_id: UUID
-    run_id_str: str
+    result_box: list[PipelineResult],
+    run_id: UUID | None = None,
+    identify_chunk_ids: list[str] | None = None,
+) -> None:
+    """Single A→identify→draft state machine."""
     claim_token = str(uuid.uuid4())
+    resolved_run_id: UUID
 
     async with orchestrator._stage_context(staged_sessions) as orch:
         run = None
-        if resume:
+        if run_id is not None:
+            run = await orch._run_state.activate_queued_run(run_id)
+            if run.source_document_id != source_document_id:
+                raise ValueError(
+                    f"run_id {run_id} belongs to source_document {run.source_document_id}, "
+                    f"not {source_document_id}"
+                )
+            logger.info(
+                "Attaching to ingestion_run %s for source_document %s (status=%s)",
+                run.id,
+                source_document_id,
+                run.status,
+            )
+            await orch._session.commit()
+        elif resume:
             run = await orch._run_state.find_resumable_run(source_document_id)
             if run is not None:
                 logger.info(
@@ -92,194 +81,105 @@ async def drive_pipeline(
             raise ConcurrentRunError(source_document_id, run.id)
         await orch._session.commit()
 
-        run_id = run.id
-        run_id_str = str(run_id)
+        resolved_run_id = run.id
         result = PipelineResult(
-            run_id=run_id,
+            run_id=resolved_run_id,
             source_document_id=source_document_id,
             final_status=RUN_SUCCEEDED,
         )
-        if result_box is not None:
-            result_box.append(result)
-
-        if emit_events:
-            yield {
-                "event": "run_started",
-                "run_id": run_id_str,
-                "source_document_id": str(source_document_id),
-            }
+        result_box.append(result)
 
     local_source_path, staged_cleanup = await materialize_local_source_file(source_path)
     try:
-        if emit_events:
-            yield {"event": "stage_started", "run_id": run_id_str, "stage": STAGE_EXTRACT}
         async with orchestrator._stage_context(staged_sessions) as orch:
-            await orch._run_state.refresh_run_claim(run_id, claim_token=claim_token)
+            await orch._run_state.refresh_run_claim(resolved_run_id, claim_token=claim_token)
             ok = await orch._run_extract(
                 result=result,
-                run_id=run_id,
+                run_id=resolved_run_id,
                 source_document_id=source_document_id,
                 source_path=local_source_path,
                 source_type=source_type,
                 primary_language=primary_language,
             )
-        outcome_a = result.stages[-1]
-        if emit_events:
-            progress = stage_progress_event(run_id_str, STAGE_EXTRACT, outcome_a, ok=ok)
-            if progress is not None:
-                yield progress
         if not ok:
+            extract_error = next(
+                (s.error for s in reversed(result.stages) if s.stage == STAGE_EXTRACT and s.error),
+                None,
+            )
+            run_error: dict[str, object] = {
+                "code": ErrorCode.EXTRACT_FAILED.value,
+                "failed_stage": STAGE_EXTRACT,
+            }
+            if extract_error:
+                if extract_error.get("reason") is not None:
+                    run_error["reason"] = extract_error["reason"]
+                if extract_error.get("message") is not None:
+                    run_error["message"] = extract_error["message"]
             async with orchestrator._stage_context(staged_sessions) as orch:
                 await orch._run_state.complete_run(
-                    run_id,
+                    resolved_run_id,
                     status=RUN_FAILED,
-                    error_jsonb={"failed_stage": STAGE_EXTRACT},
+                    error_jsonb=run_error,
                 )
                 await orch._session.commit()
             result.final_status = RUN_FAILED
-            if emit_events:
-                yield {
-                    "event": "pipeline_complete",
-                    "run_id": run_id_str,
-                    "final_status": result.final_status,
-                }
             return
 
-        if emit_events:
-            yield {
-                "event": "stage_started",
-                "run_id": run_id_str,
-                "stage": STAGE_MODULE_IDENTIFY,
-            }
         async with orchestrator._stage_context(staged_sessions) as orch:
-            await orch._run_state.refresh_run_claim(run_id, claim_token=claim_token)
+            await orch._run_state.refresh_run_claim(resolved_run_id, claim_token=claim_token)
             ok, candidates_emitted = await orch._run_identify(
                 result=result,
-                run_id=run_id,
+                run_id=resolved_run_id,
                 source_document_id=source_document_id,
+                identify_chunk_ids=identify_chunk_ids,
             )
-        outcome_c = result.stages[-1]
-        if emit_events:
-            progress = stage_progress_event(run_id_str, STAGE_MODULE_IDENTIFY, outcome_c, ok=ok)
-            if progress is not None:
-                yield progress
         if not ok:
+            identify_error = next(
+                (s.error for s in reversed(result.stages) if s.stage == STAGE_MODULE_IDENTIFY and s.error),
+                None,
+            )
+            run_error: dict[str, object] = {
+                "code": ErrorCode.IDENTIFY_FAILED.value,
+                "failed_stage": STAGE_MODULE_IDENTIFY,
+            }
+            if identify_error:
+                if identify_error.get("code") is not None:
+                    run_error["code"] = identify_error["code"]
+                if identify_error.get("message") is not None:
+                    run_error["message"] = identify_error["message"]
             async with orchestrator._stage_context(staged_sessions) as orch:
                 await orch._run_state.complete_run(
-                    run_id,
+                    resolved_run_id,
                     status=RUN_PARTIALLY_SUCCEEDED,
-                    error_jsonb={"failed_stage": STAGE_MODULE_IDENTIFY},
+                    error_jsonb=run_error,
                 )
                 await orch._session.commit()
             result.final_status = RUN_PARTIALLY_SUCCEEDED
-            if emit_events:
-                yield {
-                    "event": "pipeline_complete",
-                    "run_id": run_id_str,
-                    "final_status": result.final_status,
-                }
             return
         result.candidates_emitted = candidates_emitted
 
-        if emit_events:
-            yield {"event": "stage_started", "run_id": run_id_str, "stage": STAGE_CARD_DRAFT}
-        if candidates_emitted == 0:
-            async with orchestrator._stage_context(staged_sessions) as orch:
-                await orch._run_state.skip_step(
-                    run_id=run_id,
-                    stage=STAGE_CARD_DRAFT,
-                    reason="no_candidates_from_stage_c",
-                )
-                result.stages.append(
-                    StageOutcome(
-                        stage=STAGE_CARD_DRAFT,
-                        status="skipped",
-                        summary={"reason": "no_candidates_from_stage_c"},
-                    )
-                )
-                await orch._run_state.maybe_finalize_ingestion_run(run_id)
-                await orch._session.commit()
-                refreshed = await orch._run_state.get_run(run_id)
-            result.final_status = refreshed.status if refreshed is not None else RUN_SUCCEEDED
-            if emit_events:
-                yield {
-                    "event": "stage_skipped",
-                    "run_id": run_id_str,
-                    "stage": STAGE_CARD_DRAFT,
-                    "reason": "no_candidates_from_stage_c",
-                }
-                if result.final_status != RUN_RUNNING:
-                    yield {
-                        "event": "pipeline_complete",
-                        "run_id": run_id_str,
-                        "final_status": result.final_status,
-                        "candidates_emitted": 0,
-                        "drafts_produced": 0,
-                    }
-            return
-
         async with orchestrator._stage_context(staged_sessions) as orch:
-            await orch._run_state.refresh_run_claim(run_id, claim_token=claim_token)
-            drafts_produced, draft_failures = await orch._run_drafting(
+            await orch._run_state.refresh_run_claim(resolved_run_id, claim_token=claim_token)
+            drafts_produced, _draft_failures = await orch._run_drafting(
                 result=result,
-                run_id=run_id,
-                skip_merge=skip_merge,
+                run_id=resolved_run_id,
             )
         result.drafts_produced = drafts_produced
-        if emit_events:
-            outcome_d = result.stages[-1]
-            if outcome_d.status == "skipped":
-                yield {
-                    "event": "stage_skipped",
-                    "run_id": run_id_str,
-                    "stage": STAGE_CARD_DRAFT,
-                }
-            elif draft_failures > 0:
-                yield {
-                    "event": "stage_failed",
-                    "run_id": run_id_str,
-                    "stage": STAGE_CARD_DRAFT,
-                    "error": outcome_d.error,
-                }
-            else:
-                yield {
-                    "event": "stage_succeeded",
-                    "run_id": run_id_str,
-                    "stage": STAGE_CARD_DRAFT,
-                    "summary": outcome_d.summary,
-                }
 
         async with orchestrator._stage_context(staged_sessions) as orch:
-            await orch._run_state.maybe_finalize_ingestion_run(run_id)
+            await orch._run_state.maybe_finalize_ingestion_run(resolved_run_id)
             await orch._session.commit()
-            refreshed = await orch._run_state.get_run(run_id)
+            refreshed = await orch._run_state.get_run(resolved_run_id)
         result.final_status = refreshed.status if refreshed is not None else RUN_RUNNING
-        if emit_events and result.final_status != RUN_RUNNING:
-            yield {
-                "event": "pipeline_complete",
-                "run_id": run_id_str,
-                "final_status": result.final_status,
-                "candidates_emitted": result.candidates_emitted,
-                "drafts_produced": result.drafts_produced,
-            }
     finally:
         try:
             async with orchestrator._stage_context(staged_sessions) as orch:
-                await orch._run_state.release_run_claim(run_id, claim_token=claim_token)
+                await orch._run_state.release_run_claim(resolved_run_id, claim_token=claim_token)
                 await orch._session.commit()
         except Exception:
             logger.exception(
                 "Failed to release pipeline claim for run_id=%s",
-                run_id,
+                resolved_run_id,
             )
         if staged_cleanup is not None:
             staged_cleanup.unlink(missing_ok=True)
-
-
-async def run_pipeline_to_completion(
-    orchestrator: PipelineOrchestrator,
-    **kwargs: Any,
-) -> AsyncGenerator[dict[str, Any], None]:
-    """Yield events from ``drive_pipeline`` (SSE mode)."""
-    async for event in drive_pipeline(orchestrator, emit_events=True, result_box=None, **kwargs):
-        yield event

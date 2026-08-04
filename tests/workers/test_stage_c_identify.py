@@ -25,7 +25,8 @@ import pytest
 import pytest_asyncio
 from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.content_block import ContentBlock
-from platform_service.db.models.ingestion_run import IngestionRun
+from platform_service.db.models.ingest_batch import IngestBatch
+from platform_service.db.models.ingestion_run import IngestionRun, IngestionRunStep
 from platform_service.db.models.module_candidate_draft import ModuleCandidateDraft
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.db.models.source_page import SourcePage
@@ -34,34 +35,28 @@ from platform_service.services.module_identifier import (
     ModuleIdentifierError,
     ModuleIdentifierResult,
 )
+from platform_service.services.run_state_service import (
+    STAGE_MODULE_IDENTIFY,
+    STEP_FAILED,
+)
 from platform_service.workers.stage_c_identify import StageCOrchestrator
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
-
 
 # ─── Cleanup ──────────────────────────────────────────────────────────────
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE module_candidate_draft, content_block, source_page, "
-            "source_document, ingestion_run_step, ingestion_run, "
-            "behavioural_gap, module, module_family "
-            "RESTART IDENTITY CASCADE"
-        )
+    await truncate_tables(
+        db_session,
+        "module_candidate_draft, content_block, source_page, source_document, ingestion_run_step, ingestion_run, ingest_batch, behavioural_gap, module, module_family",
     )
-    await db_session.commit()
-
-
-# ─── Seed helpers ─────────────────────────────────────────────────────────
+    yield
 
 
 async def _seed_source_doc_with_outline(
@@ -78,8 +73,6 @@ async def _seed_source_doc_with_outline(
         source_type="pdf",
         primary_language="en",
         content_domain="clinical",
-        assessment_mode="with_quiz",
-        authority_label="BRAC",
         original_storage_path="/tmp/x.pdf",
         outline_method="markdown_parser",
         outline_jsonb={"sections": sections or [{"heading": "Sec 1"}]},
@@ -111,16 +104,44 @@ async def _seed_source_doc_with_outline(
     return sd, blocks
 
 
-async def _seed_run(session: AsyncSession, source_document_id: UUID) -> IngestionRun:
-    run = IngestionRun(source_document_id=source_document_id, status="running")
+async def _seed_run(
+    session: AsyncSession,
+    source_document_id: UUID,
+    *,
+    ingestion_instructions: str | None = None,
+    assessment_mode: str = "with_quiz",
+    cards_per_module: int | None = None,
+    quizzes_per_module: int | None = None,
+) -> IngestionRun:
+    batch = IngestBatch(
+        status="running",
+        assessment_mode=assessment_mode,
+        ingestion_instructions=ingestion_instructions,
+        cards_per_module=cards_per_module,
+        quizzes_per_module=quizzes_per_module,
+    )
+    session.add(batch)
+    await session.flush()
+    run = IngestionRun(
+        source_document_id=source_document_id,
+        ingest_batch_id=batch.id,
+        status="running",
+    )
     session.add(run)
     await session.flush()
     await session.commit()
     return run
 
 
-def _llm_candidate(block_ids: list[UUID], *, title: str = "T", cards: int = 5, quiz: int = 4) -> dict:
-    return {
+def _llm_candidate(
+    block_ids: list[UUID],
+    *,
+    title: str = "T",
+    cards: int = 5,
+    quiz: int = 4,
+    domain: str | None = None,
+) -> dict:
+    out = {
         "proposed_title": title,
         "scope_summary": "Summary of the topic.",
         "source_provenance": [
@@ -134,6 +155,9 @@ def _llm_candidate(block_ids: list[UUID], *, title: str = "T", cards: int = 5, q
         "estimated_quiz_count": quiz,
         "proposed_module_type": "refresher",
     }
+    if domain is not None:
+        out["domain"] = domain
+    return out
 
 
 def _identifier_mock(candidates: list[dict]) -> MagicMock:
@@ -248,12 +272,13 @@ class TestQualityFlagsAreAdvisory:
 
 
 class TestIngestionInstructionsPassedToIdentifier:
-    async def test_passes_instructions_from_source_document(self, db_session: AsyncSession) -> None:
+    async def test_passes_instructions_from_ingest_batch(self, db_session: AsyncSession) -> None:
         sd, blocks = await _seed_source_doc_with_outline(db_session, page_count=1)
-        sd.ingestion_instructions = "Prioritize ANC referral modules."
-        await db_session.commit()
-
-        run = await _seed_run(db_session, sd.id)
+        run = await _seed_run(
+            db_session,
+            sd.id,
+            ingestion_instructions="Prioritize ANC referral modules.",
+        )
         ident = _identifier_mock([_llm_candidate([blocks[0].id])])
         orch = StageCOrchestrator(db_session, identifier=ident)
         result = await orch.run(ingestion_run_id=run.id, source_document_ids=[sd.id])
@@ -266,25 +291,21 @@ class TestIngestionInstructionsPassedToIdentifier:
 
     async def test_persists_ingestion_instruction_rationale(self, db_session: AsyncSession) -> None:
         sd, blocks = await _seed_source_doc_with_outline(db_session, page_count=1)
-        sd.ingestion_instructions = "Prioritize ANC referral modules."
-        await db_session.commit()
-
-        run = await _seed_run(db_session, sd.id)
+        run = await _seed_run(
+            db_session,
+            sd.id,
+            ingestion_instructions="Prioritize ANC referral modules.",
+        )
         cand = _llm_candidate([blocks[0].id])
         cand["ingestion_instruction_rationale"] = "Chapter 2 covers ANC referral workflows."
         ident = _identifier_mock([cand])
         orch = StageCOrchestrator(db_session, identifier=ident)
         await orch.run(ingestion_run_id=run.id, source_document_ids=[sd.id])
 
-        rows = (
-            (
-                await db_session.execute(
-                    select(ModuleCandidateDraft).where(ModuleCandidateDraft.ingestion_run_id == run.id)
-                )
-            )
-            .scalars()
-            .all()
+        result = await db_session.execute(
+            select(ModuleCandidateDraft).where(ModuleCandidateDraft.ingestion_run_id == run.id)
         )
+        rows = result.scalars().all()
         assert len(rows) == 1
         assert rows[0].ingestion_instruction_rationale == "Chapter 2 covers ANC referral workflows."
 
@@ -350,6 +371,26 @@ class TestNoGapContextLoaded:
         # candidate (Stage 2 prompt no longer reasons about gaps).
         assert rows[0].behavioural_gap_code is None
 
+    async def test_persisted_candidate_carries_domain_from_stage_c(self, db_session: AsyncSession) -> None:
+        sd, blocks = await _seed_source_doc_with_outline(db_session)
+        run = await _seed_run(db_session, sd.id)
+        ident = _identifier_mock([_llm_candidate([blocks[0].id], domain="family_planning")])
+
+        orch = StageCOrchestrator(db_session, identifier=ident)
+        await orch.run(ingestion_run_id=run.id, source_document_ids=[sd.id])
+
+        rows = (
+            (
+                await db_session.execute(
+                    select(ModuleCandidateDraft).where(ModuleCandidateDraft.ingestion_run_id == run.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].domain == "family_planning"
+
 
 # ─── Identifier failure path ──────────────────────────────────────────────
 
@@ -359,7 +400,7 @@ class TestIdentifierFailures:
         """In the chunked architecture, a per-chunk identifier failure is
         logged and counted but does NOT abort Stage 2. The run completes
         with chunks_failed > 0 and candidates_emitted reflecting only the
-        chunks that succeeded."""
+        chunks that succeeded. Each failed chunk gets a failed run step."""
         sd, _ = await _seed_source_doc_with_outline(db_session)
         run = await _seed_run(db_session, sd.id)
 
@@ -372,6 +413,43 @@ class TestIdentifierFailures:
         assert result.candidates_emitted == 0
         assert result.chunks_failed >= 1
         assert result.chunks_succeeded == 0
+
+        chunk_steps = (
+            (
+                await db_session.execute(
+                    select(IngestionRunStep).where(
+                        IngestionRunStep.ingestion_run_id == run.id,
+                        IngestionRunStep.stage == STAGE_MODULE_IDENTIFY,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert chunk_steps
+        assert all(s.status == STEP_FAILED for s in chunk_steps)
+        assert all((s.input_summary_jsonb or {}).get("chunk_id") for s in chunk_steps)
+        assert all(s.error_jsonb and s.error_jsonb.get("type") for s in chunk_steps)
+
+    async def test_persists_source_chunk_ids_on_success(self, db_session: AsyncSession) -> None:
+        sd, blocks = await _seed_source_doc_with_outline(db_session)
+        run = await _seed_run(db_session, sd.id)
+        ident = _identifier_mock([_llm_candidate([blocks[0].id], title="Chunked")])
+        orch = StageCOrchestrator(db_session, identifier=ident)
+        result = await orch.run(ingestion_run_id=run.id, source_document_ids=[sd.id])
+        assert result.candidates_emitted == 1
+        rows = (
+            (
+                await db_session.execute(
+                    select(ModuleCandidateDraft).where(ModuleCandidateDraft.ingestion_run_id == run.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].source_chunk_ids
+        assert all(isinstance(x, str) and x.startswith("chunk-") for x in rows[0].source_chunk_ids)
 
 
 # ─── Output summary shape ─────────────────────────────────────────────────
@@ -445,8 +523,6 @@ class TestEnsureContentBlocks:
             source_type="pdf",
             primary_language="en",
             content_domain="clinical",
-            assessment_mode="with_quiz",
-            authority_label="BRAC",
             original_storage_path="/tmp/x.pdf",
             outline_method="markdown_parser",
             outline_jsonb={"sections": [{"heading": "Sec"}]},
@@ -493,3 +569,44 @@ class TestEnsureContentBlocks:
             .all()
         )
         assert len(after) >= 1
+
+    async def test_content_blocks_store_plain_text(self, db_session: AsyncSession) -> None:
+        sd = SourceDocument(
+            title="t",
+            source_type="pdf",
+            primary_language="en",
+            content_domain="clinical",
+            original_storage_path="/tmp/x.pdf",
+            outline_method="markdown_parser",
+            outline_jsonb={"sections": [{"heading": "Sec"}]},
+        )
+        db_session.add(sd)
+        await db_session.flush()
+        sp = SourcePage(
+            source_document_id=sd.id,
+            page_number=1,
+            markdown_content="# Heading\n\n**Bold** body with - not a list item.",
+            extraction_method="text",
+            extraction_quality_score=0.9,
+        )
+        db_session.add(sp)
+        await db_session.flush()
+        await db_session.commit()
+
+        run = await _seed_run(db_session, sd.id)
+        ident = _identifier_mock([])
+        orch = StageCOrchestrator(db_session, identifier=ident)
+        await orch.run(ingestion_run_id=run.id, source_document_ids=[sd.id])
+
+        blocks = (
+            (
+                await db_session.execute(
+                    select(ContentBlock).join(SourcePage).where(SourcePage.source_document_id == sd.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        paragraph = next(b for b in blocks if b.block_type == "paragraph")
+        assert paragraph.content_text == "Bold body with - not a list item."
+        assert "**" not in paragraph.content_text

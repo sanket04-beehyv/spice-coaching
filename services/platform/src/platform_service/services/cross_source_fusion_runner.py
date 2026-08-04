@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
+from mc_contracts.errors import ErrorCode
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.base import SessionLocal
@@ -49,8 +50,10 @@ from platform_service.services.cross_source_fuser import CrossSourceFuser, Cross
 from platform_service.services.fusion_candidate_loader import load_fusion_candidates
 from platform_service.services.fusion_draft_orchestrator import FusionDraftOrchestrator
 from platform_service.services.fusion_retire_policy import FusionRetirePolicy
+from platform_service.services.ingestion_cardinality import load_batch_for_run, resolve_from_batch
 from platform_service.services.run_state_service import (
     RUN_FAILED,
+    RUN_RUNNING,
     RUN_SUCCEEDED,
     STAGE_CARD_DRAFT,
     STAGE_CROSS_SOURCE_FUSION,
@@ -93,14 +96,27 @@ class CrossSourceFusionRunner:
         self._session = session
         self._fuser = fuser or CrossSourceFuser()
         self._stage_d = stage_d
-        self._draft_orchestrator = draft_orchestrator
+        self._draft_orchestrator = draft_orchestrator or (
+            FusionDraftOrchestrator(session, stage_d) if session is not None and stage_d is not None else None
+        )
         self._retire_policy = retire_policy
 
     @classmethod
-    async def run_staged(cls, source_document_ids: list[UUID], **kwargs: Any) -> FusionRunSummary:
+    async def run_staged(
+        cls,
+        source_document_ids: list[UUID],
+        *,
+        ingest_batch_id: UUID | None = None,
+        reuse_fusion_run_id: UUID | None = None,
+        **kwargs: Any,
+    ) -> FusionRunSummary:
         """Run fusion releasing the DB connection before LLM-heavy work."""
         runner = cls(session=None, **kwargs)
-        return await runner.run(source_document_ids)
+        return await runner.run(
+            source_document_ids,
+            ingest_batch_id=ingest_batch_id,
+            reuse_fusion_run_id=reuse_fusion_run_id,
+        )
 
     def _draft_orchestrator_for(self, session: AsyncSession) -> FusionDraftOrchestrator:
         if self._draft_orchestrator is not None:
@@ -111,17 +127,29 @@ class CrossSourceFusionRunner:
     def _retire_policy_for(self, session: AsyncSession) -> FusionRetirePolicy:
         return self._retire_policy or FusionRetirePolicy(session)
 
-    async def run(self, source_document_ids: list[UUID]) -> FusionRunSummary:
+    async def run(
+        self,
+        source_document_ids: list[UUID],
+        *,
+        ingest_batch_id: UUID | None = None,
+        reuse_fusion_run_id: UUID | None = None,
+    ) -> FusionRunSummary:
         if len(source_document_ids) < 2:
             raise ValueError(
                 f"cross-source fusion requires ≥2 source_document_ids; got {len(source_document_ids)}"
             )
 
         if self._session is not None:
-            return await self._run_bound(source_document_ids)
+            return await self._run_bound(
+                source_document_ids,
+                ingest_batch_id=ingest_batch_id,
+                reuse_fusion_run_id=reuse_fusion_run_id,
+            )
 
         candidates, candidates_by_id, fusion_run_id, fuse_step_id = await self._prepare_fusion_run(
-            source_document_ids
+            source_document_ids,
+            ingest_batch_id=ingest_batch_id,
+            reuse_fusion_run_id=reuse_fusion_run_id,
         )
 
         try:
@@ -132,6 +160,8 @@ class CrossSourceFusionRunner:
                 run_state = RunStateService(session)
                 await run_state.fail_step(
                     fuse_step_id,
+                    error_code=ErrorCode.FUSION_FAILED.value,
+                    error_message=str(exc)[:500],
                     error={"type": type(exc).__name__, "message": str(exc)[:500]},
                 )
                 await run_state.complete_run(fusion_run_id, status=RUN_FAILED)
@@ -147,7 +177,13 @@ class CrossSourceFusionRunner:
             fusion_result=fusion_result,
         )
 
-    async def _run_bound(self, source_document_ids: list[UUID]) -> FusionRunSummary:
+    async def _run_bound(
+        self,
+        source_document_ids: list[UUID],
+        *,
+        ingest_batch_id: UUID | None = None,
+        reuse_fusion_run_id: UUID | None = None,
+    ) -> FusionRunSummary:
         """Run using the constructor-bound session (tests and legacy callers)."""
         session = self._session
         assert session is not None
@@ -155,6 +191,8 @@ class CrossSourceFusionRunner:
         candidates, candidates_by_id, fusion_run_id, fuse_step_id = await self._prepare_fusion_run(
             source_document_ids,
             session=session,
+            ingest_batch_id=ingest_batch_id,
+            reuse_fusion_run_id=reuse_fusion_run_id,
         )
 
         try:
@@ -164,6 +202,8 @@ class CrossSourceFusionRunner:
             run_state = RunStateService(session)
             await run_state.fail_step(
                 fuse_step_id,
+                error_code=ErrorCode.FUSION_FAILED.value,
+                error_message=str(exc)[:500],
                 error={"type": type(exc).__name__, "message": str(exc)[:500]},
             )
             await run_state.complete_run(fusion_run_id, status=RUN_FAILED)
@@ -185,6 +225,8 @@ class CrossSourceFusionRunner:
         source_document_ids: list[UUID],
         *,
         session: AsyncSession | None = None,
+        ingest_batch_id: UUID | None = None,
+        reuse_fusion_run_id: UUID | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], UUID, UUID]:
         """Load candidates, create fusion run, and start fuse step; then release session."""
         if session is None:
@@ -192,6 +234,8 @@ class CrossSourceFusionRunner:
                 return await self._prepare_fusion_run(
                     source_document_ids,
                     session=scoped_session,
+                    ingest_batch_id=ingest_batch_id,
+                    reuse_fusion_run_id=reuse_fusion_run_id,
                 )
 
         candidates = await self._load_candidates(source_document_ids, session=session)
@@ -208,8 +252,21 @@ class CrossSourceFusionRunner:
         )
 
         run_state = RunStateService(session)
-        fusion_run = await run_state.start_fusion_run(source_document_ids=source_document_ids)
-        fusion_run_id = fusion_run.id
+        if reuse_fusion_run_id is not None:
+            fusion_run = await run_state.get_run(reuse_fusion_run_id)
+            if fusion_run is None:
+                raise ValueError(f"fusion ingestion_run {reuse_fusion_run_id} not found")
+            if not run_state.is_fusion_run(fusion_run):
+                raise ValueError(f"ingestion_run {reuse_fusion_run_id} is not a fusion run")
+            if fusion_run.status != RUN_RUNNING:
+                fusion_run = await run_state.reopen_run_for_retry(reuse_fusion_run_id)
+            fusion_run_id = fusion_run.id
+        else:
+            fusion_run = await run_state.start_fusion_run(
+                source_document_ids=source_document_ids,
+                ingest_batch_id=ingest_batch_id,
+            )
+            fusion_run_id = fusion_run.id
         self._draft_orchestrator_for(session).bind_fusion_run(fusion_run_id)
         await session.commit()
 
@@ -363,6 +420,13 @@ class CrossSourceFusionRunner:
         expected_sources: set[str],
     ) -> tuple[UUID | None, int, str | None, bool, dict[str, Any]]:
         """Run one LLM-bound fused draft in a fresh DB session."""
+        if self._session is not None and self._draft_orchestrator is not None:
+            return await self._draft_fused_candidate_bound(
+                fusion_run_id=fusion_run_id,
+                fc_id=fc_id,
+                group=group,
+                expected_sources=expected_sources,
+            )
         async with SessionLocal() as draft_session:
             run_state = RunStateService(draft_session)
             draft_orchestrator = FusionDraftOrchestrator(
@@ -399,6 +463,8 @@ class CrossSourceFusionRunner:
             else:
                 await run_state.fail_step(
                     draft_step_id,
+                    error_code=ErrorCode.DRAFT_FAILED.value,
+                    error_message=reason or "draft_failed",
                     error={
                         "candidate_id": str(fc_id),
                         "insufficient_reason": reason or "draft_failed",
@@ -406,6 +472,55 @@ class CrossSourceFusionRunner:
                 )
             await draft_session.commit()
             return module_id, cards_count, reason, coverage_ok, draft_summary
+
+    async def _draft_fused_candidate_bound(
+        self,
+        *,
+        fusion_run_id: UUID,
+        fc_id: UUID,
+        group: FusionGroup,
+        expected_sources: set[str],
+    ) -> tuple[UUID | None, int, str | None, bool, dict[str, Any]]:
+        """Draft through injected collaborators when a session is bound."""
+        session = self._session
+        assert session is not None
+        draft_orchestrator = self._draft_orchestrator
+        assert draft_orchestrator is not None
+        run_state = RunStateService(session)
+        draft_step = await run_state.start_step(
+            run_id=fusion_run_id,
+            stage=STAGE_CARD_DRAFT,
+            input_summary={
+                "candidate_id": str(fc_id),
+                "fusion": True,
+                "merged_title": group.merged_title,
+            },
+        )
+        await session.commit()
+        module_id, cards_count, reason, coverage_ok = await draft_orchestrator.draft_with_coverage(
+            fc_id,
+            expected_sources,
+            step_id=draft_step.id,
+        )
+        draft_summary = {
+            "candidate_id": str(fc_id),
+            "module_id": str(module_id) if module_id else None,
+            "cards_count": cards_count,
+            "merged_title": group.merged_title,
+            "insufficient_reason": reason,
+            "cross_source_coverage_ok": coverage_ok,
+        }
+        if module_id is not None:
+            await run_state.complete_step(draft_step.id, output_summary=draft_summary)
+        else:
+            await run_state.fail_step(
+                draft_step.id,
+                error_code=ErrorCode.DRAFT_FAILED.value,
+                error_message=reason or "draft_failed",
+                error={"candidate_id": str(fc_id), "insufficient_reason": reason or "draft_failed"},
+            )
+        await session.commit()
+        return module_id, cards_count, reason, coverage_ok, draft_summary
 
     async def _load_candidates(
         self,
@@ -440,6 +555,7 @@ class CrossSourceFusionRunner:
         module_type = candidates_by_id[str(group.constituent_ids[0])].get(
             "proposed_module_type", "initial_training"
         )
+        domain = candidates_by_id[str(group.constituent_ids[0])].get("domain")
 
         quality_flags = {
             "flags": ["cross_source_fused"],
@@ -450,14 +566,29 @@ class CrossSourceFusionRunner:
             },
         }
 
+        batch = await load_batch_for_run(db, fusion_run_id)
+        cardinality = resolve_from_batch(batch)
+        first_constituent = candidates_by_id[str(group.constituent_ids[0])]
+        estimated_card_count = (
+            cardinality.target_cards
+            if cardinality.target_cards is not None
+            else int(first_constituent.get("estimated_card_count") or 5)
+        )
+        estimated_quiz_count = (
+            cardinality.target_quizzes
+            if cardinality.target_quizzes is not None
+            else int(first_constituent.get("estimated_quiz_count") or 5)
+        )
+
         repo = ModuleCandidateRepository(db)
         cand = await repo.create_candidate(
             ingestion_run_id=fusion_run_id,
             proposed_title=group.merged_title,
             scope_summary=group.merged_scope_summary,
+            domain=domain,
             source_provenance=merged_prov,
-            estimated_card_count=5,
-            estimated_quiz_count=5,
+            estimated_card_count=estimated_card_count,
+            estimated_quiz_count=estimated_quiz_count,
             proposed_module_type=module_type,
             quality_flags=quality_flags,
         )

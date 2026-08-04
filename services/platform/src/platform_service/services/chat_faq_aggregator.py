@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -11,11 +10,19 @@ from uuid import UUID
 
 from platform_service.clickhouse.client import ClickHouseClient
 from platform_service.config import Settings, get_settings
+from platform_service.services.question_text import normalize_question
 
 _DIGITAL_HELP_EVENT = "digital_help_used"
 _FAQ_ID_NAMESPACE = uuid.UUID("a3f2c8e1-4b6d-4e9a-8f1c-2d7e6b5a4c93")
 
-_WHITESPACE_RE = re.compile(r"\s+")
+# Re-export for callers that historically imported from this module.
+__all__ = (
+    "CandidateQuestion",
+    "ChatFaqAggregator",
+    "TenantQuestionCandidates",
+    "normalize_question",
+    "stable_faq_id",
+)
 
 
 @dataclass(frozen=True)
@@ -30,10 +37,6 @@ class CandidateQuestion:
 class TenantQuestionCandidates:
     tenant_id: UUID
     questions: list[CandidateQuestion]
-
-
-def normalize_question(text: str) -> str:
-    return _WHITESPACE_RE.sub(" ", text.strip())
 
 
 def stable_faq_id(*, tenant_id: UUID, normalized_question_en: str) -> UUID:

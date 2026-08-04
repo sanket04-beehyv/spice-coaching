@@ -58,8 +58,8 @@ async def middleware_app(
     app = FastAPI()
     app.add_middleware(SpiceAuthMiddleware, client=mock_spice_client)
 
-    @app.get(f"{API_ROOT}/health")
-    async def health() -> dict[str, str]:
+    @app.get(f"{API_ROOT}/ready")
+    async def ready() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get(f"{API_ROOT}/probe")
@@ -78,7 +78,8 @@ async def test_disabled_auth_allows_request_without_token(monkeypatch: pytest.Mo
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get(f"{API_ROOT}/health")
+        # Prefer a dependency-free route: /ready probes Postgres/Redis/etc.
+        resp = await client.get(f"{API_ROOT}/openapi.json")
     assert resp.status_code == 200
     get_settings.cache_clear()
 
@@ -113,8 +114,8 @@ async def test_enabled_valid_token_proceeds(
 
 
 @pytest.mark.asyncio
-async def test_health_exempt_when_auth_enabled(middleware_app: AsyncClient) -> None:
-    resp = await middleware_app.get(f"{API_ROOT}/health")
+async def test_ready_exempt_when_auth_enabled(middleware_app: AsyncClient) -> None:
+    resp = await middleware_app.get(f"{API_ROOT}/ready")
     assert resp.status_code == 200
 
 
@@ -149,8 +150,8 @@ async def test_spice_auth_unavailable_returns_503(
 
 def test_spice_auth_exempt_path_set_default() -> None:
     s = Settings()
-    assert f"{s.api_root_path_normalized}/health" in s.spice_auth_exempt_path_set
     assert f"{s.api_root_path_normalized}/ready" in s.spice_auth_exempt_path_set
+    assert f"{s.api_root_path_normalized}/health" not in s.spice_auth_exempt_path_set
 
 
 def test_spice_auth_authenticate_url() -> None:

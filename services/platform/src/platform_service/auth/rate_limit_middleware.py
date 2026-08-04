@@ -6,9 +6,11 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 
+from mc_contracts.errors import ErrorCode
+from mc_foundation.problem import problem_json_response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 
 from platform_service.config import Settings, get_settings
 from platform_service.deps import get_redis_client
@@ -63,7 +65,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 count,
                 limit,
             )
-            return JSONResponse(status_code=429, content={"detail": "rate limit exceeded"})
+            return problem_json_response(
+                code=ErrorCode.RATE_LIMIT_EXCEEDED.value,
+                detail="rate limit exceeded",
+                status=429,
+                instance=str(request.url.path),
+            )
 
         return await call_next(request)
 

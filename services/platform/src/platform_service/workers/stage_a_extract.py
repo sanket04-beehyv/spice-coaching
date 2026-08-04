@@ -10,11 +10,13 @@ Per `docs/ARCHITECTURE_RESET.md`. The flow per source document:
 4. **Assemble the outline deterministically** from the per-page markdown
    (heading lines parsed by `markdown_outline_parser`). Persist
    `source_document.outline_jsonb`.
-5. Stage 1 success contract: `pages_persisted > 0` AND `section_count > 0`.
-   An empty outline fails the stage hard — no separate Stage B, no silent
-   `outline_method='failed'` masquerading as success. The orchestrator
-   propagates this as a real ingestion_run_step failure so downstream
-   stages never run on garbage.
+5. Stage 1 success contract: usable body/transcript text above
+   `extraction_quality_text_empty_min_chars` (sum of stripped page markdown).
+   Zero-page docs and empty/near-empty transcripts fail hard via
+   `Stage1DocumentEmptyError`. Empty outline alone is non-fatal — the
+   identifier can still run on body content. The orchestrator propagates
+   Stage 1 failures as real ingestion_run_step failures so downstream
+   stages never run on empty sources.
 
 The caller (pipeline_orchestrator) is responsible for:
 - Creating the source_document row before invoking us
@@ -39,7 +41,6 @@ from platform_service.workers.extractors.base import (
     SourceExtractor,
     UnsupportedSourceTypeError,
 )
-from platform_service.workers.extractors.calibration import build_calibration_decision
 from platform_service.workers.extractors.document_extractor import DocumentSourceExtractor
 from platform_service.workers.extractors.media_extractor import MediaSourceExtractor
 from platform_service.workers.extractors.page_renderer import (
@@ -52,6 +53,7 @@ from platform_service.workers.extractors.stage_a_media_path import run_media_tra
 from platform_service.workers.extractors.text_extractor import TextExtractionError
 from platform_service.workers.extractors.vision_extractor import VisionExtractor
 from platform_service.workers.stage_a_types import (
+    Stage1DocumentEmptyError,
     Stage1ExtractionError,
     Stage1RecoveryFailedError,
     StageAResult,
@@ -98,7 +100,9 @@ class StageAExtractor:
         resolved_primary_language = primary_language or get_settings().deployment_primary_locale
         total_pages = await self._count_pages_or_fail(source_document_id, source_path, source_type)
         if total_pages == 0:
-            return await self._empty_document_result(source_document_id)
+            await self._repo.update_status(source_document_id, "failed")
+            await self._session.commit()
+            raise Stage1DocumentEmptyError()
 
         extraction = await self._extract_source_or_fail(
             source_document_id, source_path, source_type, resolved_primary_language
@@ -136,21 +140,6 @@ class StageAExtractor:
             await self._repo.update_status(source_document_id, "failed")
             raise TextExtractionError(f"Stage A: cannot count pages: {exc}") from exc
 
-    async def _empty_document_result(self, source_document_id: UUID) -> StageAResult:
-        calibration = build_calibration_decision(sample_pages=[], sample_pass_count=0, sample_fail_count=0)
-        await self._repo.update_status(
-            source_document_id,
-            status="ingested",
-            calibration=calibration.to_jsonb(),
-        )
-        return StageAResult(
-            source_document_id=source_document_id,
-            total_pages=0,
-            pages_persisted=0,
-            extraction_method_counts={},
-            calibration=calibration,
-        )
-
     async def _extract_source_or_fail(
         self,
         source_document_id: UUID,
@@ -175,7 +164,13 @@ class StageAExtractor:
             raise
 
 
-__all__ = ["StageAExtractor", "StageAResult", "Stage1ExtractionError", "Stage1RecoveryFailedError"]
+__all__ = [
+    "StageAExtractor",
+    "StageAResult",
+    "Stage1DocumentEmptyError",
+    "Stage1ExtractionError",
+    "Stage1RecoveryFailedError",
+]
 
 
 _ = uuid

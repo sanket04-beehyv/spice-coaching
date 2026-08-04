@@ -25,11 +25,16 @@ class IngestionRun(Base):
         ForeignKey("source_document.id", ondelete="CASCADE"),
         nullable=False,
     )
+    ingest_batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ingest_batch.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # running | succeeded | failed | partially_succeeded
+    # queued | running | succeeded | failed | partially_succeeded
     status: Mapped[str] = mapped_column(Text, nullable=False, default="running")
     error_jsonb: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     triggered_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
@@ -54,3 +59,5 @@ class IngestionRunStep(Base):
     output_summary_jsonb: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     llm_call_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     error_jsonb: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

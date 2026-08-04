@@ -5,25 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import UUID
 
+from mc_foundation.objectstore import (
+    ObjectNotFoundError,
+    ObjectStorageError,
+    ObjectStore,
+    looks_like_object_storage_storage_path,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.config import Settings, get_settings
 from platform_service.db.repositories.source_repository import SourceRepository
 from platform_service.db.validators import ValidationError
-from platform_service.services.object_storage import (
-    ObjectNotFoundError,
-    ObjectStorageClient,
-    ObjectStorageError,
-    looks_like_object_storage_storage_path,
-)
-
-_ALLOWED_THUMBNAIL_PREFIXES: frozenset[str] = frozenset(
-    {
-        "ingest/thumbnails/",
-        "module-thumbnails/",
-        "uploads/",
-    }
-)
 
 _ALLOWED_THUMBNAIL_SUFFIXES: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 
@@ -58,7 +50,7 @@ async def validate_module_thumbnail_storage_path(
     storage_path: str | None,
     *,
     settings: Settings | None = None,
-    storage: ObjectStorageClient | None = None,
+    storage: ObjectStore | None = None,
 ) -> str | None:
     """Validate a module thumbnail MinIO path (``None`` clears the thumbnail)."""
     if storage_path is None:
@@ -69,7 +61,7 @@ async def validate_module_thumbnail_storage_path(
     if not path:
         raise ValidationError("invalid_thumbnail_storage_path", "storage_path must not be empty")
 
-    bucket_name = settings.minio_bucket_name
+    bucket_name = settings.object_storage_bucket_name
     if not looks_like_object_storage_storage_path(path, bucket_name=bucket_name):
         raise ValidationError(
             "invalid_thumbnail_storage_path",
@@ -77,10 +69,12 @@ async def validate_module_thumbnail_storage_path(
         )
 
     object_name = _object_name_from_storage_path(path, bucket_name=bucket_name)
-    if not any(object_name.startswith(prefix) for prefix in _ALLOWED_THUMBNAIL_PREFIXES):
+    allowed_prefixes = settings.admin_file_allowed_prefix_set
+    top = object_name.split("/", maxsplit=1)[0]
+    if top not in allowed_prefixes or "/" not in object_name:
         raise ValidationError(
             "invalid_thumbnail_object_prefix",
-            f"object_name must start with one of: {sorted(_ALLOWED_THUMBNAIL_PREFIXES)}",
+            f"object_name must start with one of {sorted(allowed_prefixes)!r}/",
         )
 
     suffix = Path(object_name).suffix.lower()

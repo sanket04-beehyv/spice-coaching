@@ -2,11 +2,17 @@
 -- services/platform/src/platform_service/db/models/
 --
 -- Target DB: PostgreSQL (uses UUID/JSONB/arrays/range + pgvector).
--- Safe to run on an empty database. Squashed snapshot of alembic head (0030).
+-- Safe to run on an empty database. Squashed snapshot of alembic head (0049).
 -- Locale-keyed JSONB maps (*_localized) replace legacy *_bn/*_en columns (0030).
 -- Includes chw_module_assignment (0022) and module_trigger_binding keyed by module_id.
+-- Includes module lifecycle admin audit log (0031) and chw_training_request (0032/0037).
+-- Includes module_card (0033), module_demand_summary (0041), chat_feedback_summary (0042),
+-- prompt_template (0043).
+-- Includes ingest_batch and ingestion_run.ingest_batch_id (0046).
+-- Ingest config (assessment_mode, instructions, cardinality) on ingest_batch (0049).
 -- Seed sections: config_threshold learning-points (0005), referral behavioural_gap
--- (0014), assessment-due trigger_definition (0026).
+-- (0014), assessment-due trigger_definition (0026), quiz_reattempt_validity_days
+-- (0036), module_demand_top_k (0040), prompt_template rows (0044).
 
 BEGIN;
 
@@ -27,8 +33,6 @@ CREATE TABLE IF NOT EXISTS source_document (
   source_type text NOT NULL,
   primary_language text NOT NULL,
   content_domain text NOT NULL DEFAULT 'clinical',
-  assessment_mode text NOT NULL DEFAULT 'with_quiz',
-  authority_label text NOT NULL,
   version_label text NULL,
   publication_date date NULL,
   original_storage_path text NOT NULL,
@@ -39,7 +43,6 @@ CREATE TABLE IF NOT EXISTS source_document (
   outline_method text NULL,
   outline_jsonb jsonb NULL,
   extraction_calibration_jsonb jsonb NULL,
-  ingestion_instructions text NULL,
   sync_published_visible boolean NOT NULL,
   status text NOT NULL DEFAULT 'ingesting',
   ingested_at timestamptz NOT NULL DEFAULT now(),
@@ -79,9 +82,23 @@ CREATE TABLE IF NOT EXISTS content_block (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS ingest_batch (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  status text NOT NULL DEFAULT 'queued',
+  assessment_mode text NOT NULL DEFAULT 'with_quiz',
+  ingestion_instructions text NULL,
+  cards_per_module integer NULL,
+  quizzes_per_module integer NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz NULL,
+  error_jsonb jsonb NULL,
+  triggered_by uuid NULL
+);
+
 CREATE TABLE IF NOT EXISTS ingestion_run (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   source_document_id uuid NOT NULL REFERENCES source_document(id) ON DELETE CASCADE,
+  ingest_batch_id uuid NULL REFERENCES ingest_batch(id) ON DELETE CASCADE,
   started_at timestamptz NOT NULL DEFAULT now(),
   completed_at timestamptz NULL,
   status text NOT NULL DEFAULT 'running',
@@ -89,9 +106,12 @@ CREATE TABLE IF NOT EXISTS ingestion_run (
   triggered_by uuid NULL
 );
 
+CREATE INDEX IF NOT EXISTS ix_ingestion_run_ingest_batch_id
+  ON ingestion_run (ingest_batch_id);
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ingestion_run_active_per_source
   ON ingestion_run (source_document_id)
-  WHERE status = 'running'
+  WHERE status IN ('queued', 'running')
     AND COALESCE(error_jsonb->>'type', '') != 'cross_source_fusion';
 
 CREATE TABLE IF NOT EXISTS ingestion_run_step (
@@ -158,6 +178,7 @@ CREATE TABLE IF NOT EXISTS module_candidate_draft (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   ingestion_run_id uuid NOT NULL REFERENCES ingestion_run(id) ON DELETE CASCADE,
   proposed_title text NOT NULL,
+  domain text NULL,
   behavioural_gap_code text NULL,
   scope_summary text NOT NULL DEFAULT '',
   description_localized jsonb NULL,
@@ -205,6 +226,7 @@ CREATE TABLE IF NOT EXISTS module (
   source_document_ids uuid[] NULL,
   thumbnail_storage_path text NULL,
   urgent_publish boolean NOT NULL DEFAULT false,
+  chatbot_faqs_only boolean NOT NULL DEFAULT false,
   module_json jsonb NULL,
   embedding vector NULL,
   visibility_window tstzrange NULL,
@@ -216,8 +238,16 @@ CREATE TABLE IF NOT EXISTS module (
   clinically_reviewed_by uuid NULL,
   lifecycle_status text NOT NULL DEFAULT 'draft',
   published_at timestamptz NULL,
+  first_activated_at timestamptz NULL,
+  last_deactivated_at timestamptz NULL,
+  last_reactivated_at timestamptz NULL,
+  deactivated_by uuid NULL,
+  reactivated_by uuid NULL,
   deprecated_at timestamptz NULL,
   supersedes_module_id uuid NULL,
+  merge_secondary_module_id uuid NULL,
+  merge_primary_module_id uuid NULL,
+  merge_source_module_id uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT uq_module_family_version UNIQUE (module_family_id, version)
@@ -245,6 +275,30 @@ CREATE TABLE IF NOT EXISTS module_quiz_question (
 );
 
 CREATE INDEX IF NOT EXISTS ix_module_quiz_question_module_id ON module_quiz_question (module_id);
+
+CREATE TABLE IF NOT EXISTS module_card (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  module_id uuid NOT NULL REFERENCES module(id) ON DELETE CASCADE,
+  card_order integer NOT NULL,
+  card_family_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  card_version integer NOT NULL DEFAULT 1,
+  title_localized jsonb NOT NULL,
+  body_localized jsonb NULL,
+  previous_practice_localized jsonb NULL,
+  current_practice_localized jsonb NULL,
+  rationale_for_change_localized jsonb NULL,
+  next_action_localized jsonb NULL,
+  thresholds_jsonb jsonb NULL,
+  source_block_ids uuid[] NULL,
+  figure_ref_block_id uuid NULL,
+  search_metadata_jsonb jsonb NULL,
+  attachments_jsonb jsonb NULL,
+  field_flags_jsonb jsonb NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_module_card_family_version UNIQUE (card_family_id, card_version)
+);
+
+CREATE INDEX IF NOT EXISTS ix_module_card_module_id ON module_card (module_id);
 
 -- ──────────────────────────────────────────────────────────────────────────────
 -- Gap + trigger layer
@@ -408,6 +462,18 @@ CREATE TABLE IF NOT EXISTS module_trigger_binding (
   CONSTRAINT uq_module_trigger_binding_pair UNIQUE (module_id, trigger_definition_id)
 );
 
+CREATE TABLE IF NOT EXISTS module_lifecycle_event (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  module_id uuid NOT NULL REFERENCES module(id) ON DELETE CASCADE,
+  event_type text NOT NULL,
+  occurred_at timestamptz NOT NULL DEFAULT now(),
+  actor_id uuid NULL,
+  reason text NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_module_lifecycle_event_module_occurred
+  ON module_lifecycle_event (module_id, occurred_at);
+
 -- ──────────────────────────────────────────────────────────────────────────────
 -- Chatbot FAQ layer
 -- ──────────────────────────────────────────────────────────────────────────────
@@ -431,6 +497,67 @@ CREATE INDEX IF NOT EXISTS ix_chat_faq_tenant_rank
 CREATE INDEX IF NOT EXISTS ix_chat_faq_tenant_updated
   ON chat_frequent_question (tenant_id, updated_at);
 
+CREATE TABLE IF NOT EXISTS chat_feedback_summary (
+  id uuid PRIMARY KEY,
+  tenant_id uuid NOT NULL,
+  payload_json jsonb NOT NULL,
+  generated_at timestamptz NOT NULL,
+  computed_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ix_chat_feedback_summary_tenant
+  ON chat_feedback_summary (tenant_id);
+
+CREATE TABLE IF NOT EXISTS module_demand_summary (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NULL,
+  top_k integer NOT NULL,
+  payload_json jsonb NOT NULL,
+  generated_at timestamptz NOT NULL,
+  computed_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_module_demand_summary_tenant
+  ON module_demand_summary (tenant_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_module_demand_summary_tenant
+  ON module_demand_summary (tenant_id)
+  WHERE tenant_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_module_demand_summary_global
+  ON module_demand_summary ((tenant_id IS NULL))
+  WHERE tenant_id IS NULL;
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- CHW training request
+-- ──────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS chw_training_request (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  chw_id bigint NOT NULL,
+  module_id uuid NULL REFERENCES module(id) ON DELETE RESTRICT,
+  requested_module_name text NULL,
+  reason text NULL,
+  submitted_at timestamptz NOT NULL,
+  tenant_id uuid NULL,
+  reviewed_by text NULL,
+  reviewed_at timestamptz NULL,
+  reviewer_notes text NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_chw_training_request_chw_id
+  ON chw_training_request (chw_id);
+
+CREATE INDEX IF NOT EXISTS ix_chw_training_request_module_id
+  ON chw_training_request (module_id);
+
+CREATE INDEX IF NOT EXISTS ix_chw_training_request_tenant_submitted
+  ON chw_training_request (tenant_id, submitted_at);
+
 -- ──────────────────────────────────────────────────────────────────────────────
 -- Config
 -- ──────────────────────────────────────────────────────────────────────────────
@@ -440,28 +567,71 @@ CREATE TABLE IF NOT EXISTS config_threshold (
   version integer NOT NULL DEFAULT 1,
   key text NOT NULL UNIQUE,
   value_json jsonb NOT NULL,
+  title text NULL,
   description text NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 -- ──────────────────────────────────────────────────────────────────────────────
--- Learning-points config_threshold seed (migration 0005)
+-- Prompt templates (migration 0043)
 -- ──────────────────────────────────────────────────────────────────────────────
 
-INSERT INTO config_threshold (version, key, value_json, description) VALUES
+CREATE TABLE IF NOT EXISTS prompt_template (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  template_id text NOT NULL,
+  version integer NOT NULL,
+  variant_key text NULL,
+  generation_type text NOT NULL,
+  system_prompt_template text NOT NULL,
+  human_message_template text NOT NULL,
+  required_variables jsonb NOT NULL,
+  title text NULL,
+  description text NULL,
+  change_notes text NULL,
+  status text NOT NULL DEFAULT 'active',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_prompt_template_id_variant_version
+    UNIQUE (template_id, variant_key, version)
+);
+
+CREATE INDEX IF NOT EXISTS ix_prompt_template_template_id
+  ON prompt_template (template_id);
+
+CREATE INDEX IF NOT EXISTS ix_prompt_template_active_lookup
+  ON prompt_template (template_id, variant_key, status);
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Learning-points config_threshold seed (migration 0005)
+-- plus quiz_reattempt_validity_days (0036) and module_demand_top_k (0040)
+-- ──────────────────────────────────────────────────────────────────────────────
+
+INSERT INTO config_threshold (version, key, value_json, title, description) VALUES
   (1, 'learning_points_module_delivered', '5'::jsonb,
+   'Learning Points: Module Delivered',
    'CHW learning points awarded per module_delivered telemetry event'),
   (1, 'learning_points_module_card_viewed', '10'::jsonb,
+   'Learning Points: Module Card Viewed',
    'CHW learning points awarded per module_card_viewed telemetry event'),
   (1, 'learning_points_module_quiz_attempted_base', '15'::jsonb,
+   'Learning Points: Quiz Attempted (Base)',
    'Base CHW learning points for module_quiz_attempted (correct outcome)'),
   (1, 'learning_points_module_quiz_score_multiplier', '15'::jsonb,
+   'Learning Points: Quiz Score Multiplier',
    'Quiz score bonus multiplier: floor(quiz_score_pct [0–1] * this) added to base'),
   (1, 'learning_points_module_completed', '20'::jsonb,
+   'Learning Points: Module Completed',
    'CHW learning points awarded per module_completed telemetry event'),
   (1, 'learning_points_spice_action_observed', '3'::jsonb,
-   'CHW learning points awarded per spice_action_observed telemetry event')
+   'Learning Points: Spice Action Observed',
+   'CHW learning points awarded per spice_action_observed telemetry event'),
+  (1, 'quiz_reattempt_validity_days', '7'::jsonb,
+   'Quiz Reattempt Validity (Days)',
+   'Configure the number of days from the module assignment date during which users can reattempt a quiz. Users are always allowed their first quiz attempt, even if this period has expired. After the first attempt, reattempts are permitted only until the configured validity period ends.'),
+  (1, 'module_demand_top_k', '10'::jsonb,
+   'Module Demand Top K',
+   'Number of top requested modules shown in the admin module demand summary.')
 ON CONFLICT (key) DO NOTHING;
 
 -- ──────────────────────────────────────────────────────────────────────────────

@@ -3,10 +3,12 @@
 
 Mirrors the post-publish ``platform.generate_module_card_search_metadata_batch``
 Celery task: each module is handed off to the worker, which calls ai-runtime and
-writes ``module_json.cards[*].search_metadata``. Downstream module metadata and
+writes ``module_card.search_metadata_jsonb``. Downstream module metadata and
 embedding regeneration are not chained.
 
-After workers finish, verify retrieval quality with your preferred RAG eval tooling.
+After workers finish, re-run BM25 card eval:
+
+    uv run python -m eval.rag --k 5 --output eval/rag/reports/bm25-card-metadata-v1.json
 
 Prerequisites (same env as platform service):
 
@@ -43,6 +45,7 @@ from platform_service.db.base import SessionLocal
 from platform_service.db.models.module import Module
 from platform_service.db.repositories.module_read_repository import ModuleReadRepository
 from platform_service.localized import primary_text
+from platform_service.services.card_normalisation import card_row_to_dict
 
 ModuleTarget = tuple[UUID, int, str]
 
@@ -70,11 +73,10 @@ async def _fetch_module_targets(
         for module in modules:
             if module is None:
                 continue
-            cards = (module.module_json or {}).get("cards", [])
+            card_rows = await ModuleReadRepository(session).list_cards(module.id)
             card_count = 0
-            for card in cards:
-                if not isinstance(card, dict):
-                    continue
+            for row in card_rows:
+                card = card_row_to_dict(row)
                 if missing_only and card.get("search_metadata"):
                     continue
                 card_count += 1

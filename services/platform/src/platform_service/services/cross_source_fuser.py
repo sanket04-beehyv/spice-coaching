@@ -30,20 +30,16 @@ from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceRequest,
-    ModelPolicy,
-    PromptSpec,
     TraceContext,
 )
 
-from platform_service.config import get_settings
 from platform_service.deps import get_ai_client
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 from platform_service.services.llm_response_resolver import resolve_parsed_json
-from platform_service.services.prompts.cross_source_fuser_prompt import (
-    CROSS_SOURCE_FUSER_TEMPLATE_ID,
-    CROSS_SOURCE_FUSER_TEMPLATE_VERSION,
-    render_human_message,
-    render_system_prompt,
+from platform_service.services.prompt_registry import CROSS_SOURCE_FUSER_TEMPLATE_ID
+from platform_service.services.prompt_template_service import PromptTemplateService, prompt_spec_from_rendered
+from platform_service.services.prompt_variables.cross_source_fuser_variables import (
+    build_cross_source_fuser_variables,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,16 +83,8 @@ class CrossSourceFuser:
     def __init__(
         self,
         client: AIRuntimeClient | None = None,
-        *,
-        model: str | None = None,
     ) -> None:
-        settings = get_settings()
         self._client = client or get_ai_client()
-        # Default to the lighter inference model — fusion is a small focused
-        # task (~3K tokens of metadata in, ~1-2K tokens out). The pro model
-        # used for identification is overkill here; flash is faster and
-        # cheaper. Caller can override per call.
-        self._model = model or settings.text_model
 
     async def fuse(
         self,
@@ -145,23 +133,20 @@ class CrossSourceFuser:
                 raw_response_text="",
             )
 
-        system_prompt = render_system_prompt()
-        human_message = render_human_message(candidates)
+        rendered = await PromptTemplateService().render(
+            None,
+            template_id=CROSS_SOURCE_FUSER_TEMPLATE_ID,
+            variant_key=None,
+            variables=build_cross_source_fuser_variables(candidates=candidates),
+        )
 
         request = InferenceRequest(
             request_id=str(uuid.uuid4()),
             generation_type=GenerationType.CROSS_SOURCE_FUSION,
-            model_policy=ModelPolicy(model=self._model),
-            prompt=PromptSpec(
-                template_id=CROSS_SOURCE_FUSER_TEMPLATE_ID,
-                template_version=CROSS_SOURCE_FUSER_TEMPLATE_VERSION,
-                resolved_system_prompt=system_prompt,
-                resolved_human_message=human_message,
-            ),
+            prompt=prompt_spec_from_rendered(rendered),
             constraints=GenerationConstraints(
                 language="en",
                 output_format="json",
-                max_tokens=8192,
             ),
             trace_context=trace_context or TraceContext(),
         )

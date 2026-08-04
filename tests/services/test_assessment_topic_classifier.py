@@ -24,7 +24,7 @@ def _module_with_metadata() -> Module:
         module_type="refresher",
         lifecycle_status="draft",
         module_json={"cards": [{"title": {"bn": "t"}, "body": {"bn": "malaria treatment"}}]},
-        search_metadata_jsonb={"topic_tags": ["malaria"], "clinical_conditions": []},
+        search_metadata_jsonb={"topic_tags": {"bn": ["malaria"]}, "clinical_conditions": {"bn": []}},
     )
 
 
@@ -42,13 +42,14 @@ async def test_classify_module_falls_back_on_llm_error() -> None:
         return_value=InferenceResponse(
             request_id="r1",
             generation_type=GenerationType.MODULE_ASSESSMENT_TOPIC_CLASSIFICATION,
-            provider="openai",
-            model="gpt-test",
+            provider="google",
+            model="gemini-test",
+            max_tokens=8192,
+            temperature=0.2,
             raw_text="",
-            text="",
             error="provider down",
             latency_ms=1,
-            usage=TokenUsage(input=0, output=0),
+            token_usage=TokenUsage(input=0, output=0),
         )
     )
     classifier = AssessmentTopicClassifier(MagicMock(), client=client)

@@ -26,3 +26,21 @@ class ModuleNotFoundError(Exception):
     def __init__(self, module_id: UUID) -> None:
         super().__init__(f"module {module_id} not found")
         self.module_id = module_id
+
+
+class ModuleVersionConflictError(Exception):
+    """Raised when an edit's expected_version does not match the family tip."""
+
+    def __init__(
+        self,
+        *,
+        expected_version: int,
+        current_version: int,
+        latest_module_id: UUID,
+    ) -> None:
+        super().__init__(
+            f"module version conflict: expected {expected_version}, current tip is {current_version}"
+        )
+        self.expected_version = expected_version
+        self.current_version = current_version
+        self.latest_module_id = latest_module_id

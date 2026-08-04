@@ -1,19 +1,17 @@
 """Prompt executor — selects provider and runs inference.
 
 ai-runtime owns provider selection for all capabilities (generate, embed,
-transcribe) via ``Settings.ai_provider`` / ``AI_CLOUD_PROVIDER``. Platform
-passes ``ModelPolicy.model`` only; the configured provider picks the SDK.
+transcribe) via ``Settings.ai_provider``. Model id and generation budgets
+(max_tokens, temperature) are resolved from per-``GenerationType`` profiles
+in ``ai_runtime.generation_profiles``; platform sends only the role plus
+prompt/content constraints.
 
 v3.3 additions:
 - Decodes optional `image_attachments` (base64) from InferenceRequest into
   `ProviderImage` (raw bytes) and forwards to the provider for multimodal
   calls (VISION_EXTRACTION).
-- New generation types (outline_inference, module_identification,
-  card_drafting, quiz_drafting, distractor_critique, bilingual_translation,
-  vision_extraction) are dispatched the same way as the legacy types — the
-  caller (platform) is responsible for the resolved prompt and structured
-  output expectations; the executor is generation_type-agnostic at the
-  provider call level.
+- Generation types share the same provider call path; platform owns the
+  resolved prompt and structured output expectations.
 """
 
 from __future__ import annotations
@@ -31,18 +29,18 @@ from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import InferenceImage, InferenceRequest, InferenceResponse, TokenUsage
 
 from ai_runtime.config import get_settings
+from ai_runtime.generation_profiles import resolve_profile
 from ai_runtime.providers.base import BaseProvider, ProviderImage
 from ai_runtime.providers.google import GoogleProvider
-from ai_runtime.providers.openai import OpenAIProvider
 from ai_runtime.services.embedding_vector import align_embedding_dimension
+from ai_runtime.services.llm_response_logging import log_llm_raw_text
 from ai_runtime.services.response_parser import extract_json
 from ai_runtime.services.transient_errors import is_transient_provider_error
 
 logger = logging.getLogger(__name__)
 
 
-# Generation types whose JSON output may be a top-level array (OpenAI json_object
-# mode only allows objects, so these use unconstrained JSON prompting).
+# Generation types whose JSON output may be a top-level array.
 _JSON_ARRAY_GENERATION_TYPES = frozenset(
     {
         GenerationType.MODULE_IDENTIFICATION,
@@ -118,9 +116,7 @@ def _build_provider(provider_name: str) -> BaseProvider:
         service_account_info = None
         if settings.google_service_account_base64:
             try:
-                decoded = base64.b64decode(settings.google_service_account_base64.get_secret_value()).decode(
-                    "utf-8"
-                )
+                decoded = base64.b64decode(settings.google_service_account_base64).decode("utf-8")
                 service_account_info = json.loads(decoded)
             except Exception as exc:
                 logger.error("Failed to decode google_service_account_base64: %s", exc)
@@ -136,14 +132,8 @@ def _build_provider(provider_name: str) -> BaseProvider:
                 timeout_seconds=timeout_seconds,
             )
         return GoogleProvider(
-            api_key=settings.google_api_key.get_secret_value(),
+            api_key=settings.google_api_key,
             embedding_dimension=settings.google_embedding_dimension,
-            timeout_seconds=timeout_seconds,
-        )
-    if provider_name == "openai":
-        return OpenAIProvider(
-            api_key=settings.openai_api_key.get_secret_value(),
-            embedding_dimension=settings.embedding_dimension,
             timeout_seconds=timeout_seconds,
         )
     raise ValueError(f"Unsupported provider: {provider_name}")
@@ -197,18 +187,10 @@ class PromptExecutor:
     async def execute(self, request: InferenceRequest) -> InferenceResponse:
         settings = self._settings
         provider_name = settings.ai_provider
-        model = request.model_policy.model
-
-        max_tokens = (
-            request.constraints.max_tokens
-            if request.constraints.max_tokens is not None
-            else settings.default_max_tokens
-        )
-        temperature = (
-            request.constraints.temperature
-            if request.constraints.temperature is not None
-            else settings.default_temperature
-        )
+        profile = resolve_profile(request.generation_type, settings)
+        model = profile.model
+        max_tokens = profile.max_tokens
+        temperature = profile.temperature
 
         # Decode image attachments before timing the provider call so that
         # base64 errors are surfaced as a clean InferenceResponse.
@@ -225,6 +207,8 @@ class PromptExecutor:
                 generation_type=request.generation_type,
                 provider=provider_name,
                 model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
                 raw_text="",
                 parsed_json=None,
                 latency_ms=0,
@@ -257,6 +241,8 @@ class PromptExecutor:
                 generation_type=request.generation_type,
                 provider=provider_name,
                 model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
                 raw_text="",
                 parsed_json=None,
                 latency_ms=latency_ms,
@@ -265,6 +251,17 @@ class PromptExecutor:
 
         latency_ms = int((time.monotonic() - start_ms) * 1000)
         error = None
+
+        if settings.log_llm_responses:
+            log_llm_raw_text(
+                request_id=request.request_id,
+                generation_type=request.generation_type,
+                provider=provider_name,
+                model=model,
+                raw_text=raw_text,
+                reason="debug",
+                max_chars=settings.log_llm_response_max_chars,
+            )
 
         parsed_json = None
         if request.constraints.output_format == "json":
@@ -298,6 +295,15 @@ class PromptExecutor:
 
         if request.constraints.output_format == "json" and parsed_json is None:
             error = "failed to parse JSON from provider output"
+            log_llm_raw_text(
+                request_id=request.request_id,
+                generation_type=request.generation_type,
+                provider=provider_name,
+                model=model,
+                raw_text=raw_text,
+                reason="parse_failure",
+                max_chars=settings.log_llm_response_max_chars,
+            )
 
         # parsed_json may be a dict OR a list (top-level JSON arrays are valid
         # for module_identification, distractor_critique, etc.). Both are
@@ -308,6 +314,8 @@ class PromptExecutor:
             generation_type=request.generation_type,
             provider=provider_name,
             model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
             raw_text=raw_text,
             parsed_json=parsed_json,
             latency_ms=latency_ms,
@@ -325,11 +333,7 @@ class PromptExecutor:
         """
         settings = self._settings
         provider = _get_provider(settings.ai_provider)
-
-        if settings.ai_provider == "google":
-            model = settings.google_embedding_model
-        else:
-            model = settings.openai_embedding_model
+        model = settings.google_embedding_model
 
         vectors = await _call_with_transient_retry(
             log_context="embed",
@@ -344,10 +348,7 @@ class PromptExecutor:
         """Return transcript text for audio/video bytes using configured provider."""
         settings = self._settings
         provider = _get_provider(settings.ai_provider)
-        if settings.ai_provider == "google":
-            model = settings.google_transcription_model
-        else:
-            model = settings.openai_transcription_model
+        model = settings.google_transcription_model
         return await _call_with_transient_retry(
             log_context="transcribe",
             provider_name=settings.ai_provider,

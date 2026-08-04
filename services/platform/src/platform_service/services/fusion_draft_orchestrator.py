@@ -85,16 +85,12 @@ class FusionDraftOrchestrator:
         """Return source_document_ids cited by the module's cards."""
         rows = await self._session.execute(
             text("""
-                WITH cards AS (
-                    SELECT (jsonb_array_elements(module_json->'cards'))->'source_block_ids' AS block_ids
-                    FROM module
-                    WHERE id = :mid
-                )
                 SELECT DISTINCT sp.source_document_id::text
-                FROM cards
-                CROSS JOIN LATERAL jsonb_array_elements_text(cards.block_ids) AS bid
-                JOIN content_block bk ON bk.id = bid::uuid
+                FROM module_card mc
+                CROSS JOIN LATERAL unnest(mc.source_block_ids) AS bid
+                JOIN content_block bk ON bk.id = bid
                 JOIN source_page sp ON sp.id = bk.source_page_id
+                WHERE mc.module_id = :mid
             """),
             {"mid": str(module_id)},
         )
@@ -113,6 +109,7 @@ class FusionDraftOrchestrator:
                 d_result = await self._stage_d.run(
                     candidate_id=candidate_id,
                     enqueue_post_publish=False,
+                    skip_merge=True,
                     step_id=step_id,
                 )
                 await self._session.commit()

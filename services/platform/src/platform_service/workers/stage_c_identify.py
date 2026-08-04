@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from mc_contracts.errors import ErrorCode
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +47,7 @@ from platform_service.services.corpus_partitioner import (
     dedup_and_flag_cross_chunk,
     estimate_corpus_tokens,
 )
+from platform_service.services.ingestion_cardinality import load_batch_for_run, resolve_from_batch
 from platform_service.services.insufficient_source_filter import (
     FilterDecision,
     evaluate_candidate,
@@ -53,6 +55,12 @@ from platform_service.services.insufficient_source_filter import (
 from platform_service.services.module_identifier import (
     ModuleIdentifier,
 )
+from platform_service.services.run_state_service import (
+    STAGE_MODULE_IDENTIFY,
+    STEP_RUNNING,
+    RunStateService,
+)
+from platform_service.services.text_similarity import trigram_similarity
 from platform_service.workers.extractors.content_block_parser import (
     estimate_token_count,
     parse_page_blocks,
@@ -150,15 +158,8 @@ class StageCResult:
     # (trigram-similar titles from different chunks).
     cross_chunk_review_count: int = 0
     ingestion_instructions_present: bool = False
-
-
-def _ingestion_instructions_from_documents(documents: list[Any]) -> str | None:
-    """Return the first non-null ingestion_instructions across loaded documents."""
-    for doc in documents:
-        instructions = getattr(doc, "ingestion_instructions", None)
-        if instructions:
-            return str(instructions)
-    return None
+    target_cards_per_module_present: bool = False
+    target_quizzes_per_module_present: bool = False
 
 
 class StageCOrchestrator:
@@ -169,19 +170,27 @@ class StageCOrchestrator:
         session: AsyncSession,
         *,
         identifier: ModuleIdentifier | None = None,
+        run_state: RunStateService | None = None,
     ) -> None:
         self._session = session
         self._source_repo = SourceRepository(session)
         self._candidate_repo = ModuleCandidateRepository(session)
         self._identifier = identifier or ModuleIdentifier()
+        self._run_state = run_state or RunStateService(session)
 
     async def run(
         self,
         *,
         ingestion_run_id: UUID,
         source_document_ids: list[UUID],
+        chunk_ids: set[str] | None = None,
     ) -> StageCResult:
-        """Execute Stage 2 for one workspace (ingestion run)."""
+        """Execute Stage 2 for one workspace (ingestion run).
+
+        When ``chunk_ids`` is set, only those chunks are re-identified; new
+        candidates are appended and cross-chunk near-dupes are flag-only
+        against existing drafts (siblings are never deleted here).
+        """
         documents = await self._load_documents(source_document_ids)
         if not documents:
             logger.info("Stage 2: no documents in workspace, no candidates emitted")
@@ -206,20 +215,39 @@ class StageCOrchestrator:
         ) = await self._build_corpus_payload(documents)
         content_domains = {d["content_domain"] for d in page_corpus}
         estimated_tokens = estimate_corpus_tokens(page_corpus)
-        ingestion_instructions = _ingestion_instructions_from_documents(documents)
+        batch = await load_batch_for_run(self._session, ingestion_run_id)
+        ingestion_instructions = batch.ingestion_instructions if batch is not None else None
+        cardinality = resolve_from_batch(batch)
 
-        # Chunk into token-budgeted, content-disjoint slices.
         chunks = chunk_by_token_budget(page_corpus, document_outlines)
+        if chunk_ids is not None:
+            chunks = [c for c in chunks if c.chunk_id in chunk_ids]
+            missing = chunk_ids - {c.chunk_id for c in chunks}
+            if missing:
+                logger.warning(
+                    "Stage 2 selective identify: chunk_ids not in partitioner output: %s",
+                    sorted(missing),
+                )
+
         chunks_attempted = len(chunks)
         chunks_succeeded = 0
         chunks_failed = 0
+        selective = chunk_ids is not None
+
+        # Start (or reuse reset) chunk steps before parallel LLM work.
+        chunk_step_ids: dict[str, UUID] = {}
+        for chunk in chunks:
+            step_id = await self._ensure_chunk_step_running(ingestion_run_id, chunk)
+            chunk_step_ids[chunk.chunk_id] = step_id
+        if chunks:
+            await self._session.commit()
 
         settings = get_settings()
         sem = asyncio.Semaphore(settings.stage_c_section_concurrency)
 
         async def _identify_one(
             chunk: Any,
-        ) -> tuple[Any, list[dict[str, Any]] | None]:
+        ) -> tuple[Any, list[dict[str, Any]] | None, dict[str, str] | None]:
             async with sem:
                 try:
                     result = await self._identifier.identify(
@@ -230,32 +258,22 @@ class StageCOrchestrator:
                         valid_block_ids=valid_block_ids,
                         valid_page_ids=valid_page_ids,
                         ingestion_instructions=ingestion_instructions,
+                        cardinality=cardinality,
                     )
                     backfilled = _backfill_empty_block_ids(result.candidates, chunk.page_corpus)
-                    return chunk, backfilled
+                    return chunk, backfilled, None
                 except Exception as exc:
-                    # Catch broadly — one chunk's failure (transport
-                    # timeout, JSON parse, validator rejection, anything)
-                    # must not abort the other parallel chunks via gather
-                    # cancellation. Cancelled in-flight DB queries leave
-                    # asyncpg in "another operation in progress" state and
-                    # subsequent rollback fails. Treat any chunk error as
-                    # a soft chunk failure.
                     logger.warning(
                         "Stage 2 chunk %s failed (%s): %s — skipping",
                         chunk.chunk_id,
                         type(exc).__name__,
                         exc,
                     )
-                    return chunk, None
+                    error = {"type": type(exc).__name__, "message": str(exc)[:500]}
+                    return chunk, None, error
 
-        # `return_exceptions=True` is belt-and-braces: even if a future
-        # change to `_identify_one` lets an exception escape, we still
-        # collect all results rather than cancelling siblings.
         per_chunk = await asyncio.gather(*(_identify_one(c) for c in chunks), return_exceptions=True)
-        # Normalise any exception that did escape into the same
-        # (chunk, None) shape the rest of this method expects.
-        normalised: list[tuple[Any, list[dict[str, Any]] | None]] = []
+        normalised: list[tuple[Any, list[dict[str, Any]] | None, dict[str, str] | None]] = []
         for idx, item in enumerate(per_chunk):
             if isinstance(item, BaseException):
                 logger.warning(
@@ -263,18 +281,30 @@ class StageCOrchestrator:
                     chunks[idx].chunk_id,
                     item,
                 )
-                normalised.append((chunks[idx], None))
+                error = {"type": type(item).__name__, "message": str(item)[:500]}
+                normalised.append((chunks[idx], None, error))
             else:
                 normalised.append(item)
         per_chunk = normalised
 
-        # Build (chunk_id, candidates) pairs for cross-chunk dedup.
         chunked_candidates: list[tuple[str, list[dict[str, Any]]]] = []
-        for chunk, candidates in per_chunk:
+        for chunk, candidates, error in per_chunk:
+            step_id = chunk_step_ids[chunk.chunk_id]
             if candidates is None:
                 chunks_failed += 1
+                chunk_error = error or {"type": "ChunkIdentifyError", "message": "chunk failed"}
+                await self._run_state.fail_step(
+                    step_id,
+                    error_code=ErrorCode.IDENTIFY_FAILED.value,
+                    error_message=chunk_error.get("message", "chunk failed"),
+                    error=chunk_error,
+                )
                 continue
             chunks_succeeded += 1
+            await self._run_state.complete_step(
+                step_id,
+                output_summary={"candidates_emitted": len(candidates)},
+            )
             logger.info(
                 "Stage 2 chunk %s produced %d candidates",
                 chunk.chunk_id,
@@ -282,11 +312,13 @@ class StageCOrchestrator:
             )
             chunked_candidates.append((chunk.chunk_id, candidates))
 
-        # Cross-chunk title dedup + near-duplicate flagging.
         raw_candidates = dedup_and_flag_cross_chunk(chunked_candidates)
-        cross_chunk_review_count = sum(1 for c in raw_candidates if c.get("_cross_chunk_review"))
 
-        # Quality-flag pass (advisory; never gates publish).
+        if selective:
+            # Flag-only against existing drafts; do not collapse/delete siblings.
+            existing = await self._candidate_repo.list_candidates_for_run(ingestion_run_id)
+            await self._flag_near_dupes_against_existing(raw_candidates, existing)
+
         outline_section_count = sum(len(o.get("sections", [])) for o in document_outlines)
         flag_counts: dict[str, int] = {}
         candidates_flagged = 0
@@ -307,18 +339,25 @@ class StageCOrchestrator:
             for reason in existing_flags:
                 flag_counts[reason] = flag_counts.get(reason, 0) + 1
 
-        # Persist each candidate as a module_candidate_draft row.
         for cand in raw_candidates:
             flags = cand.get("_quality_flags") or []
             quality_flags = {"flags": flags} if flags else None
+            card_count = int(cand["estimated_card_count"])
+            quiz_count = int(cand["estimated_quiz_count"])
+            if cardinality.target_cards is not None:
+                card_count = cardinality.target_cards
+            if cardinality.target_quizzes is not None:
+                quiz_count = cardinality.target_quizzes
+            lineage = [str(x) for x in (cand.get("_chunk_lineage") or []) if x]
             await self._candidate_repo.create_candidate(
                 ingestion_run_id=ingestion_run_id,
                 proposed_title=cand["proposed_title"],
                 scope_summary=cand["scope_summary"],
                 description_localized=candidate_description_localized(cand),
+                domain=cand.get("domain"),
                 source_provenance=cand["source_provenance"],
-                estimated_card_count=int(cand["estimated_card_count"]),
-                estimated_quiz_count=int(cand["estimated_quiz_count"]),
+                estimated_card_count=card_count,
+                estimated_quiz_count=quiz_count,
                 proposed_module_type=cand["proposed_module_type"],
                 quality_flags=quality_flags,
                 clinical_review_notes=cand.get("clinical_review_notes"),
@@ -326,11 +365,21 @@ class StageCOrchestrator:
                 current_practice_summary=cand.get("current_practice_summary"),
                 rationale_summary=cand.get("rationale_summary"),
                 ingestion_instruction_rationale=cand.get("ingestion_instruction_rationale"),
+                source_chunk_ids=lineage or None,
             )
+
+        cross_chunk_review_count = sum(1 for c in raw_candidates if c.get("_cross_chunk_review"))
+        if selective:
+            # Include newly flagged existing drafts in review count.
+            existing_after = await self._candidate_repo.list_candidates_for_run(ingestion_run_id)
+            for draft in existing_after:
+                flags = (draft.quality_flags_jsonb or {}).get("flags") or []
+                if "cross_chunk_near_duplicate" in flags:
+                    cross_chunk_review_count += 1
 
         logger.info(
             "Stage 2 ingestion_run=%s: emitted=%d flagged=%d cross_chunk_review=%d "
-            "(chunks: %d/%d succeeded; flag_counts=%s)",
+            "(chunks: %d/%d succeeded; flag_counts=%s; selective=%s)",
             ingestion_run_id,
             len(raw_candidates),
             candidates_flagged,
@@ -338,6 +387,7 @@ class StageCOrchestrator:
             chunks_succeeded,
             chunks_attempted,
             flag_counts,
+            selective,
         )
         if ingestion_instructions and len(raw_candidates) == 0:
             logger.info(
@@ -356,7 +406,58 @@ class StageCOrchestrator:
             chunks_failed=chunks_failed,
             cross_chunk_review_count=cross_chunk_review_count,
             ingestion_instructions_present=ingestion_instructions is not None,
+            target_cards_per_module_present=cardinality.has_target_cards(),
+            target_quizzes_per_module_present=cardinality.has_target_quizzes(),
         )
+
+    async def _ensure_chunk_step_running(self, run_id: UUID, chunk: Any) -> UUID:
+        """Start a chunk step or reuse one already reset to running for retry."""
+        existing = await self._run_state.find_step(
+            run_id,
+            stage=STAGE_MODULE_IDENTIFY,
+            input_match={"chunk_id": chunk.chunk_id},
+        )
+        if existing is not None and existing.status == STEP_RUNNING:
+            return existing.id
+        page_start, page_end = chunk.page_range
+        step = await self._run_state.start_step(
+            run_id=run_id,
+            stage=STAGE_MODULE_IDENTIFY,
+            input_summary={
+                "chunk_id": chunk.chunk_id,
+                "page_start": page_start,
+                "page_end": page_end,
+                "estimated_tokens": chunk.estimated_tokens,
+            },
+        )
+        return step.id
+
+    async def _flag_near_dupes_against_existing(
+        self,
+        new_candidates: list[dict[str, Any]],
+        existing: list[Any],
+    ) -> None:
+        """Mark near-duplicate titles across new vs existing drafts (flag only)."""
+        settings = get_settings()
+        threshold = settings.stage_c_cross_chunk_similarity_threshold
+        for cand in new_candidates:
+            title = cand.get("proposed_title", "")
+            cand_chunks = set(cand.get("_chunk_lineage") or [])
+            for draft in existing:
+                draft_chunks = set(draft.source_chunk_ids or [])
+                if cand_chunks & draft_chunks:
+                    continue
+                sim = trigram_similarity(title, draft.proposed_title or "")
+                if sim < threshold:
+                    continue
+                cand["_cross_chunk_review"] = True
+                flags = list((draft.quality_flags_jsonb or {}).get("flags") or [])
+                if "cross_chunk_near_duplicate" not in flags:
+                    flags.append("cross_chunk_near_duplicate")
+                    await self._candidate_repo.update_quality_flags(
+                        draft.id,
+                        {"flags": flags},
+                    )
 
     # ── Internal helpers ────────────────────────────────────────────────
 

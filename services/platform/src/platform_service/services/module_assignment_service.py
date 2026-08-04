@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from platform_service.db.models.chw_module_assignment import CHWModuleAssignment
 from platform_service.db.models.module import Module
 from platform_service.db.repositories.module_assignment_repository import ModuleAssignmentRepository
+from platform_service.db.repositories.module_family_repository import ModuleFamilyRepository
 from platform_service.services.user_service import get_all_users
 
 
@@ -84,12 +85,24 @@ class ModuleAssignmentService:
         self,
         body: AssignmentCreateRequest,
         assigned_by: int,
+        *,
+        commit: bool = True,
     ) -> dict[str, Any]:
-        """Create or update module assignments for users, upazilas, or tenants."""
-        # Verify module exists
+        """Create or update module assignments for users, upazilas, or tenants.
+
+        When ``commit`` is False the caller owns the transaction (e.g. demand
+        assign + attribution audit in one commit).
+        """
+        # Verify module exists and is assignable for CHW training
         module = await self._session.get(Module, body.module_id)
         if not module:
             raise ModuleNotFoundError(f"Module with ID {body.module_id} not found")
+
+        family_repo = ModuleFamilyRepository(self._session)
+        if not await family_repo.is_assignable(module.module_family_id):
+            raise AssignmentValidationError(
+                "Module cannot be assigned: it is unpublished, deactivated, or chatbot-FAQ-only"
+            )
 
         created_ids = []
 
@@ -166,7 +179,10 @@ class ModuleAssignmentService:
         else:
             raise AssignmentValidationError("Invalid assignment_type")
 
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
+        else:
+            await self._session.flush()
         return {
             "assigned_count": len(created_ids),
             "assignment_ids": [str(x) for x in created_ids],

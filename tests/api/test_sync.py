@@ -12,7 +12,6 @@ from httpx import ASGITransport, AsyncClient
 from platform_service.api.sync import router as sync_router
 from platform_service.config import get_settings
 from platform_service.deps import get_db, get_object_storage_client
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.api.conftest import (
@@ -20,23 +19,17 @@ from tests.api.conftest import (
     _seed_module,
     _seed_source_document,
 )
-from tests.conftest import platform_path, requires_db
+from tests.conftest import platform_path, requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE module_quiz_question, module, module_family, "
-            "content_block, source_page, source_document "
-            "RESTART IDENTITY CASCADE"
-        )
+    await truncate_tables(
+        db_session, "module_quiz_question, module, module_family, content_block, source_page, source_document"
     )
-    await db_session.commit()
+    yield
 
 
 class _FakeStorage:
@@ -94,15 +87,14 @@ class TestSyncRoutes:
         data = resp.json()
         assert data["modules"] == []
         assert data["assigned_module_ids"] == []
+        assert data["requested_modules"] == []
 
 
 class TestPublishedSourceDocuments:
-    async def test_returns_documents_for_published_modules_only(
+    async def test_returns_visible_documents_without_module_link(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         doc = await _seed_source_document(db_session, sync_published_visible=True)
-        await _seed_module(db_session, source_document_ids=[doc.id])
-        await _seed_module(db_session, title_localized={"bn": "Draft module"}, lifecycle_status="draft")
 
         resp = await client.get(platform_path("/sync/source-documents/published"))
         assert resp.status_code == 200
@@ -112,6 +104,7 @@ class TestPublishedSourceDocuments:
         assert len(data["source_documents"]) == 1
         entry = data["source_documents"][0]
         assert entry["source_document_id"] == str(doc.id)
+        assert entry["title"] == doc.title
         assert "cards" not in data
         assert "module_cards" not in data
 
@@ -121,7 +114,6 @@ class TestPublishedSourceDocuments:
         doc = await _seed_source_document(db_session, title="RMNCH Manual", sync_published_visible=True)
         doc.thumbnail_storage_path = "medtronics-storage/ingest/thumbnails/manual.png"
         await db_session.commit()
-        await _seed_module(db_session, source_document_ids=[doc.id])
 
         thumb_url = "https://minio.example/thumb.png"
         mock_storage = _mock_storage(presigned_url=thumb_url)
@@ -142,8 +134,8 @@ class TestPublishedSourceDocuments:
     async def test_excludes_documents_when_sync_published_visible_false(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        doc = await _seed_source_document(db_session, sync_published_visible=False)
-        await _seed_module(db_session, source_document_ids=[doc.id])
+        await _seed_source_document(db_session, sync_published_visible=False)
+        await _seed_module(db_session)
 
         resp = await client.get(platform_path("/sync/source-documents/published"))
         assert resp.status_code == 200

@@ -12,29 +12,29 @@ from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceRequest,
-    ModelPolicy,
-    PromptSpec,
     TraceContext,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.config import get_settings
 from platform_service.db.models.module import Module
+from platform_service.db.repositories.module_read_repository import ModuleReadRepository
 from platform_service.deps import get_ai_client
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
+from platform_service.localized import deployment_locales
 from platform_service.services.assessment_topic_catalog import (
     canonical_assessment_topic_keys,
     is_canonical_assessment_topic,
     normalize_topic_key,
     related_topic_keys,
 )
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.llm_response_resolver import resolve_parsed_dict
 from platform_service.services.module_gap_classifier import module_payload_for_classification
-from platform_service.services.prompts.assessment_topic_classification_prompt import (
-    ASSESSMENT_TOPIC_CLASSIFICATION_TEMPLATE_ID,
-    ASSESSMENT_TOPIC_CLASSIFICATION_TEMPLATE_VERSION,
-    render_human_message,
-    render_system_prompt,
+from platform_service.services.prompt_registry import ASSESSMENT_TOPIC_CLASSIFICATION_TEMPLATE_ID
+from platform_service.services.prompt_template_service import PromptTemplateService, prompt_spec_from_rendered
+from platform_service.services.prompt_variables.assessment_topic_classification_variables import (
+    build_assessment_topic_classification_variables,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,12 +51,19 @@ class AssessmentTopicClassificationResult:
 def classify_topics_from_metadata(module: Module) -> AssessmentTopicClassificationResult:
     """Rule-based fallback using search_metadata topic_tags / clinical_conditions."""
     metadata = module.search_metadata_jsonb or {}
+    primary = deployment_locales()
     raw_tags: set[str] = set()
     for field in ("topic_tags", "clinical_conditions"):
         values = metadata.get(field)
-        if not isinstance(values, list):
+        if isinstance(values, dict):
+            items = values.get(primary) or []
+        elif isinstance(values, list):
+            items = values
+        else:
             continue
-        for item in values:
+        if not isinstance(items, list):
+            continue
+        for item in items:
             if isinstance(item, str) and item.strip():
                 raw_tags.add(normalize_topic_key(item))
 
@@ -91,34 +98,36 @@ class AssessmentTopicClassifier:
         session: AsyncSession,
         *,
         client: AIRuntimeClient | None = None,
-        model: str | None = None,
     ) -> None:
-        del session  # reserved for future registry lookups
+        self._session = session
         settings = get_settings()
         self._client = client or get_ai_client()
-        self._model = model or settings.text_model
         self._max_topics = settings.trigger_binding_max_topics
         self._allowed = sorted(canonical_assessment_topic_keys())
 
     async def classify_module(self, module: Module) -> AssessmentTopicClassificationResult:
-        module_payload = module_payload_for_classification(module)
+        if module.id is None:
+            return classify_topics_from_metadata(module)
+        card_rows = await ModuleReadRepository(self._session).list_cards(module.id)
+        module_payload = module_payload_for_classification(
+            module,
+            cards=[card_row_to_dict(row) for row in card_rows],
+        )
+        rendered = await PromptTemplateService().render(
+            self._session,
+            template_id=ASSESSMENT_TOPIC_CLASSIFICATION_TEMPLATE_ID,
+            variant_key=None,
+            variables=build_assessment_topic_classification_variables(
+                max_topics=self._max_topics,
+                allowed_topics=self._allowed,
+                module_payload=module_payload,
+                search_metadata=module.search_metadata_jsonb,
+            ),
+        )
         request = InferenceRequest(
             request_id=str(uuid.uuid4()),
             generation_type=GenerationType.MODULE_ASSESSMENT_TOPIC_CLASSIFICATION,
-            model_policy=ModelPolicy(model=self._model),
-            prompt=PromptSpec(
-                template_id=ASSESSMENT_TOPIC_CLASSIFICATION_TEMPLATE_ID,
-                template_version=ASSESSMENT_TOPIC_CLASSIFICATION_TEMPLATE_VERSION,
-                resolved_system_prompt=render_system_prompt(
-                    max_topics=self._max_topics,
-                    allowed_topics=self._allowed,
-                ),
-                resolved_human_message=render_human_message(
-                    module_payload=module_payload,
-                    search_metadata=module.search_metadata_jsonb,
-                    allowed_topics=self._allowed,
-                ),
-            ),
+            prompt=prompt_spec_from_rendered(rendered),
             constraints=GenerationConstraints(language="en", output_format="json"),
             trace_context=TraceContext(),
         )

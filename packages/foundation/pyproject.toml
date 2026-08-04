@@ -1,7 +1,7 @@
 [project]
 name = "mc-foundation"
 version = "0.1.0"
-description = "MicroCoaching shared config, logging, and HTTP primitives"
+description = "MicroCoaching shared config, logging, HTTP primitives, and VectorStore protocol"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic-settings>=2.14.2,<3.0.0",

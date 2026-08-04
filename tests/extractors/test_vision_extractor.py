@@ -7,13 +7,16 @@ surface as VisionExtractionError.
 import base64
 from typing import Any
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import InferenceRequest, InferenceResponse, TraceContext
+from platform_service.services.prompt_template_service import PromptTemplateService, RenderedPrompt
 from platform_service.workers.extractors.vision_extractor import (
     VisionExtractionError,
     VisionExtractor,
+    _unwrap_envelope,
 )
 
 
@@ -25,6 +28,8 @@ def _make_mock_response(
         generation_type=GenerationType.VISION_EXTRACTION,
         provider="google",
         model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text=raw_text,
         parsed_json=None,
         latency_ms=200,
@@ -37,6 +42,20 @@ def mock_client() -> AsyncMock:
     client = AsyncMock()
     client.generate = AsyncMock(return_value=_make_mock_response())
     return client
+
+
+@pytest.fixture(autouse=True)
+def mock_vision_prompt_template(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _render(*_args: Any, **_kwargs: Any) -> RenderedPrompt:
+        return RenderedPrompt(
+            template_id="vision",
+            template_version=1,
+            prompt_template_id=uuid4(),
+            resolved_system_prompt="Extract verbatim. Do not translate.",
+            resolved_human_message="Extract the supplied page image.",
+        )
+
+    monkeypatch.setattr(PromptTemplateService, "render", _render)
 
 
 class TestVisionExtractorRequest:
@@ -71,11 +90,14 @@ class TestVisionExtractorRequest:
         assert att.label == "page_3"
 
     @pytest.mark.asyncio
-    async def test_request_uses_configured_vision_model(self, mock_client: AsyncMock) -> None:
-        extractor = VisionExtractor(client=mock_client, model="gemini-2.5-pro")
+    async def test_request_does_not_send_model_policy(self, mock_client: AsyncMock) -> None:
+        """Model selection is owned by ai-runtime generation profiles."""
+        extractor = VisionExtractor(client=mock_client)
         await extractor.extract_page(page_image_bytes=b"x")
         sent: InferenceRequest = mock_client.generate.call_args.args[0]
-        assert sent.model_policy.model == "gemini-2.5-pro"
+        assert not hasattr(sent, "model_policy") or getattr(sent, "model_policy", None) is None
+        assert "model_policy" not in sent.model_dump()
+        assert sent.generation_type == GenerationType.VISION_EXTRACTION
 
     @pytest.mark.asyncio
     async def test_request_passes_trace_context(self, mock_client: AsyncMock) -> None:
@@ -157,6 +179,20 @@ class TestArbitraryAdaptersStillWork:
         assert captured["req"].generation_type == GenerationType.VISION_EXTRACTION
 
 
+class TestVisionHtmlNormalization:
+    @pytest.mark.asyncio
+    async def test_extract_normalizes_html_markup(self) -> None:
+        html_body = "<b>Bold heading</b><br><ul><li>First item</li><li>Second item</li></ul>"
+        client = AsyncMock()
+        client.generate = AsyncMock(return_value=_make_mock_response(raw_text=html_body))
+        extractor = VisionExtractor(client=client)
+        result = await extractor.extract_page(page_image_bytes=b"x", page_label="page_1")
+        assert "<" not in result.markdown
+        assert "**Bold heading**" in result.markdown
+        assert "- First item" in result.markdown
+        assert "- Second item" in result.markdown
+
+
 # ─── JSON envelope unwrap (Layer 2 — regression for the bug we caught) ─────
 #
 # Gemini 2.5-flash sometimes wraps markdown output in a JSON envelope even
@@ -165,9 +201,6 @@ class TestArbitraryAdaptersStillWork:
 # unwrapping, downstream `markdown_outline_parser` finds zero `#`-prefixed
 # lines and Stage 1 fails on outline_empty. The `_unwrap_envelope` helper
 # is a defensive normalisation layer over the response.
-
-
-from platform_service.workers.extractors.vision_extractor import _unwrap_envelope  # noqa: E402
 
 
 class TestUnwrapEnvelopePure:

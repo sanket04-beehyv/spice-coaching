@@ -23,6 +23,7 @@ class ConfigThreshold(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     value_json: Mapped[Any] = mapped_column(JSONB, nullable=False)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

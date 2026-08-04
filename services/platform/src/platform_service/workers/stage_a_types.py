@@ -7,6 +7,8 @@ from uuid import UUID
 
 from platform_service.workers.extractors.calibration import CalibrationDecision
 
+DOCUMENT_EMPTY_MESSAGE = "The document is empty."
+
 
 @dataclass(frozen=True)
 class StageAResult:
@@ -21,19 +23,31 @@ class StageAResult:
 
 
 class Stage1ExtractionError(Exception):
-    """Raised by Stage1Extractor.run when the stage cannot meet its success
-    contract. Currently used for the vision-recovery tolerance breach
-    (`Stage1RecoveryFailedError` subclass). Empty outline used to raise
-    here too (pre-c5b6635 outline-partitioner era); under the token-budget
-    chunker the outline is supplementary, so empty-outline now logs a
-    warning and proceeds. The orchestrator's typed handler at
-    pipeline_orchestrator.py:462 still maps this exception to
-    `error_jsonb.reason` for the dashboard."""
+    """Raised by StageAExtractor.run when the stage cannot meet its success
+    contract (empty/below-threshold text, or vision-recovery tolerance breach).
+
+    Subclasses set ``reason`` so ``ExtractStageRunner`` can record a typed
+    ``error_jsonb.reason`` for the dashboard without parsing the message.
+    Empty outline alone is non-fatal under the token-budget chunker.
+    """
+
+    reason: str = "extract_failed"
+
+
+class Stage1DocumentEmptyError(Stage1ExtractionError):
+    """Raised when final extracted/transcript text is empty or below threshold."""
+
+    reason = "document_empty"
+
+    def __init__(self, message: str = DOCUMENT_EMPTY_MESSAGE) -> None:
+        super().__init__(message)
 
 
 class Stage1RecoveryFailedError(Stage1ExtractionError):
     """Raised when the vision-recovery pass leaves more than
     `stage_a_vision_failed_tolerance` pages still in `vision_failed` state."""
+
+    reason = "vision_recovery_failed"
 
     def __init__(self, failed_page_numbers: list[int], tolerance: int) -> None:
         self.failed_page_numbers = failed_page_numbers

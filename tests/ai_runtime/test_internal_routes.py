@@ -7,32 +7,27 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
+from ai_runtime.config import get_settings
+from ai_runtime.main import create_app
 from httpx import ASGITransport, AsyncClient
 from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceRequest,
     InferenceResponse,
-    ModelPolicy,
     PromptSpec,
     TokenUsage,
 )
 
-pytest.importorskip("openai")
-
-from ai_runtime.config import get_settings  # noqa: E402
-from ai_runtime.main import create_app  # noqa: E402
-
 
 def _internal_headers() -> dict[str, str]:
-    return {"X-Internal-Token": get_settings().internal_token.get_secret_value()}
+    return {"X-Internal-Token": get_settings().internal_token}
 
 
 def _sample_request(*, generation_type: GenerationType = GenerationType.QUIZ_DRAFTING) -> InferenceRequest:
     return InferenceRequest(
         request_id="req-route-1",
         generation_type=generation_type,
-        model_policy=ModelPolicy(model="gemini-2.5-flash"),
         prompt=PromptSpec(
             template_id="t",
             template_version=1,
@@ -67,7 +62,10 @@ class TestGenerateRoute:
             headers=_internal_headers(),
         )
         assert resp.status_code == 400
-        assert "Unknown generation_type" in resp.json()["detail"]
+        body = resp.json()
+        assert body["code"] == "bad_request"
+        assert "Unknown generation_type" in body["detail"]
+        assert resp.headers["content-type"].startswith("application/problem+json")
 
     @pytest.mark.asyncio
     async def test_path_body_mismatch_returns_400(self, client: AsyncClient) -> None:
@@ -78,15 +76,19 @@ class TestGenerateRoute:
             headers=_internal_headers(),
         )
         assert resp.status_code == 400
-        assert "does not match body" in resp.json()["detail"]
+        body = resp.json()
+        assert body["code"] == "bad_request"
+        assert "does not match body" in body["detail"]
 
     @pytest.mark.asyncio
     async def test_success_delegates_to_executor(self, client: AsyncClient) -> None:
         expected = InferenceResponse(
             request_id="req-route-1",
             generation_type=GenerationType.QUIZ_DRAFTING,
-            provider="openai",
+            provider="google",
             model="gemini-2.5-flash",
+            max_tokens=8192,
+            temperature=0.2,
             raw_text='{"ok": true}',
             parsed_json={"ok": True},
             latency_ms=5,

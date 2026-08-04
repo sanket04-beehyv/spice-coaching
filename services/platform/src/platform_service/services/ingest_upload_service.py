@@ -1,8 +1,7 @@
-"""Ingest upload orchestration — MinIO staging, provenance, source_document creation.
+"""Ingest upload orchestration — object-storage staging, provenance, source_document creation.
 
-Owns the shared path for ``POST /admin/ingest`` (batch) and
-``POST /admin/ingest/stream`` (single-file SSE). API routes validate HTTP
-form params and enqueue Celery / SSE; this service handles bytes + DB rows.
+Owns ``POST /admin/ingest/upload``. API routes validate HTTP form params;
+this service handles bytes + DB rows with ``status='uploaded'``.
 """
 
 from __future__ import annotations
@@ -18,25 +17,23 @@ from typing import Any
 import anyio
 from fastapi import UploadFile
 from mc_contracts.enums import AssessmentMode, ContentDomain
-from mc_contracts.internal_ai import GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES, OPENAI_TRANSCRIPTION_MAX_BYTES
-from sqlalchemy import update
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from platform_service.config import Settings, get_settings
-from platform_service.db.models.module import Module
-from platform_service.db.models.source_document import SourceDocument
-from platform_service.db.repositories.file_upload_repository import FileUploadRepository
-from platform_service.db.repositories.source_repository import SourceRepository
-from platform_service.db.tenant_scope import tenant_scope_filter
-from platform_service.services.attribution_audit import record_attribution_event
-from platform_service.services.file_digest import sha256_hex_file
-from platform_service.services.ingest_errors import IngestValidationError
-from platform_service.services.object_storage import (
-    ObjectStorageClient,
+from mc_contracts.errors import ErrorCode
+from mc_contracts.internal_ai import GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES
+from mc_foundation.objectstore import (
     ObjectStorageError,
+    ObjectStore,
     StoredObject,
     safe_basename,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from platform_service.config import Settings, get_settings
+from platform_service.db.models.source_document import SourceDocument
+from platform_service.db.repositories.file_upload_repository import FileUploadRepository
+from platform_service.db.repositories.source_repository import SourceRepository
+from platform_service.services.attribution_audit import record_attribution_event
+from platform_service.services.file_digest import sha256_hex_file
+from platform_service.services.ingest_errors import IngestValidationError
 from platform_service.services.upload_provenance import (
     build_upload_metadata,
     record_file_upload,
@@ -64,27 +61,23 @@ _UPLOAD_CHUNK_BYTES = 1024 * 1024
 MAX_INGEST_FILES = 10
 _ALLOWED_CONTENT_DOMAINS = frozenset(e.value for e in ContentDomain)
 _ALLOWED_ASSESSMENT_MODES = frozenset(e.value for e in AssessmentMode)
+_DEFAULT_CONTENT_DOMAIN = ContentDomain.CLINICAL.value
 
 
 @dataclass(frozen=True)
 class IngestedSourceResult:
-    """One source_document created during admin ingest upload."""
+    """One source_document reference used when queueing the ingest pipeline."""
 
     source_document_id: uuid.UUID
     title: str
     source_type: str
     stored_path: str
+    content_domain: str
 
 
 @dataclass(frozen=True)
 class IngestUploadParams:
-    content_domain: str
-    assessment_mode: str
-    authority_label: str
-    primary_language: str
     uploaded_by: str
-    retired_ids: list[uuid.UUID]
-    ingestion_instructions: str | None = None
 
 
 @dataclass(frozen=True)
@@ -99,25 +92,25 @@ class DuplicateIngestConflict:
 
 @dataclass(frozen=True)
 class IngestUploadOutcome:
-    """Result of attempting to ingest one uploaded file."""
+    """Result of attempting to upload one file."""
 
-    ingested: IngestedSourceResult | None = None
+    uploaded: IngestedSourceResult | None = None
     skipped: DuplicateIngestConflict | None = None
 
     def __post_init__(self) -> None:
-        if self.ingested is not None and self.skipped is not None:
-            raise ValueError("ingested and skipped are mutually exclusive")
-        if self.ingested is None and self.skipped is None:
-            raise ValueError("one of ingested or skipped must be set")
+        if self.uploaded is not None and self.skipped is not None:
+            raise ValueError("uploaded and skipped are mutually exclusive")
+        if self.uploaded is None and self.skipped is None:
+            raise ValueError("one of uploaded or skipped must be set")
 
 
 class IngestUploadService:
-    """Upload files to object storage and create source_document rows."""
+    """Upload files to object storage and create uploaded source_document rows."""
 
     def __init__(
         self,
         db: AsyncSession,
-        storage: ObjectStorageClient,
+        storage: ObjectStore | None = None,
         *,
         settings: Settings | None = None,
     ) -> None:
@@ -132,9 +125,8 @@ class IngestUploadService:
     @staticmethod
     def media_upload_limit_bytes(provider: str) -> int:
         """Return the strict provider inline transcription limit."""
-        return (
-            OPENAI_TRANSCRIPTION_MAX_BYTES if provider == "openai" else GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES
-        )
+        _ = provider
+        return GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES
 
     @staticmethod
     def validate_file_count(files: list[UploadFile]) -> None:
@@ -146,22 +138,46 @@ class IngestUploadService:
             )
 
     @staticmethod
-    def validate_mode(mode: str) -> None:
-        if mode not in ("append", "new"):
-            raise IngestValidationError(f"invalid mode {mode!r}; must be 'append' or 'new'")
-
-    @staticmethod
-    def validate_ingest_metadata(*, content_domain: str, assessment_mode: str) -> None:
+    def validate_content_domain(content_domain: str) -> None:
         if content_domain not in _ALLOWED_CONTENT_DOMAINS:
             raise IngestValidationError(
                 f"invalid content_domain {content_domain!r}; "
                 f"must be one of: {sorted(_ALLOWED_CONTENT_DOMAINS)}",
             )
+
+    @staticmethod
+    def validate_assessment_mode(assessment_mode: str) -> None:
         if assessment_mode not in _ALLOWED_ASSESSMENT_MODES:
             raise IngestValidationError(
                 f"invalid assessment_mode {assessment_mode!r}; "
                 f"must be one of: {sorted(_ALLOWED_ASSESSMENT_MODES)}",
             )
+
+    def validate_cardinality_targets(
+        self,
+        *,
+        target_cards_per_module: int | None,
+        target_quizzes_per_module: int | None,
+    ) -> None:
+        """Validate optional fixed card/quiz counts against deployment bounds."""
+        if target_cards_per_module is not None:
+            lo = self._settings.card_min_count
+            hi = self._settings.card_max_count
+            if not (lo <= target_cards_per_module <= hi):
+                raise IngestValidationError(
+                    f"cards_per_module must be between {lo} and {hi} (inclusive); "
+                    f"got {target_cards_per_module}",
+                    status_code=422,
+                )
+        if target_quizzes_per_module is not None:
+            lo = self._settings.quiz_min_questions
+            hi = self._settings.quiz_max_questions
+            if not (lo <= target_quizzes_per_module <= hi):
+                raise IngestValidationError(
+                    f"quizzes_per_module must be between {lo} and {hi} (inclusive); "
+                    f"got {target_quizzes_per_module}",
+                    status_code=422,
+                )
 
     @staticmethod
     def resolve_titles_for_files(titles_json: str | None, files: list[UploadFile]) -> list[str]:
@@ -172,7 +188,10 @@ class IngestUploadService:
             resolved: list[str] = []
             for upload in files:
                 if not upload.filename:
-                    raise IngestValidationError("filename is required")
+                    raise IngestValidationError(
+                        "filename is required",
+                        code=ErrorCode.FILENAME_REQUIRED.value,
+                    )
                 stem = Path(safe_basename(upload.filename)).stem
                 if not stem:
                     raise IngestValidationError(
@@ -197,6 +216,39 @@ class IngestUploadService:
                     f"titles[{index}] must be a non-empty string",
                 )
             resolved.append(entry.strip())
+        return resolved
+
+    @staticmethod
+    def resolve_descriptions_for_files(
+        descriptions_json: str | None,
+        files: list[UploadFile],
+    ) -> list[str | None]:
+        """Map each upload to an optional description (default null when omitted)."""
+        if not files:
+            raise IngestValidationError("at least one file is required")
+        if descriptions_json is None:
+            return [None] * len(files)
+        try:
+            parsed = json.loads(descriptions_json)
+        except json.JSONDecodeError as exc:
+            raise IngestValidationError("descriptions must be valid JSON") from exc
+        if not isinstance(parsed, list):
+            raise IngestValidationError("descriptions must be a JSON array")
+        if len(parsed) != len(files):
+            raise IngestValidationError(
+                f"descriptions must have {len(files)} entries (one per file); got {len(parsed)}",
+            )
+        resolved: list[str | None] = []
+        for index, entry in enumerate(parsed):
+            if entry is None:
+                resolved.append(None)
+                continue
+            if not isinstance(entry, str):
+                raise IngestValidationError(
+                    f"descriptions[{index}] must be a string or null",
+                )
+            text = entry.strip()
+            resolved.append(text or None)
         return resolved
 
     @staticmethod
@@ -229,32 +281,57 @@ class IngestUploadService:
         return resolved
 
     @staticmethod
-    def resolve_sync_published_visible_for_files(
-        visible_json: str | None,
-        files: list[UploadFile],
+    def resolve_override_duplicates_for_ids(
+        override_flags: list[bool] | None,
+        source_document_ids: list[uuid.UUID],
     ) -> list[bool]:
-        """Map each upload to a published-sync visibility flag (default false when omitted)."""
+        """Map each source_document_id to an override flag (default false when omitted)."""
+        if not source_document_ids:
+            raise IngestValidationError("at least one source_document_id is required")
+        if override_flags is None:
+            return [False] * len(source_document_ids)
+        if len(override_flags) != len(source_document_ids):
+            raise IngestValidationError(
+                f"override_duplicates must have {len(source_document_ids)} entries "
+                f"(one per source_document_id); got {len(override_flags)}",
+            )
+        return list(override_flags)
+
+    @staticmethod
+    def resolve_content_domains_for_files(
+        content_domains_json: str | None,
+        files: list[UploadFile],
+    ) -> list[str]:
+        """Map each upload to a content_domain (default clinical when omitted/null/empty)."""
         if not files:
             raise IngestValidationError("at least one file is required")
-        if visible_json is None:
-            return [False] * len(files)
+        if content_domains_json is None:
+            return [_DEFAULT_CONTENT_DOMAIN] * len(files)
         try:
-            parsed = json.loads(visible_json)
+            parsed = json.loads(content_domains_json)
         except json.JSONDecodeError as exc:
-            raise IngestValidationError("sync_published_visible must be valid JSON") from exc
+            raise IngestValidationError("content_domains must be valid JSON") from exc
         if not isinstance(parsed, list):
-            raise IngestValidationError("sync_published_visible must be a JSON array")
+            raise IngestValidationError("content_domains must be a JSON array")
         if len(parsed) != len(files):
             raise IngestValidationError(
-                f"sync_published_visible must have {len(files)} entries (one per file); got {len(parsed)}",
+                f"content_domains must have {len(files)} entries (one per file); got {len(parsed)}",
             )
-        resolved: list[bool] = []
+        resolved: list[str] = []
         for index, entry in enumerate(parsed):
-            if not isinstance(entry, bool):
+            if entry is None:
+                resolved.append(_DEFAULT_CONTENT_DOMAIN)
+                continue
+            if not isinstance(entry, str):
                 raise IngestValidationError(
-                    f"sync_published_visible[{index}] must be a boolean",
+                    f"content_domains[{index}] must be a string or null",
                 )
-            resolved.append(entry)
+            domain = entry.strip()
+            if not domain:
+                resolved.append(_DEFAULT_CONTENT_DOMAIN)
+                continue
+            IngestUploadService.validate_content_domain(domain)
+            resolved.append(domain)
         return resolved
 
     @staticmethod
@@ -278,7 +355,10 @@ class IngestUploadService:
     @staticmethod
     def source_type_for_upload(file: UploadFile) -> str:
         if not file.filename:
-            raise IngestValidationError("filename is required")
+            raise IngestValidationError(
+                "filename is required",
+                code=ErrorCode.FILENAME_REQUIRED.value,
+            )
         suffix = Path(file.filename).suffix.lower()
         if suffix not in _ACCEPTED_SUFFIXES:
             raise IngestValidationError(
@@ -286,74 +366,56 @@ class IngestUploadService:
             )
         return IngestUploadService.source_type_from_suffix(suffix)
 
-    async def retire_published_modules_if_new(
-        self,
-        mode: str,
-        *,
-        tenant_id: uuid.UUID | None = None,
-    ) -> tuple[int, list[uuid.UUID]]:
-        """Retire published modules for the active tenant when ``mode=='new'``."""
-        if mode != "new":
-            return 0, []
-        stmt = (
-            update(Module)
-            .where(Module.lifecycle_status == "published")
-            .values(lifecycle_status="retired")
-            .returning(Module.id)
-        )
-        if tenant_id is not None:
-            stmt = stmt.where(tenant_scope_filter(Module.tenant_id, tenant_id))
-        result = await self._db.execute(stmt)
-        retired_ids = list(result.scalars().all())
-        logger.info(
-            "Ingest mode=new: retired %d published module(s) before fresh ingestion (tenant_id=%s)",
-            len(retired_ids),
-            tenant_id,
-        )
-        return len(retired_ids), retired_ids
-
-    async def ingest_uploaded_files(
+    async def upload_files(
         self,
         *,
         files: list[UploadFile],
         titles: list[str],
+        descriptions: list[str | None],
         params: IngestUploadParams,
         override_flags: list[bool],
-        sync_published_visible_flags: list[bool],
+        content_domains: list[str],
     ) -> list[IngestUploadOutcome]:
         outcomes: list[IngestUploadOutcome] = []
-        for upload, doc_title, override_duplicate, sync_published_visible in zip(
+        for (
+            upload,
+            doc_title,
+            description,
+            override_duplicate,
+            content_domain,
+        ) in zip(
             files,
             titles,
+            descriptions,
             override_flags,
-            sync_published_visible_flags,
+            content_domains,
             strict=True,
         ):
             outcomes.append(
-                await self.ingest_one_uploaded_file(
+                await self.upload_one_file(
                     file=upload,
                     title=doc_title,
+                    description=description,
                     params=params,
                     override_duplicate=override_duplicate,
-                    sync_published_visible=sync_published_visible,
+                    content_domain=content_domain,
                 )
             )
         return outcomes
 
-    async def ingest_one_uploaded_file(
+    async def upload_one_file(
         self,
         *,
         file: UploadFile,
         title: str,
         params: IngestUploadParams,
+        description: str | None = None,
         override_duplicate: bool = False,
-        sync_published_visible: bool = False,
+        content_domain: str = _DEFAULT_CONTENT_DOMAIN,
     ) -> IngestUploadOutcome:
-        """Upload one file, persist provenance, and create a source_document."""
-        self.validate_ingest_metadata(
-            content_domain=params.content_domain,
-            assessment_mode=params.assessment_mode,
-        )
+        """Upload one file, persist provenance, and create an uploaded source_document."""
+        if self._storage is None:
+            raise RuntimeError("IngestUploadService requires object storage for uploads")
         source_type = self.source_type_for_upload(file)
         staging_path, content_sha256, original_filename = await self._stage_and_digest_upload(
             file,
@@ -361,7 +423,7 @@ class IngestUploadService:
         )
         source_repo = SourceRepository(self._db)
         try:
-            existing = await source_repo.list_ingested_by_content_sha256(content_sha256)
+            existing = await source_repo.list_duplicate_candidates_by_content_sha256(content_sha256)
             if existing and not override_duplicate:
                 return IngestUploadOutcome(
                     skipped=DuplicateIngestConflict(
@@ -379,7 +441,11 @@ class IngestUploadService:
                 )
             except ObjectStorageError:
                 logger.exception("Ingest object storage upload failed for %s", file.filename)
-                raise IngestValidationError("object storage upload failed", status_code=502) from None
+                raise IngestValidationError(
+                    "object storage upload failed",
+                    status_code=502,
+                    code=ErrorCode.OBJECT_STORAGE_ERROR.value,
+                ) from None
 
             storage_path = stored.storage_path
             await record_file_upload(
@@ -397,39 +463,34 @@ class IngestUploadService:
             doc = await source_repo.create_source_document(
                 title=title,
                 source_type=source_type,
-                primary_language=params.primary_language,
-                content_domain=params.content_domain,
-                assessment_mode=params.assessment_mode,
-                authority_label=params.authority_label,
+                primary_language=self._settings.deployment_primary_locale,
+                content_domain=content_domain,
                 original_storage_path=storage_path,
                 content_sha256=content_sha256,
                 original_filename=original_filename,
                 uploaded_by=params.uploaded_by,
-                ingestion_instructions=params.ingestion_instructions,
-                sync_published_visible=sync_published_visible,
+                description=description,
+                sync_published_visible=False,
+                status="uploaded",
             )
-            audit_payload: dict[str, Any] = {
-                "stored_path": storage_path,
-                "source_type": source_type,
-                "sync_published_visible": sync_published_visible,
-            }
-            if params.retired_ids:
-                audit_payload["retired_module_ids"] = [str(mid) for mid in params.retired_ids]
-            if params.ingestion_instructions is not None:
-                audit_payload["ingestion_instructions"] = params.ingestion_instructions
             await record_attribution_event(
                 self._db,
-                event_type="ingest_started",
+                event_type="ingest_uploaded",
                 actor=params.uploaded_by,
                 source_document_id=doc.id,
-                payload=audit_payload,
+                payload={
+                    "stored_path": storage_path,
+                    "source_type": source_type,
+                    "content_domain": content_domain,
+                },
             )
             return IngestUploadOutcome(
-                ingested=IngestedSourceResult(
+                uploaded=IngestedSourceResult(
                     source_document_id=doc.id,
                     title=doc.title,
                     source_type=doc.source_type,
                     stored_path=storage_path,
+                    content_domain=doc.content_domain,
                 )
             )
         finally:
@@ -445,7 +506,7 @@ class IngestUploadService:
         staging_dir = Path(self._settings.upload_dir) / "ingest_staging"
         staging_dir.mkdir(parents=True, exist_ok=True)
         staging_path = staging_dir / f".ingest-{uuid.uuid4()}.part"
-        max_media_bytes = self.media_upload_limit_bytes(self._settings.ai_cloud_provider)
+        max_media_bytes = self.media_upload_limit_bytes("google")
         await stream_upload_to_path(
             file,
             staging_path,
@@ -462,7 +523,7 @@ class IngestUploadService:
         *,
         original_filename: str,
     ) -> StoredObject:
-        """Upload a staged file to MinIO under the ``ingest/`` prefix."""
+        """Upload a staged file to object storage under the ``ingest/`` prefix."""
         object_name = f"ingest/{uuid.uuid4()}_{original_filename}"
         content_type = mimetypes.guess_type(original_filename)[0] or "application/octet-stream"
         digest = sha256_hex_file(staging_path)
@@ -501,6 +562,7 @@ async def stream_upload_to_path(
                         "larger audio/video requires chunking or provider file upload support"
                     ),
                     status_code=413,
+                    code=ErrorCode.PAYLOAD_TOO_LARGE.value,
                 )
             await anyio.to_thread.run_sync(lambda c=chunk, f=first: _append_bytes_to_path(dest, c, first=f))
             first = False

@@ -45,6 +45,30 @@ class TestListModules:
         assert "Live" in titles
         assert "Gone" not in titles
 
+    async def test_default_includes_review_pending_excludes_deactivated(
+        self, db_session: AsyncSession
+    ) -> None:
+        fam = await _make_family(db_session)
+        await _make_module(
+            db_session,
+            family=fam,
+            title_localized={"bn": "PendingReview"},
+            lifecycle_status="review_pending",
+        )
+        await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "Deactivated"},
+            lifecycle_status="deactivated",
+            set_family_pointer=False,
+        )
+
+        repo = ModuleRepository(db_session)
+        rows = await repo.list_modules()
+        titles = {m.title_localized["bn"] for m in rows}
+        assert "PendingReview" in titles
+        assert "Deactivated" not in titles
+
     async def test_status_retired_filter_returns_only_retired(self, db_session: AsyncSession) -> None:
         fam = await _make_family(db_session)
         await _make_module(db_session, family=fam, title_localized={"bn": "Live"})
@@ -188,7 +212,7 @@ class TestListModules:
         await _make_module(
             db_session,
             family=await _make_family(db_session),
-            title_localized={"bn": f"English {marker} guidance", "en": "x"},
+            title_localized={"bn": "x", "en": f"English {marker} guidance"},
         )
 
         repo = ModuleRepository(db_session)
@@ -231,6 +255,7 @@ class TestListModules:
         # No row appears on more than one page.
         ids = {m.id for m in page1} | {m.id for m in page2} | {m.id for m in page3}
         assert len(ids) == 5
+        assert await repo.count_modules(domain=domain) == 5
 
     async def test_results_ordered_by_published_at_desc(self, db_session: AsyncSession) -> None:
         domain = f"order-{uuid4().hex[:6]}"
@@ -256,6 +281,260 @@ class TestListModules:
         # Newest-first.
         assert rows[0].title_localized["bn"] == "newer"
         assert rows[1].title_localized["bn"] == "older"
+
+    async def test_orders_by_created_at_asc(self, db_session: AsyncSession) -> None:
+        domain = f"sort-created-{uuid4().hex[:6]}"
+        early = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "early"},
+            domain=domain,
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+        late = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "late"},
+            domain=domain,
+            created_at=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+
+        repo = ModuleRepository(db_session)
+        rows = await repo.list_modules(domain=domain, sort_by="created_at", sort_dir="asc")
+        assert [m.id for m in rows] == [early.id, late.id]
+
+    async def test_orders_by_published_at_asc(self, db_session: AsyncSession) -> None:
+        domain = f"sort-published-{uuid4().hex[:6]}"
+        old = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "older"},
+            domain=domain,
+            published_at=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+        new = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "newer"},
+            domain=domain,
+            published_at=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+
+        repo = ModuleRepository(db_session)
+        rows = await repo.list_modules(domain=domain, sort_by="published_at", sort_dir="asc")
+        assert [m.id for m in rows] == [old.id, new.id]
+
+    async def test_orders_by_published_at_desc_nulls_last(self, db_session: AsyncSession) -> None:
+        domain = f"sort-null-pub-{uuid4().hex[:6]}"
+        published = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "published"},
+            domain=domain,
+            lifecycle_status="published",
+            published_at=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+        draft = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "draft"},
+            domain=domain,
+            lifecycle_status="draft",
+            published_at=None,
+            set_family_pointer=False,
+        )
+
+        repo = ModuleRepository(db_session)
+        rows = await repo.list_modules(domain=domain, sort_by="published_at", sort_dir="desc")
+        assert [m.id for m in rows] == [published.id, draft.id]
+
+    async def test_orders_by_activated_at_desc(self, db_session: AsyncSession) -> None:
+        domain = f"sort-activated-{uuid4().hex[:6]}"
+        older = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "older-activation"},
+            domain=domain,
+            published_at=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+        older.first_activated_at = datetime(2024, 6, 1, tzinfo=UTC)
+        newer = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "newer-activation"},
+            domain=domain,
+            published_at=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+        newer.last_reactivated_at = datetime(2025, 3, 15, tzinfo=UTC)
+        await db_session.flush()
+
+        repo = ModuleRepository(db_session)
+        rows = await repo.list_modules(domain=domain, sort_by="activated_at", sort_dir="desc")
+        assert [m.id for m in rows] == [newer.id, older.id]
+
+    async def test_orders_by_last_deactivated_at_desc(self, db_session: AsyncSession) -> None:
+        domain = f"sort-deactivated-{uuid4().hex[:6]}"
+        early = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "early-deactivated"},
+            domain=domain,
+            lifecycle_status="deactivated",
+            published_at=datetime(2024, 1, 1, tzinfo=UTC),
+            set_family_pointer=False,
+        )
+        early.last_deactivated_at = datetime(2025, 1, 1, tzinfo=UTC)
+        late = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "late-deactivated"},
+            domain=domain,
+            lifecycle_status="deactivated",
+            published_at=datetime(2024, 1, 1, tzinfo=UTC),
+            set_family_pointer=False,
+        )
+        late.last_deactivated_at = datetime(2025, 6, 1, tzinfo=UTC)
+        await db_session.flush()
+
+        repo = ModuleRepository(db_session)
+        rows = await repo.list_modules(
+            status="deactivated",
+            domain=domain,
+            sort_by="last_deactivated_at",
+            sort_dir="desc",
+        )
+        assert [m.id for m in rows] == [late.id, early.id]
+
+    async def test_orders_by_title_asc(self, db_session: AsyncSession) -> None:
+        domain = f"sort-title-{uuid4().hex[:6]}"
+        beta = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "Beta Module"},
+            domain=domain,
+        )
+        alpha = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "Alpha Module"},
+            domain=domain,
+        )
+
+        repo = ModuleRepository(db_session)
+        rows = await repo.list_modules(domain=domain, sort_by="title", sort_dir="asc")
+        assert [m.id for m in rows] == [alpha.id, beta.id]
+
+    async def test_orders_by_domain_asc(self, db_session: AsyncSession) -> None:
+        marker = uuid4().hex[:6]
+        beta = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": f"beta-{marker}"},
+            domain=f"zzz-{marker}",
+        )
+        alpha = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": f"alpha-{marker}"},
+            domain=f"aaa-{marker}",
+        )
+
+        repo = ModuleRepository(db_session)
+        rows = await repo.list_modules(full_text_query=marker, sort_by="domain", sort_dir="asc")
+        assert [m.id for m in rows] == [alpha.id, beta.id]
+
+    async def test_orders_by_lifecycle_status_asc(self, db_session: AsyncSession) -> None:
+        domain = f"sort-status-{uuid4().hex[:6]}"
+        published = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "published-row"},
+            domain=domain,
+            lifecycle_status="published",
+        )
+        draft = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "draft-row"},
+            domain=domain,
+            lifecycle_status="draft",
+            published_at=None,
+            set_family_pointer=False,
+        )
+
+        repo = ModuleRepository(db_session)
+        rows = await repo.list_modules(domain=domain, sort_by="lifecycle_status", sort_dir="asc")
+        assert [m.id for m in rows] == [draft.id, published.id]
+
+    async def test_typed_created_and_published_date_ranges(self, db_session: AsyncSession) -> None:
+        await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "published-row"},
+            lifecycle_status="published",
+            published_at=datetime(2025, 4, 1, 12, 0, tzinfo=UTC),
+            created_at=datetime(2020, 1, 1, tzinfo=UTC),
+        )
+        await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "draft-row"},
+            lifecycle_status="draft",
+            published_at=None,
+            created_at=datetime(2025, 4, 2, 12, 0, tzinfo=UTC),
+            set_family_pointer=False,
+        )
+        await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "outside"},
+            lifecycle_status="published",
+            published_at=datetime(2023, 1, 1, tzinfo=UTC),
+            created_at=datetime(2023, 1, 1, tzinfo=UTC),
+        )
+
+        repo = ModuleRepository(db_session)
+        by_created = await repo.list_modules(
+            created_from=datetime(2025, 4, 1, tzinfo=UTC),
+            created_to=datetime(2025, 4, 30, tzinfo=UTC),
+        )
+        assert {m.title_localized["bn"] for m in by_created} == {"draft-row"}
+
+        by_published = await repo.list_modules(
+            published_from=datetime(2025, 4, 1, tzinfo=UTC),
+            published_to=datetime(2025, 4, 30, tzinfo=UTC),
+        )
+        assert {m.title_localized["bn"] for m in by_published} == {"published-row"}
+
+    async def test_deactivated_date_excludes_null_column(self, db_session: AsyncSession) -> None:
+        match = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "deactivated-in-range"},
+            lifecycle_status="deactivated",
+            published_at=datetime(2024, 1, 1, tzinfo=UTC),
+            set_family_pointer=False,
+        )
+        match.last_deactivated_at = datetime(2025, 5, 10, tzinfo=UTC)
+        await db_session.flush()
+
+        other = await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": "no-deactivated-at"},
+            lifecycle_status="published",
+            published_at=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+        other.last_deactivated_at = None
+        await db_session.flush()
+
+        repo = ModuleRepository(db_session)
+        rows = await repo.list_modules(
+            status="deactivated",
+            deactivated_from=datetime(2025, 5, 1, tzinfo=UTC),
+            deactivated_to=datetime(2025, 5, 31, tzinfo=UTC),
+        )
+        assert {m.title_localized["bn"] for m in rows} == {"deactivated-in-range"}
 
 
 # ─── get_module / list_quiz_questions ───────────────────────────────────────
@@ -333,7 +612,7 @@ class TestListQuizQuestions:
         assert rows[0].question_localized["bn"] == "for m1"
 
 
-# ─── search_by_embedding (pgvector cosine distance) ─────────────────────────
+# ─── search_by_embedding (VectorStore → pgvector cosine distance) ───────────
 
 
 class TestSearchByEmbedding:

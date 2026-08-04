@@ -147,26 +147,39 @@ def build_clean_english_docx(out_path: Path) -> Path:
     return out_path
 
 
-def build_supervisor_update_pdf(out_path: Path) -> Path:
-    """Build a 2-page English supervisor update with explicit before/after framing."""
-    doc = pymupdf.open()
-    page1 = doc.new_page()
-    page1.insert_text(
-        (72, 72),
-        "# Supervisor Update — April 2026\n\n"
-        "## Updated Hb threshold for severe anaemia\n\n"
-        "Previously: severe anaemia threshold was Hb < 7 g/dL.\n"
-        "Now: severe anaemia threshold is Hb < 8 g/dL.\n"
-        "Rationale: aligns with updated WHO guideline.\n"
-        "Next visit: re-evaluate any PW currently classified Hb 7-8.",
-        fontsize=11,
-    )
-    page2 = doc.new_page()
-    page2.insert_text(
-        (72, 72),
-        "## Distribution\n\nThis update applies to all SKs in the BRAC pilot region.",
-        fontsize=11,
-    )
+def build_formatted_english_docx(out_path: Path) -> Path:
+    """DOCX with bold runs and bullet-list paragraphs."""
+    doc = Document()
+    doc.add_heading("Formatted Manual", level=1)
+    para = doc.add_paragraph()
+    para.add_run("Normal text and ")
+    bold_run = para.add_run("bold emphasis")
+    bold_run.bold = True
+    doc.add_paragraph("First bullet item", style="List Bullet")
+    doc.add_paragraph("Second bullet item", style="List Bullet")
+    doc.add_paragraph("Numbered step one", style="List Number")
+    doc.add_paragraph("Numbered step two", style="List Number")
     doc.save(str(out_path))
-    doc.close()
+    return out_path
+
+
+def build_formatted_english_pptx(out_path: Path) -> Path:
+    """PPTX slide with bold text in the content placeholder."""
+    prs = Presentation()
+    layout = prs.slide_layouts[1]
+    slide = prs.slides.add_slide(layout)
+    slide.shapes.title.text = "Formatted Slide"
+    body = slide.placeholders[1]
+    tf = body.text_frame
+    tf.clear()
+    opening = tf.paragraphs[0]
+    run1 = opening.add_run()
+    run1.text = "Opening line with "
+    bold = opening.add_run()
+    bold.text = "bold lead-in"
+    bold.font.bold = True
+    bullet = tf.add_paragraph()
+    bullet.text = "Bulleted clinical point"
+    bullet.level = 1
+    prs.save(str(out_path))
     return out_path

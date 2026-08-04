@@ -20,6 +20,7 @@ def test_is_prosemirror_doc() -> None:
 
 def test_plain_string_body() -> None:
     assert card_body_plain_text("  hello  ") == "hello"
+    assert card_body_plain_text("**bold** text") == "bold text"
     assert card_body_is_nonempty("hello")
     assert not card_body_is_nonempty("   ")
     assert card_body_char_len("abcd") == 4

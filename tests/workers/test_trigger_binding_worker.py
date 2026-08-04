@@ -29,7 +29,7 @@ async def test_bind_triggers_writes_bindings(db_session) -> None:
         module_type="refresher",
         lifecycle_status="draft",
         module_json={"cards": [{"title": {"bn": "c"}, "body": {"bn": "b"}}]},
-        search_metadata_jsonb={"topic_tags": ["anc"], "clinical_conditions": []},
+        search_metadata_jsonb={"topic_tags": {"bn": ["anc"]}, "clinical_conditions": {"bn": []}},
     )
     db_session.add(module)
     await db_session.flush()

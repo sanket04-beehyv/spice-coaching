@@ -15,7 +15,6 @@ env/
 # IDE
 .idea/
 .vscode/
-.cursor/
 *.swp
 *.swo
 
@@ -44,3 +43,4 @@ Thumbs.db
 # uv
 .python-version
 .claude/
+.cursor/

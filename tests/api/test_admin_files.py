@@ -10,10 +10,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from mc_foundation.objectstore import ObjectNotFoundError, StoredObject
 from platform_service.db.repositories.file_upload_repository import FileUploadRepository
 from platform_service.deps import get_db, get_object_storage_client
 from platform_service.main import create_app
-from platform_service.services.object_storage import ObjectNotFoundError, StoredObject
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import platform_path, requires_db
@@ -35,7 +35,7 @@ async def storage_mock() -> MagicMock:
             object_name="uploads/test.txt",
             storage_path=f"{_TEST_BUCKET}/uploads/test.txt",
             content_type="application/pdf",
-            size_bytes=5,
+            size_bytes=len(_TEST_PDF_BYTES),
         )
     )
     storage.stat_object = AsyncMock()
@@ -88,13 +88,15 @@ class TestAdminFileUpload:
         storage_mock: MagicMock,
     ) -> None:
         files = {"file": ("hello.pdf", BytesIO(_TEST_PDF_BYTES), "application/pdf")}
-        resp = await client.post(platform_path("/admin/v3/files"), files=files, data={"prefix": "uploads"})
+        resp = await client.post(platform_path("/admin/files"), files=files)
         assert resp.status_code == 201
         body = resp.json()
         assert body["storage_path"].startswith(f"{_TEST_BUCKET}/")
         assert body["content_type"] == "application/pdf"
         assert body["reused_existing"] is False
         storage_mock.put_object_from_local_file.assert_awaited_once()
+        put_kwargs = storage_mock.put_object_from_local_file.await_args.kwargs
+        assert put_kwargs["object_name"].startswith("uploads/")
 
     async def test_upload_reuses_existing_object_when_hash_matches(
         self,
@@ -104,7 +106,7 @@ class TestAdminFileUpload:
     ) -> None:
         await _seed_file_upload(db_session)
         files = {"file": ("hello.pdf", BytesIO(_TEST_PDF_BYTES), "application/pdf")}
-        resp = await client.post(platform_path("/admin/v3/files"), files=files, data={"prefix": "uploads"})
+        resp = await client.post(platform_path("/admin/files"), files=files)
         assert resp.status_code == 201
         body = resp.json()
         assert body["reused_existing"] is True
@@ -122,8 +124,10 @@ class TestAdminFileUpload:
         await _seed_file_upload(db_session)
         storage_mock.stat_object = AsyncMock(side_effect=ObjectNotFoundError("missing"))
         files = {"file": ("hello.pdf", BytesIO(_TEST_PDF_BYTES), "application/pdf")}
-        resp = await client.post(platform_path("/admin/v3/files"), files=files, data={"prefix": "uploads"})
+        resp = await client.post(platform_path("/admin/files"), files=files)
         assert resp.status_code == 201
         body = resp.json()
         assert body["reused_existing"] is False
         storage_mock.put_object_from_local_file.assert_awaited_once()
+        put_kwargs = storage_mock.put_object_from_local_file.await_args.kwargs
+        assert put_kwargs["object_name"].startswith("uploads/")

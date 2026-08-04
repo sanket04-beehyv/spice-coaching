@@ -48,6 +48,7 @@ async def _make_trigger_with_bindings(
     trigger_kind: str = "gap",
     trigger_code: str | None = None,
     bindings: list[tuple[ModuleFamily, int]] | None = None,
+    modules_by_family: dict | None = None,
 ):
     repo = TriggerRepository(session)
     trigger = await repo.create_trigger(
@@ -55,8 +56,12 @@ async def _make_trigger_with_bindings(
         trigger_code=trigger_code or f"trig_{uuid4().hex[:8]}",
         predicate_jsonb={"behavioural_gap_code": "x"} if trigger_kind == "gap" else {},
     )
+    modules_by_family = modules_by_family or {}
     for family, weight in bindings or []:
-        module = await _make_published_module(session, family)
+        module = modules_by_family.get(family.id)
+        if module is None:
+            module = await _make_published_module(session, family)
+            modules_by_family[family.id] = module
         await repo.bind_module_to_trigger(
             module_id=module.id,
             trigger_definition_id=trigger.id,
@@ -194,27 +199,9 @@ async def test_module_reachable_from_two_triggers_dedupes_by_higher_weight(
 ) -> None:
     fam = await _make_family(db_session)
     module = await _make_published_module(db_session, fam)
-    repo = TriggerRepository(db_session)
-    t1 = await repo.create_trigger(
-        trigger_kind="gap",
-        trigger_code=f"trig_{uuid4().hex[:8]}",
-        predicate_jsonb={"behavioural_gap_code": "x"},
-    )
-    await repo.bind_module_to_trigger(
-        module_id=module.id,
-        trigger_definition_id=t1.id,
-        priority_weight=5,
-    )
-    t2 = await repo.create_trigger(
-        trigger_kind="gap",
-        trigger_code=f"trig_{uuid4().hex[:8]}",
-        predicate_jsonb={"behavioural_gap_code": "y"},
-    )
-    await repo.bind_module_to_trigger(
-        module_id=module.id,
-        trigger_definition_id=t2.id,
-        priority_weight=15,
-    )
+    shared = {fam.id: module}
+    t1 = await _make_trigger_with_bindings(db_session, bindings=[(fam, 5)], modules_by_family=shared)
+    t2 = await _make_trigger_with_bindings(db_session, bindings=[(fam, 15)], modules_by_family=shared)
     selector = ModuleSelector(db_session)
     out = await selector.select_modules_for_chw(
         chw_id=_test_chw_id(),

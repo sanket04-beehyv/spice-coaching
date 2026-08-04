@@ -37,30 +37,27 @@ from mc_contracts.internal_ai import (
 )
 from platform_service.config import get_settings
 from platform_service.db.models.module import Module
+from platform_service.db.models.module_card import ModuleCard
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
+from platform_service.services.prompt_template_service import PromptTemplateService, RenderedPrompt
+from platform_service.services.prompt_variables.quiz_generation_variables import (
+    build_quiz_generation_variables,
+)
 from platform_service.workers.quiz_generation_worker import (
+    _clamp_quiz_size,
     _format_card_block,
     _target_quiz_size,
     generate_quiz_for_module,
-    render_system_prompt,
 )
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
+
+pytestmark = pytest.mark.usefixtures("mock_prompt_templates")
 
 # ─── Pure unit: target quiz size + card block formatter ────────────────────
-
-
-def _card_block(card: dict[str, Any], idx: int) -> str:
-    settings = get_settings()
-    return _format_card_block(
-        card,
-        idx,
-        primary_locale=settings.deployment_primary_locale,
-        settings=settings,
-    )
 
 
 class TestTargetQuizSize:
@@ -84,9 +81,25 @@ class TestTargetQuizSize:
         assert _target_quiz_size(0) == s.quiz_min_questions
 
 
+class TestClampQuizSize:
+    def test_clamps_above_max(self) -> None:
+        s = get_settings()
+        assert _clamp_quiz_size(s.quiz_max_questions + 5, settings=s) == s.quiz_max_questions
+
+    def test_clamps_below_min(self) -> None:
+        s = get_settings()
+        assert _clamp_quiz_size(1, settings=s) == s.quiz_min_questions
+
+
 class TestFormatCardBlock:
     def test_includes_only_populated_fields(self) -> None:
-        block = _card_block({"title": {"bn": "T"}, "body": {"bn": "B"}}, idx=1)
+        settings = get_settings()
+        block = _format_card_block(
+            {"title": {"bn": "T"}, "body": {"bn": "B"}},
+            idx=1,
+            primary_locale="bn",
+            settings=settings,
+        )
         assert "### Card 1" in block
         assert "Title (bn): T" in block
         assert "Body (bn): B" in block
@@ -95,7 +108,8 @@ class TestFormatCardBlock:
         assert "Rationale" not in block
 
     def test_includes_all_optional_fields_in_order(self) -> None:
-        block = _card_block(
+        settings = get_settings()
+        block = _format_card_block(
             {
                 "title": {"bn": "t"},
                 "body": {"bn": "b"},
@@ -105,6 +119,8 @@ class TestFormatCardBlock:
                 "rationale_for_change": {"bn": "r"},
             },
             idx=2,
+            primary_locale="bn",
+            settings=settings,
         )
         # Title before body, body before next, next before previous practice,
         # previous before current, current before rationale.
@@ -119,19 +135,29 @@ class TestFormatCardBlock:
         assert positions == sorted(positions)
 
     def test_card_index_in_header(self) -> None:
-        assert "### Card 7" in _card_block({"title": {"bn": "x"}}, idx=7)
+        assert "### Card 7" in _format_card_block(
+            {"title": {"bn": "x"}},
+            idx=7,
+            primary_locale="bn",
+            settings=get_settings(),
+        )
 
     def test_empty_card_only_emits_header(self) -> None:
-        block = _card_block({}, idx=1)
+        block = _format_card_block({}, idx=1, primary_locale="bn", settings=get_settings())
         assert block.strip() == "### Card 1"
 
 
 class TestRenderSystemPrompt:
     def test_forbids_card_citations_in_explanations(self) -> None:
-        prompt = render_system_prompt()
-        assert "cite which card" not in prompt.lower()
-        assert "do not mention card numbers" in prompt.lower()
-        assert "no card references" in prompt.lower()
+        settings = get_settings()
+        variables = build_quiz_generation_variables(
+            module_title="Sample",
+            domain="anc",
+            quiz_size=3,
+            cards_block="",
+            settings=settings,
+        )
+        assert "no card references" in variables["explanation_field_schema"].lower()
 
 
 # ─── DB-backed setup ────────────────────────────────────────────────────────
@@ -142,12 +168,8 @@ pytestmark_db = [requires_db, pytest.mark.asyncio]
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
+    await truncate_tables(db_session, "module_quiz_question, module, module_family")
     yield
-    await db_session.rollback()
-    await db_session.execute(
-        text("TRUNCATE module_quiz_question, module, module_family RESTART IDENTITY CASCADE")
-    )
-    await db_session.commit()
 
 
 async def _seed_module(
@@ -162,10 +184,13 @@ async def _seed_module(
     await session.flush()
     if module_json_override is not None:
         module_json = module_json_override
+        card_payloads: list[dict] = []
     elif cards is None:
         module_json = {"cards": [{"title": {"bn": "c1"}, "body": {"bn": "b1"}}]}
+        card_payloads = module_json["cards"]
     else:
         module_json = {"cards": cards}
+        card_payloads = cards
     module = Module(
         module_family_id=fam.id,
         version=1,
@@ -178,6 +203,19 @@ async def _seed_module(
     )
     session.add(module)
     await session.flush()
+    for order, card in enumerate(card_payloads, start=1):
+        session.add(
+            ModuleCard(
+                module_id=module.id,
+                card_order=order,
+                title_localized=card.get("title", {"bn": ""}),
+                body_localized=card.get("body"),
+                next_action_localized=card.get("next_action"),
+                previous_practice_localized=card.get("previous_practice"),
+                current_practice_localized=card.get("current_practice"),
+                rationale_for_change_localized=card.get("rationale_for_change"),
+            )
+        )
     fam.current_published_module_id = module.id
     await session.commit()
     return module.id
@@ -189,6 +227,8 @@ def _llm_response(payload: Any, *, error: str | None = None) -> InferenceRespons
         generation_type=GenerationType.QUIZ_DRAFTING,
         provider="google",
         model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text="" if payload is None else (payload if isinstance(payload, str) else ""),
         parsed_json=payload if not isinstance(payload, str) else None,
         latency_ms=200,
@@ -211,19 +251,16 @@ def _valid_question(idx: int = 0) -> dict[str, Any]:
 
 @pytest.fixture
 def mock_generate(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
-    """Patch AIRuntimeClient.generate in the worker's namespace."""
+    """Patch the AI client factory used by the worker."""
     gen_mock = AsyncMock()
 
     class _StubClient:
-        def __init__(self, *_args: Any, **_kwargs: Any) -> None: ...
-
         async def generate(self, request: InferenceRequest) -> InferenceResponse:
             return await gen_mock(request)
 
-    stub = _StubClient()
     monkeypatch.setattr(
         "platform_service.workers.quiz_generation_worker.get_ai_client",
-        lambda: stub,
+        lambda: _StubClient(),
     )
     return gen_mock
 
@@ -413,6 +450,8 @@ class TestLlmOutputShapes:
             generation_type=GenerationType.QUIZ_DRAFTING,
             provider="google",
             model="gemini-2.5-flash",
+            max_tokens=8192,
+            temperature=0.2,
             raw_text="this is not json{{{",
             parsed_json=None,
             latency_ms=10,
@@ -433,6 +472,8 @@ class TestLlmOutputShapes:
             generation_type=GenerationType.QUIZ_DRAFTING,
             provider="google",
             model="gemini-2.5-flash",
+            max_tokens=8192,
+            temperature=0.2,
             raw_text=json.dumps({"questions": [_valid_question(0)]}),
             parsed_json=None,
             latency_ms=10,
@@ -454,6 +495,8 @@ class TestLlmOutputShapes:
             generation_type=GenerationType.QUIZ_DRAFTING,
             provider="google",
             model="gemini-2.5-flash",
+            max_tokens=8192,
+            temperature=0.2,
             raw_text="42",
             parsed_json=None,
             latency_ms=10,
@@ -568,7 +611,18 @@ class TestRequestShape:
         self,
         db_session: AsyncSession,
         mock_generate: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        async def _render(*_args: Any, variables: dict[str, str], **_kwargs: Any) -> RenderedPrompt:
+            return RenderedPrompt(
+                template_id="quiz-generation",
+                template_version=1,
+                prompt_template_id=uuid4(),
+                resolved_system_prompt="system",
+                resolved_human_message=variables["cards_block"],
+            )
+
+        monkeypatch.setattr(PromptTemplateService, "render", _render)
         module_id = await _seed_module(
             db_session,
             cards=[

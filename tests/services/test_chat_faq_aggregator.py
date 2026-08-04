@@ -12,11 +12,18 @@ from platform_service.services.chat_faq_aggregator import (
     normalize_question,
     stable_faq_id,
 )
+from platform_service.services.question_text import normalize_question as normalize_question_shared
 
 
 class TestNormalizeQuestion:
     def test_collapses_whitespace(self) -> None:
         assert normalize_question("  child   cough  ") == "child cough"
+
+    def test_casefolds(self) -> None:
+        assert normalize_question("How Do I Measure?") == "how do i measure?"
+
+    def test_reexport_matches_shared(self) -> None:
+        assert normalize_question is normalize_question_shared
 
 
 class TestStableFaqId:

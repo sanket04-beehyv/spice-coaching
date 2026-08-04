@@ -7,16 +7,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
+from mc_foundation.objectstore import PresignedObjectUrl
 from platform_service.config import Settings
 from platform_service.db.models.content_block import ContentBlock
 from platform_service.db.models.source_page import SourcePage
-from platform_service.services.object_storage import PresignedObjectUrl
 from platform_service.services.sync_service import SyncService
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.api.conftest import _seed_module, _seed_source_document
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
@@ -26,19 +25,22 @@ _THUMB_URL = "https://minio.example/thumb"
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text("TRUNCATE module_quiz_question, module, module_family, source_document RESTART IDENTITY CASCADE")
+    await truncate_tables(
+        db_session,
+        "module_quiz_question, module, module_family, source_document",
     )
-    await db_session.commit()
+    yield
 
 
 def _mock_storage() -> MagicMock:
     storage = MagicMock()
 
     async def _presign(
-        *, object_name: str, expires_seconds: int, download_filename=None, disposition="auto", **kwargs
+        *,
+        object_name: str,
+        expires_seconds: int,
+        download_filename=None,
+        disposition=None,
     ):
         if "thumbnails" in object_name:
             return PresignedObjectUrl(

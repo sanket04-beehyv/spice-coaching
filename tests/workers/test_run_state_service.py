@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from mc_contracts.errors import ErrorCode
 from platform_service.db.models.ingestion_run import IngestionRun
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.services.run_state_service import (
@@ -20,22 +21,17 @@ from platform_service.services.run_state_service import (
     STAGE_QUIZ_GENERATION,
     RunStateService,
 )
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe(db_session: AsyncSession) -> AsyncIterator[None]:
+    await truncate_tables(db_session, "source_document, ingestion_run_step, ingestion_run")
     yield
-    await db_session.rollback()
-    await db_session.execute(
-        text("TRUNCATE source_document, ingestion_run_step, ingestion_run RESTART IDENTITY CASCADE")
-    )
-    await db_session.commit()
 
 
 async def _seed_run(session: AsyncSession) -> tuple[RunStateService, object]:
@@ -44,8 +40,6 @@ async def _seed_run(session: AsyncSession) -> tuple[RunStateService, object]:
         source_type="pdf",
         primary_language="en",
         content_domain="clinical",
-        assessment_mode="with_quiz",
-        authority_label="BRAC",
         original_storage_path="/tmp/x.pdf",
     )
     session.add(sd)
@@ -139,7 +133,15 @@ class TestMaybeFinalizeIngestionRun:
             input_summary={"candidate_id": str(uuid4()), "module_id": str(uuid4())},
         )
         await run_state.complete_step(quiz.id, output_summary={"questions_written": 1})
-        await run_state.fail_step(embed.id, error={"type": "TestError", "message": "boom"})
+        await run_state.fail_step(
+            embed.id,
+            error_code=ErrorCode.EMBEDDING_FAILED.value,
+            error_message="boom",
+            error={"type": "TestError", "message": "boom"},
+        )
+        await db_session.refresh(embed)
+        assert embed.error_code == ErrorCode.EMBEDDING_FAILED.value
+        assert embed.error_message == "boom"
         await run_state.complete_step(gap.id, output_summary={"secondary_links_written": 0})
         await db_session.commit()
 
@@ -185,7 +187,12 @@ class TestMaybeFinalizeIngestionRun:
             stage=STAGE_CARD_DRAFT,
             input_summary={"candidate_id": str(uuid4())},
         )
-        await run_state.fail_step(card.id, error={"type": "RuntimeError", "message": "draft failed"})
+        await run_state.fail_step(
+            card.id,
+            error_code=ErrorCode.DRAFT_FAILED.value,
+            error_message="draft failed",
+            error={"type": "RuntimeError", "message": "draft failed"},
+        )
         await run_state.skip_step(
             run_id=run.id,
             stage=STAGE_QUIZ_GENERATION,
@@ -222,8 +229,6 @@ class TestFusionRunLookup:
             source_type="pdf",
             primary_language="en",
             content_domain="clinical",
-            assessment_mode="with_quiz",
-            authority_label="BRAC",
             original_storage_path="/tmp/a.pdf",
         )
         sd2 = SourceDocument(
@@ -231,8 +236,6 @@ class TestFusionRunLookup:
             source_type="pdf",
             primary_language="en",
             content_domain="clinical",
-            assessment_mode="with_quiz",
-            authority_label="BRAC",
             original_storage_path="/tmp/b.pdf",
         )
         db_session.add_all([sd1, sd2])

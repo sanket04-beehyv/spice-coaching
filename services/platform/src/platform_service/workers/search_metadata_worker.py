@@ -1,8 +1,8 @@
 """Post-publish search metadata worker.
 
-Generates bilingual lexical enrichment for module retrieval via LLM, persists
-to ``module.search_metadata_jsonb``, then chains embedding generation so
-vectors include the enriched text.
+Generates locale-keyed lexical enrichment (primary locale only) for module
+retrieval via LLM, persists to ``module.search_metadata_jsonb``, then chains
+embedding generation so vectors include the enriched text.
 """
 
 from __future__ import annotations
@@ -10,8 +10,12 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
+from mc_contracts.errors import ErrorCode
+
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.module import Module
+from platform_service.db.repositories.module_read_repository import ModuleReadRepository
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.module_search_metadata_generator import ModuleSearchMetadataGenerator
 from platform_service.services.post_publish_step import finish_post_publish_step
 
@@ -67,13 +71,18 @@ async def generate_search_metadata_for_module(
                 await finish_post_publish_step(
                     step_id=step_id,
                     success=False,
+                    error_code=ErrorCode.MODULE_NOT_FOUND.value,
+                    error_message=f"module {module_id} not found",
                     error={"type": "ModuleNotFound", "message": f"module {module_id} not found"},
                 )
                 _chain_post_metadata()
                 return False
 
+            card_rows = await ModuleReadRepository(session).list_cards(module_id)
+            cards = [card_row_to_dict(row) for row in card_rows]
+
             generator = ModuleSearchMetadataGenerator()
-            result = await generator.generate(module)
+            result = await generator.generate(module, cards=cards)
             if result.metadata is None:
                 logger.warning(
                     "Search metadata worker: generation failed for module %s: %s",
@@ -83,6 +92,8 @@ async def generate_search_metadata_for_module(
                 await finish_post_publish_step(
                     step_id=step_id,
                     success=False,
+                    error_code=ErrorCode.GENERATION_FAILED.value,
+                    error_message=(result.error or "unknown")[:500],
                     error={
                         "type": "GenerationError",
                         "message": (result.error or "unknown")[:500],
@@ -108,6 +119,8 @@ async def generate_search_metadata_for_module(
         await finish_post_publish_step(
             step_id=step_id,
             success=False,
+            error_code=ErrorCode.SEARCH_METADATA_FAILED.value,
+            error_message=str(exc)[:500],
             error={"type": type(exc).__name__, "message": str(exc)[:500]},
         )
         _chain_post_metadata()

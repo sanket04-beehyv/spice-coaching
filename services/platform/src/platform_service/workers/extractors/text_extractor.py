@@ -21,7 +21,10 @@ from pathlib import Path
 
 import pymupdf  # type: ignore[import-untyped]
 from docx import Document as DocxDocument  # type: ignore[import-untyped]
+from docx.text.paragraph import Paragraph as DocxParagraph  # type: ignore[import-untyped]
 from pptx import Presentation  # type: ignore[import-untyped]
+
+from platform_service.workers.extractors.extraction_markdown import normalize_extraction_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,93 @@ class ExtractedPage:
 
 class TextExtractionError(Exception):
     """Raised when text extraction fails irrecoverably (corrupted file, etc.)."""
+
+
+def _finalize_markdown(markdown: str) -> str:
+    return normalize_extraction_markdown(markdown)
+
+
+def _docx_run_text(run) -> str:
+    text = run.text or ""
+    if not text:
+        return ""
+    if run.bold:
+        text = f"**{text}**"
+    if run.italic:
+        text = f"*{text}*"
+    return text
+
+
+def _docx_paragraph_text(para: DocxParagraph) -> str:
+    parts = [_docx_run_text(run) for run in para.runs]
+    combined = "".join(parts).strip()
+    if combined:
+        return combined
+    return (para.text or "").strip()
+
+
+def _docx_list_prefix(para: DocxParagraph, *, num_counters: dict[int, int]) -> str | None:
+    style_name = (para.style.name or "").strip() if para.style else ""
+    if style_name.startswith("List Bullet"):
+        return "- "
+    if style_name.startswith("List Number"):
+        num_counters[0] = num_counters.get(0, 0) + 1
+        return f"{num_counters[0]}. "
+    p_pr = para._p.pPr
+    if p_pr is not None and p_pr.numPr is not None:
+        return "- "
+    return None
+
+
+def _docx_paragraph_line(para: DocxParagraph, *, num_counters: dict[int, int]) -> str:
+    text = _docx_paragraph_text(para)
+    if not text:
+        return ""
+    prefix = _docx_list_prefix(para, num_counters=num_counters)
+    if prefix is not None:
+        return f"{prefix}{text}"
+    num_counters.clear()
+    return text
+
+
+def _pptx_run_text(run) -> str:
+    text = run.text or ""
+    if not text:
+        return ""
+    if run.font.bold:
+        text = f"**{text}**"
+    if run.font.italic:
+        text = f"*{text}*"
+    return text
+
+
+def _pptx_paragraph_text(paragraph) -> str:
+    parts = [_pptx_run_text(run) for run in paragraph.runs]
+    combined = "".join(parts).strip()
+    if combined:
+        return combined
+    return (paragraph.text or "").strip()
+
+
+def _pptx_is_bulleted(paragraph) -> bool:
+    if (paragraph.level or 0) > 0:
+        return True
+    p_pr = paragraph._p.pPr
+    if p_pr is None:
+        return False
+    ns = "{http://schemas.openformats.org/drawingml/2006/main}"
+    return any(p_pr.find(f"{ns}{tag}") is not None for tag in ("buChar", "buAutoNum", "buBlip"))
+
+
+def _pptx_paragraph_line(paragraph) -> str:
+    text = _pptx_paragraph_text(paragraph)
+    if not text:
+        return ""
+    level = paragraph.level or 0
+    indent = "  " * level
+    if _pptx_is_bulleted(paragraph):
+        return f"{indent}- {text}"
+    return text
 
 
 # ── PDF ────────────────────────────────────────────────────────────────
@@ -78,7 +168,7 @@ def extract_pdf_pages(pdf_path: str | Path) -> list[ExtractedPage]:
                     path.name,
                 )
                 text = ""
-            pages.append(ExtractedPage(page_number=i + 1, markdown=text.strip()))
+            pages.append(ExtractedPage(page_number=i + 1, markdown=_finalize_markdown(text.strip())))
         return pages
     finally:
         doc.close()
@@ -110,7 +200,8 @@ def extract_pptx_slides(pptx_path: str | Path) -> list[ExtractedPage]:
             if not shape.has_text_frame:
                 continue
             tf = shape.text_frame
-            shape_text = "\n".join(p.text.strip() for p in tf.paragraphs if p.text.strip())
+            shape_lines = [line for p in tf.paragraphs if (line := _pptx_paragraph_line(p))]
+            shape_text = "\n".join(shape_lines)
             if not shape_text:
                 continue
             # Title placeholder identification: slides title style is at index
@@ -129,7 +220,7 @@ def extract_pptx_slides(pptx_path: str | Path) -> list[ExtractedPage]:
             parts.append(f"# {title_text}")
         if body_lines:
             parts.extend(body_lines)
-        markdown = "\n\n".join(parts).strip()
+        markdown = _finalize_markdown("\n\n".join(parts).strip())
         pages.append(ExtractedPage(page_number=slide_idx + 1, markdown=markdown))
     return pages
 
@@ -153,12 +244,14 @@ def extract_docx_pages(docx_path: str | Path) -> list[ExtractedPage]:
         raise TextExtractionError(f"Failed to open DOCX {path.name}: {exc}") from exc
 
     lines: list[str] = []
+    num_counters: dict[int, int] = {}
     for para in doc.paragraphs:
-        text = (para.text or "").strip()
+        text = _docx_paragraph_line(para, num_counters=num_counters)
         if not text:
             continue
         style_name = (para.style.name or "").strip() if para.style else ""
         if style_name.startswith("Heading"):
+            num_counters.clear()
             # Heading 1 → "# ", Heading 2 → "## ", etc. Default to ## for any
             # malformed heading style.
             try:
@@ -166,10 +259,11 @@ def extract_docx_pages(docx_path: str | Path) -> list[ExtractedPage]:
                 level = max(1, min(level, 6))
             except (ValueError, IndexError):
                 level = 2
-            lines.append(f"{'#' * level} {text}")
+            heading_text = _docx_paragraph_text(para)
+            lines.append(f"{'#' * level} {heading_text}")
         else:
             lines.append(text)
-    markdown = "\n\n".join(lines).strip()
+    markdown = _finalize_markdown("\n\n".join(lines).strip())
     return [ExtractedPage(page_number=1, markdown=markdown)]
 
 

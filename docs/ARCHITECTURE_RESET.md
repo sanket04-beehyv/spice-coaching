@@ -25,11 +25,15 @@ This is **not** a pilot-scope cut and post-pilot expansion. It is the architectu
 
 ## Conceptual model
 
+### Cards have stable family IDs across module versions
+- Cards are relational rows in `module_card`, keyed by `card_family_id` + `card_version` (same versioning pattern as `module_quiz_question`).
+- `module.module_json` holds only module-level data (e.g. `attachments`); card content lives in `module_card`.
+- Telemetry (`module_card_viewed`) and quiz linkage (`primary_card_family_id`) reference `card_family_id`.
+
 ### Module is the unit of meaning. Cards are slices of one module.
 - A module is a coherent behavioural topic (pregnancy referral, postnatal care, etc.).
-- Cards inside a module are presentation slices for screen rendering — paginated content, not addressable units.
-- Cards belong to exactly one module. Cross-module reuse is not a concept; the same source facts in two different modules produce two different cards (different framings, different calls-to-action).
-- Cards have **no stable IDs** outside their module. Position in the module's card array is the only handle they need.
+- Cards inside a module are presentation slices for screen rendering — paginated content.
+- Cards belong to exactly one module version. Cross-module reuse is not a concept.
 
 ### No assignment.
 - There is no CHW-to-module assignment table or workflow.
@@ -97,6 +101,7 @@ Writes `module.status = published`, `module.clinically_reviewed = false`. Enqueu
 ### Keep (no change)
 - `source_document`, `source_page`, `content_block` (provenance layer; migration 0002)
 - `module_quiz_question` (FK target for `chw_quiz_attempt`; migration 0003)
+- `module_card` (relational card rows; FK from `module.id`; migration 0033)
 - `behavioural_gap`, `module_trigger_binding`, `chw_behavioural_gap_state` (runtime tables; migration 0004)
 - `chw_module_completion` (telemetry schema; migration 0005)
 - `chw_quiz_attempt` (telemetry schema)
@@ -104,7 +109,7 @@ Writes `module.status = published`, `module.clinically_reviewed = false`. Enqueu
 
 ### Modify
 - `module`:
-  - **Add** `module_json JSONB` (cards array; canonical card content lives here)
+  - **Keep** `module_json JSONB` for module-level attachments only (cards moved to `module_card`)
   - **Add** `embedding vector(N)` (per-module vector for admin/web semantic search; pgvector index)
   - **Add** `visibility_window TSTZRANGE` (nullable; when active, module surfaces in "what's new")
   - **Confirm** `clinically_reviewed BOOLEAN` exists (default false)
@@ -114,7 +119,6 @@ Writes `module.status = published`, `module.clinically_reviewed = false`. Enqueu
   - **Keep** the table as ephemeral pipeline state for Stage 2 retry semantics and run-history visibility
 
 ### Drop
-- `module_card` table (cards live inline in `module.module_json`)
 - `module_card_membership` table (cross-module reuse is not a concept)
 - `module_card_embedding` table (replaced by `module.embedding`)
 - Any `chw_module_assignment`-like table if it exists (no assignment concept; verify in migrations and drop)
@@ -174,7 +178,7 @@ These are blockers we discovered while running the current branch end-to-end. Fi
    Add `google_use_vertex`, `google_cloud_project`, `google_cloud_location`, `GOOGLE_APPLICATION_CREDENTIALS` to the environment block, plus a credentials volume mount. Currently only `google_api_key` is forwarded, so Vertex deployments fail at startup with `Developer API mode requires a real api_key`.
 
 2. **Stage B model selection.**
-   `services/platform/src/platform_service/workers/extractors/llm_outline_extractor.py` calls `gemini-2.0-flash` and falls back to `gemini-2.0-pro`. Both return 404 on the `microcoaching` Vertex project. Switch to read from `settings.text_model` / `GOOGLE_INFERENCE_MODEL` env (which is set to `gemini-2.5-flash`). Will go away when Stage B is folded into Stage 1, but needs fixing now for the current code path to work.
+   `services/platform/src/platform_service/workers/extractors/llm_outline_extractor.py` calls `gemini-2.0-flash` and falls back to `gemini-2.0-pro`. Both return 404 on the `microcoaching` Vertex project. Generate models are owned by ai-runtime `generation_profiles` (default `gemini-2.5-flash`); platform must not select model ids. Will go away when Stage B is folded into Stage 1, but needs fixing now for the current code path to work.
 
 3. **MissingGreenlet at `pipeline_orchestrator.py:~493`.**
    Failure-recording path crashes with `sqlalchemy.exc.MissingGreenlet: greenlet_spawn has not been called` because `step.id` lazy-loads outside greenlet context. Wrap the failure path in a fresh async session.

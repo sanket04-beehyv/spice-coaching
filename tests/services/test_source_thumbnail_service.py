@@ -93,7 +93,7 @@ async def test_generate_and_store_uploads_pdf_and_persists() -> None:
 
     service = SourceThumbnailService(session, storage=storage)
     service._repo = repo
-    service._settings.minio_bucket_name = "medtronics-storage"
+    service._settings.object_storage_bucket_name = "medtronics-storage"
 
     with (
         patch(

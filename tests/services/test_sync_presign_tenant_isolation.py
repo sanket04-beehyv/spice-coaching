@@ -46,8 +46,6 @@ async def _seed_source_document(session: AsyncSession) -> SourceDocument:
         source_type="pdf",
         primary_language="bn",
         content_domain="clinical",
-        assessment_mode="read_only",
-        authority_label="test",
         original_storage_path=_STORAGE_PATH,
         thumbnail_storage_path=_THUMB_PATH,
         status="ingested",
@@ -90,7 +88,7 @@ async def test_presign_source_document_rejects_other_tenant(db_session: AsyncSes
     doc = await _seed_source_document(db_session)
     await _seed_module(db_session, tenant_id=_TENANT_A, source_document_ids=[doc.id])
     storage = _mock_storage()
-    settings = Settings(minio_bucket_name=_BUCKET)
+    settings = Settings(object_storage_bucket_name=_BUCKET)
 
     resp = await SyncService(db_session).get_source_document_presigned_urls(
         source_document_ids=[doc.id],
@@ -110,7 +108,7 @@ async def test_presign_source_document_allows_own_tenant(db_session: AsyncSessio
     doc = await _seed_source_document(db_session)
     await _seed_module(db_session, tenant_id=_TENANT_A, source_document_ids=[doc.id])
     storage = _mock_storage()
-    settings = Settings(minio_bucket_name=_BUCKET)
+    settings = Settings(object_storage_bucket_name=_BUCKET)
 
     resp = await SyncService(db_session).get_source_document_presigned_urls(
         source_document_ids=[doc.id],
@@ -139,7 +137,7 @@ async def test_presign_module_thumbnail_rejects_other_tenant(db_session: AsyncSe
         resp = await SyncService(db_session).get_module_thumbnail_presigned_urls(
             module_ids=[module.id],
             storage=storage,
-            settings=Settings(minio_bucket_name=_BUCKET),
+            settings=Settings(object_storage_bucket_name=_BUCKET),
             tenant_id=_TENANT_B,
         )
 
@@ -162,7 +160,7 @@ async def test_presign_source_document_thumbnail_rejects_other_tenant(db_session
         resp = await SyncService(db_session).get_source_document_thumbnail_presigned_urls(
             source_document_ids=[doc.id],
             storage=storage,
-            settings=Settings(minio_bucket_name=_BUCKET),
+            settings=Settings(object_storage_bucket_name=_BUCKET),
             tenant_id=_TENANT_B,
         )
 

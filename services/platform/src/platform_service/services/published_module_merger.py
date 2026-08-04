@@ -12,8 +12,6 @@ from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceRequest,
-    ModelPolicy,
-    PromptSpec,
     TraceContext,
 )
 from mc_foundation.locale import LOCALIZED_CARD_TEXT_FIELDS
@@ -30,11 +28,10 @@ from platform_service.localized import (
 from platform_service.services.card_body_text import card_body_plain_text, is_rich_text_body
 from platform_service.services.card_normalisation import normalise_draft_card
 from platform_service.services.llm_response_resolver import resolve_parsed_dict
-from platform_service.services.prompts.published_module_merger_prompt import (
-    PUBLISHED_MODULE_MERGER_TEMPLATE_ID,
-    PUBLISHED_MODULE_MERGER_TEMPLATE_VERSION,
-    render_human_message,
-    render_system_prompt,
+from platform_service.services.prompt_registry import PUBLISHED_MODULE_MERGER_TEMPLATE_ID
+from platform_service.services.prompt_template_service import PromptTemplateService, prompt_spec_from_rendered
+from platform_service.services.prompt_variables.published_module_merger_variables import (
+    build_published_module_merger_variables,
 )
 from platform_service.services.text_similarity import trigram_similarity
 
@@ -62,12 +59,8 @@ class PublishedModuleMerger:
     def __init__(
         self,
         client: AIRuntimeClient | None = None,
-        *,
-        model: str | None = None,
     ) -> None:
-        settings = get_settings()
         self._client = client or get_ai_client()
-        self._model = model or settings.text_model
 
     async def merge(
         self,
@@ -77,8 +70,9 @@ class PublishedModuleMerger:
         valid_block_ids: set[uuid.UUID],
         trace_context: TraceContext | None = None,
         existing_modules: list[dict[str, Any]] | None = None,
-        # Backwards-compat alias for tests/callers still passing this name.
         published_modules: list[dict[str, Any]] | None = None,
+        card_min_count: int | None = None,
+        card_max_count: int | None = None,
     ) -> PublishedModuleMergerResult:
         """Run merge when the active-module list is non-empty.
 
@@ -105,31 +99,30 @@ class PublishedModuleMerger:
             limit=settings.stage_d_published_merge_prefilter_limit,
         )
 
-        system_prompt = render_system_prompt(
-            card_min_count=settings.card_min_count,
-            card_max_count=settings.card_max_count,
-            deployment_primary_locale=settings.deployment_primary_locale,
-        )
-        human_message = render_human_message(
-            candidate=candidate,
-            new_cards=new_cards,
-            existing_modules=prefiltered,
+        resolved_card_min = card_min_count if card_min_count is not None else settings.card_min_count
+        resolved_card_max = card_max_count if card_max_count is not None else settings.card_max_count
+
+        rendered = await PromptTemplateService().render(
+            None,
+            template_id=PUBLISHED_MODULE_MERGER_TEMPLATE_ID,
+            variant_key=None,
+            variables=build_published_module_merger_variables(
+                candidate=candidate,
+                new_cards=new_cards,
+                existing_modules=prefiltered,
+                card_min_count=resolved_card_min,
+                card_max_count=resolved_card_max,
+                deployment_primary_locale=settings.deployment_primary_locale,
+            ),
         )
 
         request = InferenceRequest(
             request_id=str(uuid.uuid4()),
             generation_type=GenerationType.MODULE_PUBLISHED_MERGE,
-            model_policy=ModelPolicy(model=self._model),
-            prompt=PromptSpec(
-                template_id=PUBLISHED_MODULE_MERGER_TEMPLATE_ID,
-                template_version=PUBLISHED_MODULE_MERGER_TEMPLATE_VERSION,
-                resolved_system_prompt=system_prompt,
-                resolved_human_message=human_message,
-            ),
+            prompt=prompt_spec_from_rendered(rendered),
             constraints=GenerationConstraints(
                 language="en",
                 output_format="json",
-                max_tokens=settings.stage_d_published_merge_max_output_tokens,
             ),
             trace_context=trace_context or TraceContext(),
         )
@@ -150,6 +143,7 @@ class PublishedModuleMerger:
             existing_modules=prefiltered,
             candidate=candidate,
             valid_block_ids=valid_block_ids,
+            card_max_count=resolved_card_max,
         )
 
 
@@ -377,8 +371,10 @@ def _parse_merge_payload(
     existing_modules: list[dict[str, Any]],
     candidate: dict[str, Any],
     valid_block_ids: set[uuid.UUID],
+    card_max_count: int | None = None,
 ) -> PublishedModuleMergerResult:
     settings = get_settings()
+    resolved_card_max = card_max_count if card_max_count is not None else settings.card_max_count
     module_type = candidate.get("proposed_module_type", "refresher")
     rationale = str(payload.get("match_rationale") or "").strip() or None
 
@@ -410,13 +406,13 @@ def _parse_merge_payload(
         if normalised is not None:
             cards.append(normalised)
 
-    if len(cards) > settings.card_max_count:
+    if len(cards) > resolved_card_max:
         logger.info(
             "Module merge returned %d cards; capping to %d",
             len(cards),
-            settings.card_max_count,
+            resolved_card_max,
         )
-        cards = cards[: settings.card_max_count]
+        cards = cards[:resolved_card_max]
 
     if matched_id is None:
         return PublishedModuleMergerResult(
@@ -459,9 +455,11 @@ def _parse_merge_payload(
     )
 
 
-def published_module_to_merge_dict(module: Module) -> dict[str, Any]:
+def published_module_to_merge_dict(
+    module: Module,
+    cards: list[dict[str, Any]],
+) -> dict[str, Any]:
     """Serialize a Module ORM row for the merger prompt."""
-    cards = (module.module_json or {}).get("cards", [])
     return {
         "module_id": str(module.id),
         "lifecycle_status": module.lifecycle_status,
@@ -469,7 +467,7 @@ def published_module_to_merge_dict(module: Module) -> dict[str, Any]:
         "description_localized": module.description_localized,
         "module_type": module.module_type,
         "domain": module.domain,
-        "cards": cards if isinstance(cards, list) else [],
+        "cards": cards,
     }
 
 

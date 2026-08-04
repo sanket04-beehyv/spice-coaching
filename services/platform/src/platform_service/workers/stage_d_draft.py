@@ -1,17 +1,19 @@
-"""Stage 2-draft (was Stage D) — bilingual card drafter, per candidate.
+"""Stage 2-draft (was Stage D) — locale-keyed card drafter, per candidate.
 
 Per `docs/ARCHITECTURE_RESET.md`:
 
-- Stage 2-draft takes one `module_candidate_draft`, drafts bilingual cards,
-  and persists a `module` row as `lifecycle_status='draft'` with
-  `module_json.cards` populated.
-- When a semantically similar **active** module exists (any non-retired row,
+- Stage 2-draft takes one `module_candidate_draft`, drafts cards in the
+  deployment primary locale, and persists a `module` row as
+  `lifecycle_status='draft'` with cards populated.
+- When a semantically similar **active** module exists (draft or published,
   latest version per family), an LLM merges the old and new card sets
-  (new wins on conflict), retires the matched row, and writes a new draft
-  version in the same `module_family`.
+  (new wins on conflict). Stage D then persists a dual path in the matched
+  family: secondary = LLM-merged cards, primary = current-document cards,
+  both as `review_pending`, linked to each other and the matched tip.
+  The matched tip is left untouched until an admin override-merge.
 - Quiz, search metadata, embedding (chained), and gap-classification are
   separate post-publish Celery workers; this stage enqueues them via
-  ``DraftPipeline.enqueue_post_publish`` once the module row has been committed.
+  ``DraftPipeline.enqueue_post_publish`` once module rows have been committed.
   Per-card search metadata is generated before module-level search metadata.
 - `module_card_validator` runs on each drafted card; cards with hard
   violations are dropped, soft warnings are annotated as `field_flags`.
@@ -28,7 +30,6 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from platform_service.config import get_settings
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_candidate_draft import ModuleCandidateDraft
 from platform_service.db.repositories.module_candidate_repository import (
@@ -38,8 +39,11 @@ from platform_service.db.repositories.module_drafter_repository import (
     ModuleDrafterRepository,
 )
 from platform_service.db.repositories.module_repository import ModuleRepository
+from platform_service.localized import primary_text
 from platform_service.services.card_drafter import CardDrafter
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.draft_pipeline import DraftPipeline
+from platform_service.services.ingestion_cardinality import resolve_for_candidate
 from platform_service.services.published_module_merger import (
     PublishedModuleMerger,
     PublishedModuleMergerError,
@@ -64,6 +68,18 @@ class StageDResult:
     insufficient_reason: str | None
     merged_from_module_id: UUID | None = None
     was_published_merge: bool = False
+    secondary_module_id: UUID | None = None
+
+
+@dataclass(frozen=True)
+class MergeProposal:
+    """LLM merge proposal used immediately for dual-path persistence."""
+
+    matched_module_id: UUID
+    match_rationale: str | None
+    proposed_title: str | None
+    new_cards: list[dict[str, Any]]
+    merged_cards: list[dict[str, Any]]
 
 
 class StageDOrchestrator:
@@ -108,8 +124,10 @@ class StageDOrchestrator:
         runner re-enqueues after coverage validation passes.
 
         `skip_merge` when True skips merging new cards into similar
-        active modules even when ``stage_d_published_merge_enabled`` is on
-        (per-ingest opt-out from POST /admin/ingest).
+        active modules (internal opt-out used by cross-source fusion).
+
+        When merge is attempted and the LLM finds a match, dual-path
+        ``review_pending`` modules are persisted immediately (no parking).
         """
         candidate = await self._candidate_repo.get_candidate(candidate_id)
         if candidate is None:
@@ -135,11 +153,7 @@ class StageDOrchestrator:
         cards = draft_outcome.cards or []
 
         source_document_ids = self._pipeline.extract_source_document_ids(candidate_dict)
-        merged_from_id: UUID | None = None
-        was_merge = False
-
-        settings = get_settings()
-        if settings.stage_d_published_merge_enabled and not skip_merge:
+        if not skip_merge:
             if step_id is not None:
                 run_state = RunStateService(self._session)
                 await run_state.patch_step_input_summary(
@@ -150,115 +164,74 @@ class StageDOrchestrator:
                     },
                 )
                 await self._session.commit()
-            merge_outcome = await self._try_published_merge(
+            proposal = await self._propose_published_merge(
                 candidate_id=candidate_id,
-                candidate=candidate,
                 candidate_dict=candidate_dict,
                 cards=cards,
                 valid_block_ids=valid_block_ids,
             )
-            if merge_outcome is not None:
-                module, cards, merged_from_id, source_document_ids = merge_outcome
-                was_merge = True
-            else:
-                module = None
-        else:
-            module = None
+            if proposal is not None:
+                return await self._persist_dual_path_merge(
+                    candidate=candidate,
+                    candidate_dict=candidate_dict,
+                    proposal=proposal,
+                    enqueue_post_publish=enqueue_post_publish,
+                )
 
-        if module is None:
-            family = await self._drafter_repo.get_or_create_module_family(
-                proposed_title=candidate_dict.get("proposed_title", "Untitled Module")
-            )
-            module = await self._drafter_repo.create_published_module(
-                family=family,
-                candidate=candidate_dict,
-                cards=cards,
-                source_document_ids=source_document_ids,
-                quality_flags=candidate.quality_flags_jsonb,
-            )
-
-        await self._session.flush()
-        module_id = module.id
-
-        if enqueue_post_publish:
-            await self._enqueue_post_publish(
-                module_id,
-                source_document_ids,
-                ingestion_run_id=candidate.ingestion_run_id,
-                candidate_id=candidate_id,
-            )
-
-        return StageDResult(
-            candidate_id=candidate_id,
-            module_id=module_id,
-            cards_count=len(cards),
-            questions_count=0,
-            insufficient_reason=None,
-            merged_from_module_id=merged_from_id,
-            was_published_merge=was_merge,
+        return await self._persist_new_module(
+            candidate=candidate,
+            candidate_dict=candidate_dict,
+            cards=cards,
+            source_document_ids=source_document_ids,
+            enqueue_post_publish=enqueue_post_publish,
         )
 
-    async def _try_published_merge(
+    async def _persist_new_module(
         self,
         *,
-        candidate_id: UUID,
         candidate: ModuleCandidateDraft,
         candidate_dict: dict[str, Any],
         cards: list[dict[str, Any]],
-        valid_block_ids: set[UUID],
-    ) -> tuple[Module, list[dict[str, Any]], UUID, list[UUID]] | None:
-        """Merge with an active (non-retired) module when the LLM finds a match.
-
-        Returns ``(module, cards, superseded_id, source_document_ids)`` on
-        success, or ``None`` to fall back to the standard create path.
-        """
-        active_rows = await self._module_repo.list_active_modules_for_merge()
-        if not active_rows:
-            return None
-
-        existing_payloads = [published_module_to_merge_dict(m) for m in active_rows]
-        merge_block_ids = set(valid_block_ids)
-        for payload in existing_payloads:
-            merge_block_ids |= self._pipeline.block_ids_from_cards(payload.get("cards", []))
-
-        try:
-            merge_result = await self._published_merger.merge(
-                candidate=candidate_dict,
-                new_cards=cards,
-                existing_modules=existing_payloads,
-                valid_block_ids=merge_block_ids,
-            )
-        except PublishedModuleMergerError:
-            logger.warning(
-                "Stage 2-draft module merge failed for candidate %s; using standard create",
-                candidate_id,
-                exc_info=True,
-            )
-            return None
-
-        if merge_result.matched_module_id is None:
-            return None
-
-        merged_cards = self._pipeline.validate_cards(
-            merge_result.merged_cards,
-            candidate_id=candidate_id,
+        source_document_ids: list[UUID],
+        enqueue_post_publish: bool,
+    ) -> StageDResult:
+        family = await self._drafter_repo.get_or_create_module_family(
+            proposed_title=candidate_dict.get("proposed_title", "Untitled Module")
         )
-        settings = get_settings()
-        if len(merged_cards) < settings.card_min_count:
-            logger.warning(
-                "Stage 2-draft merge for candidate %s dropped below card_min_count; "
-                "falling back to standard create (matched module not retired)",
-                candidate_id,
+        module = await self._drafter_repo.create_published_module(
+            family=family,
+            candidate=candidate_dict,
+            cards=cards,
+            source_document_ids=source_document_ids,
+            quality_flags=candidate.quality_flags_jsonb,
+        )
+        await self._session.flush()
+        if enqueue_post_publish:
+            await self._enqueue_post_publish(
+                module.id,
+                source_document_ids,
+                ingestion_run_id=candidate.ingestion_run_id,
+                candidate_id=candidate.id,
             )
-            return None
+        return StageDResult(
+            candidate_id=candidate.id,
+            module_id=module.id,
+            cards_count=len(cards),
+            questions_count=0,
+            insufficient_reason=None,
+        )
 
-        matched = await self._session.get(Module, merge_result.matched_module_id)
+    async def _persist_dual_path_merge(
+        self,
+        *,
+        candidate: ModuleCandidateDraft,
+        candidate_dict: dict[str, Any],
+        proposal: MergeProposal,
+        enqueue_post_publish: bool,
+    ) -> StageDResult:
+        matched = await self._session.get(Module, proposal.matched_module_id)
         if matched is None or matched.lifecycle_status == "retired":
-            logger.warning(
-                "Stage 2-draft merge matched module %s is missing or retired",
-                merge_result.matched_module_id,
-            )
-            return None
+            raise ValueError(f"matched module {proposal.matched_module_id} is missing or retired")
 
         source_ids: set[UUID] = set(self._pipeline.extract_source_document_ids(candidate_dict))
         for sid in matched.source_document_ids or []:
@@ -276,24 +249,137 @@ class StageDOrchestrator:
             qf["flags"] = flags
             quality_flags = qf
 
-        module = await self._drafter_repo.create_merged_draft_module(
-            matched_published=matched,
+        # Secondary first (vN+1) = LLM-merged cards; primary (vN+2) = new_cards.
+        secondary = await self._drafter_repo.create_review_pending_in_matched_family(
+            matched=matched,
             candidate=candidate_dict,
-            cards=merged_cards,
+            cards=proposal.merged_cards,
             source_document_ids=source_document_ids,
             quality_flags=quality_flags,
-            match_rationale=merge_result.match_rationale,
+            match_rationale=proposal.match_rationale,
+            is_merge_secondary=True,
         )
-        await self._module_repo.retire_module(matched.id)
+        primary = await self._drafter_repo.create_review_pending_in_matched_family(
+            matched=matched,
+            candidate=candidate_dict,
+            cards=proposal.new_cards,
+            source_document_ids=source_document_ids,
+            quality_flags=quality_flags,
+            match_rationale=proposal.match_rationale,
+            is_merge_secondary=False,
+        )
+        primary.merge_secondary_module_id = secondary.id
+        primary.merge_source_module_id = matched.id
+        secondary.merge_primary_module_id = primary.id
+        secondary.merge_source_module_id = matched.id
+        await self._session.flush()
+
+        if enqueue_post_publish:
+            for module_id in (primary.id, secondary.id):
+                await self._enqueue_post_publish(
+                    module_id,
+                    source_document_ids,
+                    ingestion_run_id=candidate.ingestion_run_id,
+                    candidate_id=candidate.id,
+                )
+
         logger.info(
-            "Stage 2-draft merged candidate %s into family %s (retired %s %s, new draft %s)",
-            candidate_id,
-            matched.module_family_id,
-            matched.lifecycle_status,
+            "Stage 2-draft dual-path merge for candidate %s: primary=%s secondary=%s "
+            "matched_source=%s (source left active)",
+            candidate.id,
+            primary.id,
+            secondary.id,
             matched.id,
-            module.id,
         )
-        return module, merged_cards, matched.id, source_document_ids
+        return StageDResult(
+            candidate_id=candidate.id,
+            module_id=primary.id,
+            cards_count=len(proposal.new_cards),
+            questions_count=0,
+            insufficient_reason=None,
+            merged_from_module_id=matched.id,
+            was_published_merge=True,
+            secondary_module_id=secondary.id,
+        )
+
+    async def _propose_published_merge(
+        self,
+        *,
+        candidate_id: UUID,
+        candidate_dict: dict[str, Any],
+        cards: list[dict[str, Any]],
+        valid_block_ids: set[UUID],
+    ) -> MergeProposal | None:
+        """Run merge LLM; return a proposal when a match is found, else None."""
+        active_rows = await self._module_repo.list_active_modules_for_merge()
+        if not active_rows:
+            return None
+
+        active_ids = [row.id for row in active_rows]
+        card_rows = await self._module_repo.list_cards_for_module_ids(active_ids)
+        cards_by_module_id: dict[UUID, list[dict[str, Any]]] = {}
+        for row in card_rows:
+            if row.module_id is None:
+                continue
+            cards_by_module_id.setdefault(row.module_id, []).append(card_row_to_dict(row))
+
+        existing_payloads = [
+            published_module_to_merge_dict(m, cards_by_module_id.get(m.id, [])) for m in active_rows
+        ]
+        merge_block_ids = set(valid_block_ids)
+        for payload in existing_payloads:
+            merge_block_ids |= self._pipeline.block_ids_from_cards(payload.get("cards", []))
+
+        cardinality = await resolve_for_candidate(candidate_dict, self._session)
+        card_min, card_max = cardinality.card_bounds()
+
+        try:
+            merge_result = await self._published_merger.merge(
+                candidate=candidate_dict,
+                new_cards=cards,
+                existing_modules=existing_payloads,
+                valid_block_ids=merge_block_ids,
+                card_min_count=card_min,
+                card_max_count=card_max,
+            )
+        except PublishedModuleMergerError:
+            logger.warning(
+                "Stage 2-draft module merge failed for candidate %s; using standard create",
+                candidate_id,
+                exc_info=True,
+            )
+            return None
+
+        if merge_result.matched_module_id is None:
+            return None
+
+        merged_cards = self._pipeline.validate_cards(
+            merge_result.merged_cards,
+            candidate_id=candidate_id,
+        )
+        if len(merged_cards) < card_min:
+            logger.warning(
+                "Stage 2-draft merge for candidate %s dropped below card_min_count; "
+                "falling back to standard create (matched module not retired)",
+                candidate_id,
+            )
+            return None
+
+        matched = await self._session.get(Module, merge_result.matched_module_id)
+        if matched is None or matched.lifecycle_status == "retired":
+            logger.warning(
+                "Stage 2-draft merge matched module %s is missing or retired",
+                merge_result.matched_module_id,
+            )
+            return None
+
+        return MergeProposal(
+            matched_module_id=matched.id,
+            match_rationale=merge_result.match_rationale,
+            proposed_title=primary_text(matched.title_localized),
+            new_cards=cards,
+            merged_cards=merged_cards,
+        )
 
     async def _enqueue_post_publish(
         self,
@@ -318,6 +404,7 @@ class StageDOrchestrator:
             "proposed_title": c.proposed_title,
             "scope_summary": c.scope_summary,
             "description_localized": c.description_localized,
+            "domain": c.domain,
             "source_provenance": c.source_provenance_jsonb,
             "estimated_card_count": c.estimated_card_count,
             "estimated_quiz_count": c.estimated_quiz_count,
@@ -328,4 +415,4 @@ class StageDOrchestrator:
         }
 
 
-__all__ = ["StageDOrchestrator", "StageDResult"]
+__all__ = ["MergeProposal", "StageDOrchestrator", "StageDResult"]

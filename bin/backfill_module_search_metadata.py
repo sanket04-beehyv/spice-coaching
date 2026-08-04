@@ -6,7 +6,9 @@ each module is handed off to the worker, which calls ai-runtime and writes
 ``module.search_metadata_jsonb``. Downstream embedding regeneration is not
 chained (use ``bin/regenerate_module_embeddings.py`` if needed).
 
-After workers finish, verify retrieval quality with your preferred RAG eval tooling.
+After workers finish, re-run BM25 eval:
+
+    uv run python -m eval.rag --k 5 --output eval/rag/reports/bm25-metadata-v1.json
 
 Prerequisites (same env as platform service):
 

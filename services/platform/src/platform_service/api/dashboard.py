@@ -4,43 +4,90 @@ GET /dashboard/supervisor/{chw_id}       → SupervisorDashboardResponse
 GET /dashboard/district/{upazila_id}     → 501 (not implemented)
 GET /dashboard/llm-quality               → LLMQualityResponse
 GET /dashboard/digital-help-modules      → DigitalHelpModuleUsageResponse
+GET /dashboard/digital-help-modules/{module_id}/questions → DigitalHelpModuleQuestionsResponse
+GET /dashboard/digital-help-modules/{module_id}/requests  → DigitalHelpModuleRequestsResponse
+GET /dashboard/module-creation-suggestions → ModuleCreationSuggestionListResponse
+GET /dashboard/module-creation-suggestions/{suggestion_id} → ModuleCreationSuggestionDetailResponse
+GET /dashboard/team-activity             → TeamActivityResponse
+GET /dashboard/team-activity/users/{user_id}/questions → TeamMemberQuestionsResponse
+GET /dashboard/document-usage            → DocumentUsageResponse
 
 Supervisor and LLM quality routes query ClickHouse materialized views.
-District dashboard still returns 501 until implemented.
+Team activity is a device-plane organizer report. Document usage reads
+``document_view_daily`` (KPIs / documents) and raw ``coaching_events``
+(drill-down) in a single response. District dashboard still returns 501 until
+implemented.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from datetime import date
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from mc_contracts.dashboard import (
     CHWSkillSnapshot,
+    DigitalHelpModuleQuestionsResponse,
+    DigitalHelpModuleRequestsResponse,
     DigitalHelpModuleUsageResponse,
+    DocumentUsageResponse,
     LLMQualityResponse,
+    ModuleCreationSuggestionDetailResponse,
+    ModuleCreationSuggestionListResponse,
     SupervisorDashboardResponse,
+    TeamActivityResponse,
+    TeamMemberQuestionsResponse,
 )
+from mc_contracts.errors import ErrorCode
+from mc_foundation.problem import AppError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.auth.spice_identity import (
     require_chw_id_for_device_route,
+    require_organizer_for_device_route,
+    resolve_organizer_for_team_activity,
     resolve_tenant_id_for_dashboard,
+    resolve_tenant_id_for_device_route,
 )
 from platform_service.auth.spice_principal import is_admin_principal
 from platform_service.auth.spice_user import get_spice_user
 from platform_service.config import get_settings
 from platform_service.deps import get_clickhouse_client, get_db
 from platform_service.services.dashboard_analytics_service import DashboardAnalyticsService
+from platform_service.services.document_usage_analytics_service import (
+    DocumentUsageAnalyticsService,
+    DocumentUsageFilter,
+)
+from platform_service.services.document_usage_hierarchy import org_user_index
+from platform_service.services.module_creation_suggestion_service import (
+    ModuleCreationSuggestionService,
+)
+from platform_service.services.team_activity_service import TeamActivityService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 logger = logging.getLogger(__name__)
 
+_HIERARCHY_SCOPED_ROLES = frozenset({"AM", "PO", "SK"})
 
-def _not_implemented(endpoint: str) -> HTTPException:
+FromDate = Annotated[
+    date,
+    Query(alias="from", description="Inclusive start date (YYYY-MM-DD)."),
+]
+ToDate = Annotated[
+    date,
+    Query(alias="to", description="Inclusive end date (YYYY-MM-DD)."),
+]
+
+
+def _not_implemented(endpoint: str) -> AppError:
     logger.info("Dashboard endpoint requested before implementation endpoint=%s", endpoint)
-    return HTTPException(status_code=501, detail=f"{endpoint} analytics are not implemented yet.")
+    return AppError(
+        ErrorCode.NOT_IMPLEMENTED.value,
+        f"{endpoint} analytics are not implemented yet.",
+        status=501,
+    )
 
 
 def _to_int(value: Any, default: int = 0) -> int:
@@ -59,6 +106,66 @@ def _to_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _require_inclusive_date_range(*, from_date: date, to_date: date) -> None:
+    if from_date > to_date:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR.value,
+            "from_date must be on or before to_date",
+            status=422,
+        )
+
+
+def _document_usage_viewer(request: Request) -> tuple[int | None, bool]:
+    """Return (viewer_id, unrestricted). Auth-off and non-hierarchy admins are unrestricted."""
+    settings = get_settings()
+    if not settings.spice_auth_enabled:
+        return None, True
+    user = get_spice_user(request)
+    viewer_id = user.id
+    if viewer_id is None:
+        return None, True
+    org = org_user_index().get(viewer_id)
+    if org is not None and org.role in _HIERARCHY_SCOPED_ROLES:
+        return viewer_id, False
+    return viewer_id, True
+
+
+def _build_document_usage_filter(
+    request: Request,
+    *,
+    from_date: date,
+    to_date: date,
+    tenant_id: UUID | None,
+    upazila_id: str | None,
+    district: str | None,
+    po_id: int | None,
+    sk_id: int | None,
+    user_id: int | None,
+    document_id: UUID | None,
+) -> DocumentUsageFilter:
+    if from_date > to_date:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR.value,
+            "'from' must be on or before 'to'.",
+            status=422,
+        )
+    resolved_tenant = resolve_tenant_id_for_dashboard(request, tenant_id)
+    viewer_id, unrestricted = _document_usage_viewer(request)
+    return DocumentUsageFilter(
+        from_date=from_date,
+        to_date=to_date,
+        tenant_id=resolved_tenant,
+        upazila=upazila_id.strip() if upazila_id else None,
+        district=district.strip() if district else None,
+        po_id=po_id,
+        sk_id=sk_id,
+        user_id=user_id,
+        document_id=document_id,
+        viewer_id=viewer_id,
+        unrestricted_viewer=unrestricted,
+    )
 
 
 @router.get("/supervisor/{chw_id}")
@@ -118,7 +225,11 @@ async def chw_dashboard(
         rows = await get_clickhouse_client().query_rows(query, parameters=parameters)
     except Exception:  # pylint: disable=broad-exception-caught
         logger.exception("ClickHouse query failed for supervisor dashboard")
-        raise HTTPException(status_code=502, detail="Analytics backend unavailable") from None
+        raise AppError(
+            ErrorCode.ANALYTICS_UNAVAILABLE.value,
+            "Analytics backend unavailable",
+            status=502,
+        ) from None
 
     row: dict[str, Any] = rows[0] if rows else {}
 
@@ -204,7 +315,11 @@ async def llm_quality(
         )
     except Exception:  # pylint: disable=broad-exception-caught
         logger.exception("ClickHouse query failed for LLM quality dashboard")
-        raise HTTPException(status_code=502, detail="Analytics backend unavailable") from None
+        raise AppError(
+            ErrorCode.ANALYTICS_UNAVAILABLE.value,
+            "Analytics backend unavailable",
+            status=502,
+        ) from None
 
     row: dict[str, Any] = rows[0] if rows else {}
 
@@ -234,7 +349,8 @@ async def llm_quality(
 @router.get("/digital-help-modules")
 async def digital_help_module_usage(
     request: Request,
-    period_days: int = Query(default=30, ge=1, le=366),
+    from_date: date = Query(..., description="UTC start date (inclusive)."),
+    to_date: date = Query(..., description="UTC end date (inclusive)."),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     tenant_id: UUID | None = Query(
@@ -243,17 +359,274 @@ async def digital_help_module_usage(
     ),
     session: AsyncSession = Depends(get_db),
 ) -> DigitalHelpModuleUsageResponse:
-    """Rank modules by digital_help_used query volume for a tenant."""
+    """Rank modules by combined digital_help_used + module_requested volume (keyed on module_id)."""
+    _require_inclusive_date_range(from_date=from_date, to_date=to_date)
     tenant_id = resolve_tenant_id_for_dashboard(request, tenant_id)
     try:
         return await DashboardAnalyticsService(
             get_clickhouse_client(), session
         ).get_digital_help_module_usage(
             tenant_id=tenant_id,
-            period_days=period_days,
+            from_date=from_date,
+            to_date=to_date,
             limit=limit,
             offset=offset,
         )
     except Exception:  # pylint: disable=broad-exception-caught
         logger.exception("ClickHouse query failed for digital help module usage")
-        raise HTTPException(status_code=502, detail="Analytics backend unavailable") from None
+        raise AppError(
+            ErrorCode.ANALYTICS_UNAVAILABLE.value,
+            "Analytics backend unavailable",
+            status=502,
+        ) from None
+
+
+@router.get("/digital-help-modules/{module_id}/questions")
+async def digital_help_module_questions(
+    request: Request,
+    module_id: UUID,
+    from_date: date = Query(..., description="UTC start date (inclusive)."),
+    to_date: date = Query(..., description="UTC end date (inclusive)."),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    tenant_id: UUID | None = Query(
+        default=None,
+        description="Optional tenant UUID override (admin principals only when auth is enabled).",
+    ),
+    session: AsyncSession = Depends(get_db),
+) -> DigitalHelpModuleQuestionsResponse:
+    """Paginated chatbot questions for one module (keyed on module_id)."""
+    _require_inclusive_date_range(from_date=from_date, to_date=to_date)
+    tenant_id = resolve_tenant_id_for_dashboard(request, tenant_id)
+    try:
+        return await DashboardAnalyticsService(
+            get_clickhouse_client(), session
+        ).get_digital_help_module_questions(
+            module_id=module_id,
+            tenant_id=tenant_id,
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("ClickHouse query failed for digital help module questions")
+        raise AppError(
+            ErrorCode.ANALYTICS_UNAVAILABLE.value,
+            "Analytics backend unavailable",
+            status=502,
+        ) from None
+
+
+@router.get("/digital-help-modules/{module_id}/requests")
+async def digital_help_module_requests(
+    request: Request,
+    module_id: UUID,
+    from_date: date = Query(..., description="UTC start date (inclusive)."),
+    to_date: date = Query(..., description="UTC end date (inclusive)."),
+    tenant_id: UUID | None = Query(
+        default=None,
+        description="Optional tenant UUID override (admin principals only when auth is enabled).",
+    ),
+    session: AsyncSession = Depends(get_db),
+) -> DigitalHelpModuleRequestsResponse:
+    """Aggregate module_requested count for one concrete module_id."""
+    _require_inclusive_date_range(from_date=from_date, to_date=to_date)
+    tenant_id = resolve_tenant_id_for_dashboard(request, tenant_id)
+    try:
+        return await DashboardAnalyticsService(
+            get_clickhouse_client(), session
+        ).get_digital_help_module_requests(
+            module_id=module_id,
+            tenant_id=tenant_id,
+            from_date=from_date,
+            to_date=to_date,
+        )
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("ClickHouse query failed for digital help module requests")
+        raise AppError(
+            ErrorCode.ANALYTICS_UNAVAILABLE.value,
+            "Analytics backend unavailable",
+            status=502,
+        ) from None
+
+
+@router.get("/module-creation-suggestions")
+async def list_module_creation_suggestions(
+    request: Request,
+    from_date: date = Query(..., description="UTC start date (inclusive)."),
+    to_date: date = Query(..., description="UTC end date (inclusive)."),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    tenant_id: UUID | None = Query(
+        default=None,
+        description="Optional tenant UUID override (admin principals only when auth is enabled).",
+    ),
+    session: AsyncSession = Depends(get_db),
+) -> ModuleCreationSuggestionListResponse:
+    """List daily module-creation suggestions inferred from unattributed demand."""
+    _require_inclusive_date_range(from_date=from_date, to_date=to_date)
+    tenant_id = resolve_tenant_id_for_dashboard(request, tenant_id)
+    return await ModuleCreationSuggestionService(session).list_suggestions(
+        tenant_id=tenant_id,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/module-creation-suggestions/{suggestion_id}")
+async def get_module_creation_suggestion(
+    request: Request,
+    suggestion_id: UUID,
+    tenant_id: UUID | None = Query(
+        default=None,
+        description="Optional tenant UUID override (admin principals only when auth is enabled).",
+    ),
+    session: AsyncSession = Depends(get_db),
+) -> ModuleCreationSuggestionDetailResponse:
+    """Detail for one suggestion including chat questions and free-text requests."""
+    tenant_id = resolve_tenant_id_for_dashboard(request, tenant_id)
+    try:
+        return await ModuleCreationSuggestionService(session).get_detail(
+            suggestion_id=suggestion_id,
+            tenant_id=tenant_id,
+        )
+    except LookupError as exc:
+        raise AppError(ErrorCode.NOT_FOUND.value, str(exc), status=404) from exc
+
+
+@router.get("/team-activity")
+async def team_activity(
+    request: Request,
+    from_date: date = Query(..., description="UTC start date (inclusive)."),
+    to_date: date = Query(..., description="UTC end date (inclusive)."),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_db),
+) -> TeamActivityResponse:
+    """Team activity report for authenticated organizers (device plane)."""
+    _require_inclusive_date_range(from_date=from_date, to_date=to_date)
+
+    organizer_id = resolve_organizer_for_team_activity(request)
+    tenant_id = resolve_tenant_id_for_device_route(request, None)
+    settings = get_settings()
+    uuid_to_spice_id = {v: k for k, v in settings.spice_tenant_uuid_by_id.items()}
+    organization_ids = (
+        [uuid_to_spice_id[tenant_id]] if tenant_id is not None and tenant_id in uuid_to_spice_id else None
+    )
+
+    try:
+        return await TeamActivityService(get_clickhouse_client(), session).get_team_activity(
+            organizer_id=organizer_id,
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+            organization_ids=organization_ids,
+        )
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("ClickHouse query failed for team activity dashboard")
+        raise AppError(
+            ErrorCode.ANALYTICS_UNAVAILABLE.value,
+            "Analytics backend unavailable",
+            status=502,
+        ) from None
+
+
+@router.get("/team-activity/users/{user_id}/questions")
+async def team_member_questions(
+    request: Request,
+    user_id: int,
+    po_user_id: int | None = Query(
+        default=None,
+        description="PO user ID whose team to fetch. Required when auth is disabled or caller is an admin principal.",
+    ),
+    from_date: date = Query(..., description="UTC start date (inclusive)."),
+    to_date: date = Query(..., description="UTC end date (inclusive)."),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_db),
+) -> TeamMemberQuestionsResponse:
+    """Paginated chatbot questions for one team member (device plane)."""
+    _require_inclusive_date_range(from_date=from_date, to_date=to_date)
+
+    organizer_id = require_organizer_for_device_route(request, po_user_id)
+    tenant_id = resolve_tenant_id_for_device_route(request, None)
+
+    try:
+        return await TeamActivityService(get_clickhouse_client(), session).get_member_questions(
+            organizer_id=organizer_id,
+            user_id=user_id,
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+        )
+    except AppError:
+        raise
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("ClickHouse query failed for team member questions")
+        raise AppError(
+            ErrorCode.ANALYTICS_UNAVAILABLE.value,
+            "Analytics backend unavailable",
+            status=502,
+        ) from None
+
+
+@router.get("/document-usage")
+async def document_usage(
+    request: Request,
+    from_date: FromDate,
+    to_date: ToDate,
+    tenant_id: UUID | None = Query(default=None),
+    upazila_id: str | None = Query(
+        default=None,
+        description="Filter by org-map upazila (same semantics as district).",
+    ),
+    district: str | None = Query(default=None),
+    po_id: int | None = Query(default=None),
+    sk_id: int | None = Query(default=None),
+    user_id: int | None = Query(default=None),
+    document_id: UUID | None = Query(default=None),
+    top_limit: int = Query(default=10, ge=1, le=50),
+    documents_limit: int = Query(default=20, ge=1, le=100),
+    documents_offset: int = Query(default=0, ge=0),
+    events_limit: int = Query(default=50, ge=1, le=200),
+    events_offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_db),
+) -> DocumentUsageResponse:
+    """Document-view KPIs, per-document table, and event drill-down in one response."""
+    filters = _build_document_usage_filter(
+        request,
+        from_date=from_date,
+        to_date=to_date,
+        tenant_id=tenant_id,
+        upazila_id=upazila_id,
+        district=district,
+        po_id=po_id,
+        sk_id=sk_id,
+        user_id=user_id,
+        document_id=document_id,
+    )
+    try:
+        return await DocumentUsageAnalyticsService(get_clickhouse_client(), session).get_usage(
+            filters,
+            top_limit=top_limit,
+            documents_limit=documents_limit,
+            documents_offset=documents_offset,
+            events_limit=events_limit,
+            events_offset=events_offset,
+        )
+    except AppError:
+        raise
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("ClickHouse query failed for document usage")
+        raise AppError(
+            ErrorCode.ANALYTICS_UNAVAILABLE.value,
+            "Analytics backend unavailable",
+            status=502,
+        ) from None

@@ -15,6 +15,16 @@ from tests.workers.conftest import _make_gap, _test_chw_id
 
 pytestmark = [pytest.mark.asyncio, requires_db]
 
+
+@pytest.fixture(autouse=True)
+def enable_behavioural_gap_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        module_completion_worker.get_settings(),
+        "telemetry_behavioural_gap_state_enabled",
+        True,
+    )
+
+
 # ── spice_action_observed (gap observation) ─────────────────────────────
 
 
@@ -28,7 +38,7 @@ async def test_spice_action_observed_records_gap_observation(
     await module_completion_worker.process_module_event_job(
         {
             "event_type": "spice_action_observed",
-            "event_id": "evt-spice-1",
+            "event_id": str(uuid4()),
             "chw_id": str(chw),
             "payload_json": {
                 "kind": "assessment_submitted",
@@ -58,7 +68,7 @@ async def test_spice_action_observed_incorrect_outcome_increments_failed_attempt
     await module_completion_worker.process_module_event_job(
         {
             "event_type": "spice_action_observed",
-            "event_id": "evt-spice-incorrect",
+            "event_id": str(uuid4()),
             "chw_id": str(chw),
             "outcome": "incorrect",
             "payload_json": {
@@ -88,7 +98,7 @@ async def test_spice_action_observed_wrong_outcome_nested_in_payload_json(
     await module_completion_worker.process_module_event_job(
         {
             "event_type": "spice_action_observed",
-            "event_id": "evt-spice-wrong",
+            "event_id": str(uuid4()),
             "chw_id": str(chw),
             "payload_json": {
                 "kind": "assessment_submitted",
@@ -117,7 +127,7 @@ async def test_spice_action_observed_correct_outcome_does_not_increment_failed_a
     await module_completion_worker.process_module_event_job(
         {
             "event_type": "spice_action_observed",
-            "event_id": "evt-spice-ok",
+            "event_id": str(uuid4()),
             "chw_id": str(chw),
             "outcome": "correct",
             "payload_json": {
@@ -145,7 +155,7 @@ async def test_spice_action_observed_missing_behavioural_gap_id_no_row(
     await module_completion_worker.process_module_event_job(
         {
             "event_type": "spice_action_observed",
-            "event_id": "evt-spice-2",
+            "event_id": str(uuid4()),
             "chw_id": str(chw),
             "payload_json": {"kind": "assessment_submitted"},
         }
@@ -169,8 +179,8 @@ async def test_spice_action_observed_second_event_increments_occurrence_count(
             "behavioural_gap_id": str(gap.id),
         },
     }
-    await module_completion_worker.process_module_event_job({**job, "event_id": "evt-a"})
-    await module_completion_worker.process_module_event_job({**job, "event_id": "evt-b"})
+    await module_completion_worker.process_module_event_job({**job, "event_id": str(uuid4())})
+    await module_completion_worker.process_module_event_job({**job, "event_id": str(uuid4())})
     r = await db_session.execute(
         select(CHWBehaviouralGapState).where(
             CHWBehaviouralGapState.chw_id == chw,
@@ -227,7 +237,7 @@ async def test_spice_action_observed_skipped_when_quiz_telemetry_mode(
     await module_completion_worker.process_module_event_job(
         {
             "event_type": "spice_action_observed",
-            "event_id": "evt-spice-skip",
+            "event_id": str(uuid4()),
             "chw_id": str(chw),
             "payload_json": {
                 "kind": "assessment_submitted",

@@ -15,6 +15,7 @@ from platform_service.services.run_state_service import (
     STAGE_CROSS_SOURCE_FUSION,
     STEP_RUNNING,
     STEP_SUCCEEDED,
+    RunStateService,
 )
 
 
@@ -33,7 +34,26 @@ def _step(
         input_summary_jsonb=input_summary,
         output_summary_jsonb=output_summary,
         error_jsonb=None,
+        error_code=None,
+        error_message=None,
     )
+
+
+class TestPresentRunError:
+    def test_none_error_jsonb(self) -> None:
+        assert IngestionRunPresenter._present_run_error(None) is None
+
+    def test_strips_pipeline_claim(self) -> None:
+        assert IngestionRunPresenter._present_run_error(
+            {"_pipeline_claim": {"claim_token": "x"}, "failed_stage": "extract"}
+        ) == {"failed_stage": "extract"}
+
+    def test_non_object_error_jsonb_returns_none(self) -> None:
+        # Legacy array corruption from jsonb || must not crash list/detail APIs.
+        assert (
+            IngestionRunPresenter._present_run_error([None, {"_pipeline_claim": {"claim_token": "x"}}])
+            is None
+        )
 
 
 class TestRunKind:
@@ -44,6 +64,12 @@ class TestRunKind:
     def test_fusion_run(self) -> None:
         run = SimpleNamespace(error_jsonb={"type": FUSION_RUN_TYPE})
         assert IngestionRunPresenter.run_kind(run) == FUSION_RUN_TYPE
+
+    def test_non_object_error_jsonb_is_pipeline(self) -> None:
+        # Corrupted / legacy array values must not crash poll serialisation.
+        run = SimpleNamespace(error_jsonb=[{"_pipeline_claim": {"claim_token": "x"}}])
+        assert IngestionRunPresenter.run_kind(run) == "pipeline"
+        assert RunStateService.is_fusion_run(run) is False
 
 
 class TestStepToPollDict:
@@ -61,12 +87,16 @@ class TestStepToPollDict:
 
     def test_terminal_card_draft_merge_outcome(self) -> None:
         merged_from = str(uuid4())
+        primary = str(uuid4())
+        secondary = str(uuid4())
         step = _step(
             status=STEP_SUCCEEDED,
             input_summary={"candidate_id": str(uuid4())},
             output_summary={
                 "was_published_merge": True,
                 "merged_from_module_id": merged_from,
+                "module_id": primary,
+                "secondary_module_id": secondary,
             },
         )
         out = IngestionRunPresenter.step_to_poll_dict(step)
@@ -74,6 +104,8 @@ class TestStepToPollDict:
             "active": False,
             "was_merge": True,
             "merged_from_module_id": merged_from,
+            "primary_module_id": primary,
+            "secondary_module_id": secondary,
         }
 
     def test_fusion_card_draft_flag(self) -> None:

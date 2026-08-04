@@ -7,6 +7,8 @@ from mc_contracts.localized import LocaleConfig
 from mc_contracts.sync import ConfigSyncBundle
 from mc_foundation.locale import get_locale_metadata
 from platform_service.config import Settings
+from platform_service.services.card_search_metadata_generator import normalize_card_search_metadata
+from platform_service.services.module_search_metadata_generator import normalize_search_metadata
 from platform_service.services.prompts.symbol_verbalization import render_symbol_verbalization_rules
 
 
@@ -66,3 +68,54 @@ def test_config_sync_bundle_locales_match_deployment(
     assert isinstance(bundle.locales, LocaleConfig)
     assert bundle.locales.primary == primary
     assert bundle.locales.supported == expected_supported
+
+
+@pytest.mark.parametrize("primary", ["hi", "bn"])
+def test_search_metadata_normalizers_use_deployment_primary_only(primary: str) -> None:
+    locale_samples = {
+        "hi": {
+            "keywords": {"hi": ["खांसी"], "bn": ["কাশি"], "en": ["cough"]},
+            "search_phrases": {"hi": ["h"], "bn": ["b"]},
+            "topic_tags": {"hi": ["respiratory"], "bn": ["শ্বাস"]},
+        },
+        "bn": {
+            "keywords": {"hi": ["खांसी"], "bn": ["কাশি"], "en": ["cough"]},
+            "search_phrases": {"hi": ["h"], "bn": ["b"]},
+            "topic_tags": {"hi": ["respiratory"], "bn": ["শ্বাস"]},
+        },
+    }
+    module_out = normalize_search_metadata(
+        {
+            **locale_samples[primary],
+            "synonyms": {
+                "hi": {"ARI": "खांसी"},
+                "bn": {"ARI": "তীব্র শ্বাসতন্ত্রের সংক্রমণ"},
+            },
+            "clinical_conditions": {"hi": ["निमोनिया"], "bn": ["নিউমোনিয়া"]},
+        },
+        max_keywords=10,
+        max_search_phrases=10,
+        max_synonyms=10,
+        max_tags=10,
+        primary_locale=primary,
+    )
+    assert list(module_out["keywords"].keys()) == [primary]
+    assert list(module_out["topic_tags"].keys()) == [primary]
+    assert list(module_out["synonyms"].keys()) == [primary]
+    assert list(module_out["clinical_conditions"].keys()) == [primary]
+
+    card_out = normalize_card_search_metadata(
+        {
+            "keywords": {"hi": ["खांसी"], "bn": ["কাশি"]},
+            "retrieval_hints": {"hi": ["h"], "bn": ["b"]},
+            "questions": {"hi": ["q"], "bn": ["q2"]},
+            "synonyms": {"hi": {"ARI": "खांसी"}, "bn": {"ARI": "কাশি"}},
+        },
+        max_retrieval_hints=10,
+        max_keywords=10,
+        max_synonyms=10,
+        max_questions=10,
+        primary_locale=primary,
+    )
+    assert list(card_out["keywords"].keys()) == [primary]
+    assert list(card_out["synonyms"].keys()) == [primary]

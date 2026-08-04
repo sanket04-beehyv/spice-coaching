@@ -56,6 +56,28 @@ def create_celery_app() -> Celery:
                     day_of_week=settings.chat_faq_weekly_day_of_week,
                 ),
             },
+            "aggregate-chat-feedback-summary": {
+                "task": "platform.aggregate_chat_feedback_summary",
+                "schedule": crontab(
+                    hour=settings.chat_feedback_summary_weekly_hour_utc,
+                    minute=0,
+                    day_of_week=settings.chat_feedback_summary_weekly_day_of_week,
+                ),
+            },
+            "refresh-module-demand-summary": {
+                "task": "platform.refresh_module_demand_summary",
+                "schedule": crontab(
+                    hour=settings.module_demand_summary_daily_hour_utc,
+                    minute=0,
+                ),
+            },
+            "refresh-module-creation-suggestions": {
+                "task": "platform.refresh_module_creation_suggestions",
+                "schedule": crontab(
+                    hour=settings.module_creation_suggestions_daily_hour_utc,
+                    minute=0,
+                ),
+            },
         },
     )
 

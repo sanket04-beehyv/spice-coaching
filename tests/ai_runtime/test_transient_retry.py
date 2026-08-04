@@ -5,10 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
-pytest.importorskip("openai")
-
-from ai_runtime.services.prompt_executor import _call_with_transient_retry  # noqa: E402
+from ai_runtime.services.prompt_executor import _call_with_transient_retry
 
 
 @pytest.mark.asyncio

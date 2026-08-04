@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from platform_service.db.models.ingestion_run import IngestionRunStep
@@ -17,6 +18,7 @@ STAGE_CARD_SEARCH_METADATA_GENERATION = "card_search_metadata_generation"
 STAGE_GAP_CLASSIFICATION = "gap_classification"
 STAGE_TRIGGER_BINDING = "trigger_binding"
 STAGE_CROSS_SOURCE_FUSION = "cross_source_fusion"
+STAGE_THUMBNAIL = "thumbnail"
 
 PIPELINE_STAGES = (STAGE_EXTRACT, STAGE_MODULE_IDENTIFY, STAGE_CARD_DRAFT)
 POST_PUBLISH_STAGES = (
@@ -27,20 +29,31 @@ POST_PUBLISH_STAGES = (
     STAGE_EMBEDDING_GENERATION,
     STAGE_GAP_CLASSIFICATION,
 )
-ALL_STAGES = PIPELINE_STAGES + POST_PUBLISH_STAGES + (STAGE_CROSS_SOURCE_FUSION,)
+ALL_STAGES = PIPELINE_STAGES + POST_PUBLISH_STAGES + (STAGE_CROSS_SOURCE_FUSION, STAGE_THUMBNAIL)
 
 FUSION_RUN_TYPE = "cross_source_fusion"
 
+RUN_QUEUED = "queued"
 RUN_RUNNING = "running"
 RUN_SUCCEEDED = "succeeded"
 RUN_FAILED = "failed"
 RUN_PARTIALLY_SUCCEEDED = "partially_succeeded"
+
+BATCH_QUEUED = "queued"
+BATCH_RUNNING = "running"
+BATCH_SUCCEEDED = "succeeded"
+BATCH_FAILED = "failed"
+BATCH_PARTIALLY_SUCCEEDED = "partially_succeeded"
+
+_ACTIVE_RUN_STATUSES = frozenset({RUN_QUEUED, RUN_RUNNING})
+_TERMINAL_RUN_STATUSES = frozenset({RUN_SUCCEEDED, RUN_FAILED, RUN_PARTIALLY_SUCCEEDED})
 
 STEP_PENDING = "pending"
 STEP_RUNNING = "running"
 STEP_SUCCEEDED = "succeeded"
 STEP_FAILED = "failed"
 STEP_SKIPPED = "skipped"
+STEP_AWAITING_INPUT = "awaiting_input"
 
 _TERMINAL_STEP_STATUSES = frozenset({STEP_SUCCEEDED, STEP_FAILED, STEP_SKIPPED})
 
@@ -77,6 +90,16 @@ def now_utc() -> datetime:
     return datetime.now(UTC)
 
 
+def as_error_object(error_jsonb: Any) -> dict[str, Any]:
+    """Coerce ``error_jsonb`` to a dict.
+
+    Run/batch ``error_jsonb`` is typed as a JSON object, but Postgres ``||``
+    on jsonb coerces non-objects into arrays when merging claim metadata.
+    Callers must tolerate legacy or corrupted non-object values.
+    """
+    return error_jsonb if isinstance(error_jsonb, dict) else {}
+
+
 def terminal_run_status_from_steps(
     steps: list[IngestionRunStep],
 ) -> tuple[str, dict | None]:
@@ -86,6 +109,9 @@ def terminal_run_status_from_steps(
     drafts_produced = 0
 
     for step in steps:
+        if step.stage == STAGE_THUMBNAIL:
+            # Thumbnail is best-effort; never drives run terminal status.
+            continue
         if step.stage == STAGE_CARD_DRAFT:
             if step.status == STEP_FAILED:
                 draft_failures += 1
@@ -106,3 +132,21 @@ def terminal_run_status_from_steps(
     elif len(failed_stages) == 1:
         error["failed_stage"] = failed_stages[0]
     return RUN_PARTIALLY_SUCCEEDED, error
+
+
+def rollup_batch_status(run_statuses: list[str]) -> str:
+    """Derive batch status from child ingestion_run statuses (incl. fusion)."""
+    if not run_statuses:
+        return BATCH_QUEUED
+    if any(s == RUN_RUNNING for s in run_statuses):
+        return BATCH_RUNNING
+    if any(s == RUN_QUEUED for s in run_statuses):
+        return BATCH_QUEUED
+    terminals = [s for s in run_statuses if s in _TERMINAL_RUN_STATUSES]
+    if not terminals:
+        return BATCH_QUEUED
+    if all(s == RUN_SUCCEEDED for s in terminals):
+        return BATCH_SUCCEEDED
+    if all(s == RUN_FAILED for s in terminals):
+        return BATCH_FAILED
+    return BATCH_PARTIALLY_SUCCEEDED

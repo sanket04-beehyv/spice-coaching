@@ -15,6 +15,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 COPY pyproject.toml uv.lock /app/
 COPY packages/ /app/packages/
 COPY services/ /app/services/
+COPY eval/ /app/eval/
 
 RUN uv sync --locked --no-dev --package microcoaching-platform
 ENV PATH="/app/.venv/bin:$PATH"

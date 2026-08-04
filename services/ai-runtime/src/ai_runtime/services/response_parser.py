@@ -66,7 +66,7 @@ def extract_json(raw_text: str) -> dict | list | None:
         if complete is not None:
             return complete
 
-    logger.warning("Failed to extract JSON from raw text (len=%d)", len(raw_text))
+    logger.debug("Failed to extract JSON from raw text (len=%d)", len(raw_text))
     return None
 
 

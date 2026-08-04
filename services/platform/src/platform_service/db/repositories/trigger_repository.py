@@ -10,10 +10,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.models.module import Module
+from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.trigger_definition import (
     ModuleTriggerBinding,
     TriggerDefinition,
 )
+from platform_service.db.module_availability import LIFECYCLE_PUBLISHED, is_training_module_family
 
 
 class TriggerRepository:
@@ -133,10 +135,12 @@ class TriggerRepository:
                 ModuleTriggerBinding.trigger_definition_id == TriggerDefinition.id,
             )
             .join(Module, ModuleTriggerBinding.module_id == Module.id)
+            .join(ModuleFamily, Module.module_family_id == ModuleFamily.id)
             .where(
                 TriggerDefinition.trigger_code.in_(trigger_codes),
                 TriggerDefinition.status == "active",
-                Module.lifecycle_status == "published",
+                Module.lifecycle_status == LIFECYCLE_PUBLISHED,
+                is_training_module_family(),
             )
             .order_by(ModuleTriggerBinding.priority_weight.desc())
         )

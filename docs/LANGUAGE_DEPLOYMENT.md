@@ -38,7 +38,38 @@ Each translatable card field is a locale map with the deployment primary key:
 }
 ```
 
-Search metadata uses the same pattern: `keywords`, `search_phrases`, `retrieval_hints`, `questions`.
+Search metadata uses the same locale-map pattern for list fields (see below).
+
+### Module search metadata (`module.search_metadata_jsonb`)
+
+Written by the post-publish search metadata worker after card drafting.
+
+| Field | Shape | Notes |
+|-------|-------|-------|
+| `keywords` | `{"<primary>": ["...", ...]}` | CHW-facing clinical vocabulary |
+| `search_phrases` | `{"<primary>": ["...", ...]}` | Natural-language search scenarios |
+| `topic_tags` | `{"<primary>": ["...", ...]}` | Broad topical labels (snake_case) in primary language |
+| `synonyms` | `{"<primary>": {"ABBREV": "expanded form"}}` | Abbreviation expansions in primary language (abbrev keys may be Latin) |
+| `clinical_conditions` | `{"<primary>": ["...", ...]}` | Conditions or syndromes in primary language |
+| `audience` | string | Always `chw_field_worker` |
+| `rationale` | string | Reviewer-facing note (English) |
+| `schema_version` | int | Schema version |
+
+### Per-card search metadata (`module_json.cards[i].search_metadata`)
+
+Written by the post-publish card search metadata worker.
+
+| Field | Shape | Notes |
+|-------|-------|-------|
+| `retrieval_hints` | `{"<primary>": ["...", ...]}` | Search scenarios scoped to the card |
+| `keywords` | `{"<primary>": ["...", ...]}` | Card-scoped clinical vocabulary |
+| `questions` | `{"<primary>": ["...", ...]}` | FAQ-style questions the card answers |
+| `synonyms` | `{"<primary>": {"ABBREV": "expanded form"}}` | Abbreviation expansions in primary language |
+| `schema_version` | int | Schema version |
+
+Clients resolve list fields with `metadata.keywords[locales.primary]` and synonym maps with `metadata.synonyms[locales.primary]` (same rule as card `title`/`body`).
+
+Legacy `synonyms_en` flat dicts are migrated on read to `synonyms: {"en": {...}}`; new writes use `synonyms` with the deployment primary key only.
 
 ### Canonical rule
 
@@ -76,6 +107,32 @@ Re-generate embeddings after migration:
 ```bash
 uv run python bin/regenerate_module_embeddings.py
 ```
+
+### Switching deployment primary locale
+
+When `DEPLOYMENT_PRIMARY_LOCALE` changes (e.g. `bn` → `hi`), existing stored
+metadata maps retain the old locale keys only. Re-generate CHW-facing metadata
+and embeddings for published modules:
+
+1. Run the backfill script (cleans legacy `*_bn`/`*_en` suffix shapes if any remain):
+
+   ```bash
+   uv run python bin/backfill_localized_content.py
+   ```
+
+2. Re-run post-publish workers for each published module (card search metadata,
+   then module search metadata) so `keywords`, `search_phrases`, `topic_tags`,
+   `synonyms`, `clinical_conditions`, `retrieval_hints`, and `questions` are
+   written under the new primary key.
+
+3. Regenerate embeddings so BM25/vector indexes include the new locale text:
+
+   ```bash
+   uv run python bin/regenerate_module_embeddings.py
+   ```
+
+Legacy plain-list `topic_tags` values (pre-localization) are coerced to
+`{"<primary>": [...]}` on read and during normalization.
 
 ## Android SDK migration
 

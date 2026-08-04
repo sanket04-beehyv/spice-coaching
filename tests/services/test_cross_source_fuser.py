@@ -21,6 +21,8 @@ from platform_service.services.cross_source_fuser import (
     CrossSourceFuserError,
 )
 
+pytestmark = pytest.mark.usefixtures("mock_prompt_templates")
+
 
 def _candidate(
     *,
@@ -45,6 +47,8 @@ def _mock_response(
         generation_type=GenerationType.CROSS_SOURCE_FUSION,
         provider="google",
         model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text=raw_text,
         parsed_json=parsed_json,
         latency_ms=200,

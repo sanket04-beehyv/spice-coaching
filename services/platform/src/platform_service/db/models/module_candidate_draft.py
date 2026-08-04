@@ -31,6 +31,8 @@ class ModuleCandidateDraft(Base):
         nullable=False,
     )
     proposed_title: Mapped[str] = mapped_column(Text, nullable=False)
+    # Admin filter domain emitted by Stage C; copied onto module.domain at Stage D.
+    domain: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Stage 2 dropped gap context from its prompt (architecture reset);
     # this column is nullable and the pipeline writes None. Reviewer-
     # authored bindings carry the gap mapping post-publish.
@@ -55,6 +57,8 @@ class ModuleCandidateDraft(Base):
     # Stage 2-draft propagates these onto `module.quality_flags_jsonb`
     # when the candidate is drafted; they never gate publish.
     quality_flags_jsonb: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Stage C chunk lineage (e.g. ["chunk-3"]) for per-chunk identify retry.
+    source_chunk_ids: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

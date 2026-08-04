@@ -35,6 +35,7 @@ from mc_contracts.internal_ai import (
     InferenceResponse,
     TokenUsage,
 )
+from platform_service.services.ingestion_cardinality import IngestionCardinality
 from platform_service.services.module_identifier import (
     ModuleIdentifier,
     ModuleIdentifierError,
@@ -44,10 +45,11 @@ from platform_service.services.module_identifier import (
 )
 from platform_service.services.prompt_id_codec import PromptIdCodec
 from platform_service.services.prompts.module_identifier_prompt import (
-    MODULE_IDENTIFIER_TEMPLATE_VERSION,
     render_human_message,
     render_system_prompt,
 )
+
+pytestmark = pytest.mark.usefixtures("mock_prompt_templates")
 
 # ─── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -87,7 +89,9 @@ def _mock_response(
         request_id="r-1",
         generation_type=GenerationType.MODULE_IDENTIFICATION,
         provider="google",
-        model="gemini-2.5-pro",
+        model="gemini-2.5-flash",
+        max_tokens=12_000,
+        temperature=0.2,
         raw_text=raw_text,
         parsed_json=parsed_json,
         latency_ms=200,
@@ -105,9 +109,7 @@ class TestPromptGapContextRemoved:
         [
             set(),
             {"clinical"},
-            {"supervisor_update"},
             {"digital"},
-            {"clinical", "supervisor_update"},
         ],
     )
     def test_system_prompt_does_not_reference_gap_registry(self, content_domains: set[str]) -> None:
@@ -152,7 +154,16 @@ class TestPromptGapContextRemoved:
         """v5 added the annexure-exclusion rule (Hindi NCDs run was
         proposing modules from Annexure 1-4). Tests must fail if someone
         reverts to v4 (no annexure rule) or earlier."""
-        assert MODULE_IDENTIFIER_TEMPLATE_VERSION >= 10
+        prompt = render_system_prompt({"clinical"})
+        assert "annexure" in prompt.lower() or "appendix" in prompt.lower()
+
+    def test_system_prompt_requests_domain_field_with_common_examples(self) -> None:
+        prompt = render_system_prompt({"clinical"})
+        assert '"domain":' in prompt
+        assert "prefer" in prompt.lower()
+        assert "anc" in prompt
+        assert "hypertension" in prompt
+        assert "must be one of" not in prompt.lower()
 
     def test_system_prompt_includes_ingestion_guidance_when_instructions_set(self) -> None:
         prompt = render_system_prompt(
@@ -231,9 +242,10 @@ class TestPromptGapContextRemoved:
         prompt = render_system_prompt({"clinical"})
         lowered = prompt.lower()
         assert "annexure" in lowered
-        assert "appendices" in lowered
+        assert "appendix" in lowered
         assert "job aid" in lowered
-        assert "পরিশিষ্ট" in prompt
+        # Hindi-Bijoy mojibake cue (lowercase form, since prompt is lowered).
+        assert "layxud" in lowered
 
     def test_human_message_uses_short_tokens_not_uuids(self) -> None:
         """The corpus body must reference content blocks/pages/docs by
@@ -290,27 +302,16 @@ class TestContentDomainBranching:
         prompt = render_system_prompt(set())
         assert "CLINICAL" in prompt or "initial_training" in prompt
 
-    def test_supervisor_update_branch(self) -> None:
-        prompt = render_system_prompt({"supervisor_update"})
-        assert "SUPERVISOR UPDATE" in prompt
-        assert "content_update" in prompt
-        assert "previous_practice_summary" in prompt
-        assert "current_practice_summary" in prompt
-        assert "rationale_summary" in prompt
-
     def test_digital_branch(self) -> None:
         prompt = render_system_prompt({"digital"})
         assert "DIGITAL" in prompt
         assert "digital_proficiency" in prompt
 
-    def test_clinical_with_app_action_branch(self) -> None:
-        prompt = render_system_prompt({"clinical_with_app_action"})
-        assert "CLINICAL" in prompt and "app" in prompt.lower()
+    def test_operational_branch(self) -> None:
+        prompt = render_system_prompt({"operational"})
+        assert "OPERATIONAL" in prompt
         assert "initial_training" in prompt
-
-    def test_mixed_domain_picks_mixed_branch(self) -> None:
-        prompt = render_system_prompt({"supervisor_update", "clinical"})
-        assert "MIXED" in prompt
+        assert "clinical_with_app_workflows" not in prompt
 
 
 # ─── _extract_candidates: tolerant to LLM output shape ─────────────────────
@@ -353,6 +354,20 @@ class TestValidateCandidate:
         cand = _valid_candidate(cited_block_ids=[b1])
         assert _validate_candidate(cand, valid_block_ids={b1}) is True
 
+    def test_catalogued_domain_normalized_on_candidate(self) -> None:
+        b1 = uuid4()
+        cand = _valid_candidate(cited_block_ids=[b1])
+        cand["domain"] = "Hypertension"
+        assert _validate_candidate(cand, valid_block_ids={b1}) is True
+        assert cand["domain"] == "hypertension"
+
+    def test_unknown_domain_normalized_and_kept(self) -> None:
+        b1 = uuid4()
+        cand = _valid_candidate(cited_block_ids=[b1])
+        cand["domain"] = "Dengue Fever"
+        assert _validate_candidate(cand, valid_block_ids={b1}) is True
+        assert cand["domain"] == "dengue_fever"
+
     def test_no_behavioural_gap_code_required(self) -> None:
         """Architecture-reset: gap_code dropped from required fields."""
         b1 = uuid4()
@@ -391,7 +406,7 @@ class TestValidateCandidate:
 
     @pytest.mark.parametrize(
         "card_count,expected",
-        [(2, False), (3, True), (5, True), (7, True), (8, False)],
+        [(2, False), (3, True), (5, True), (7, True), (10, True), (11, False)],
     )
     def test_card_count_bounds(self, card_count: int, expected: bool) -> None:
         b1 = uuid4()
@@ -578,9 +593,8 @@ class TestIdentifyCallShape:
         assert sent.constraints.output_format == "json"
 
     @pytest.mark.asyncio
-    async def test_uses_pro_model_by_default(self) -> None:
-        """Identification uses settings.identification_model — gemini-2.5-pro
-        for higher accuracy on the corpus call."""
+    async def test_request_does_not_send_model_policy(self) -> None:
+        """Model selection is owned by ai-runtime generation profiles."""
         client = MagicMock()
         client.generate = AsyncMock(return_value=_mock_response({"candidates": []}))
         identifier = ModuleIdentifier(client=client)
@@ -593,8 +607,8 @@ class TestIdentifyCallShape:
             valid_page_ids=set(),
         )
         sent: InferenceRequest = client.generate.call_args.args[0]
-        # Default is gemini-2.5-pro for google, gpt-4o-mini for openai.
-        assert sent.model_policy.model in ("gemini-2.5-pro", "gpt-4o-mini")
+        assert "model_policy" not in sent.model_dump()
+        assert sent.generation_type == GenerationType.MODULE_IDENTIFICATION
 
 
 class TestIdentifyValidationFiltersInvalid:
@@ -693,6 +707,42 @@ class TestIdentifyErrorPaths:
                 valid_block_ids=set(),
                 valid_page_ids=set(),
             )
+
+    @pytest.mark.asyncio
+    async def test_parse_failure_error_uses_raw_text_when_json_is_recoverable(self) -> None:
+        block_id = uuid4()
+        page_id = uuid4()
+        wrapped = json.dumps(
+            {
+                "candidates": [
+                    _valid_candidate(
+                        title="Recovered",
+                        cited_block_ids=[block_id],
+                        source_page_id=page_id,
+                    )
+                ]
+            },
+            ensure_ascii=False,
+        )
+        client = MagicMock()
+        client.generate = AsyncMock(
+            return_value=_mock_response(
+                None,
+                raw_text=wrapped,
+                error="failed to parse JSON from provider output",
+            )
+        )
+        identifier = ModuleIdentifier(client=client)
+        result = await identifier.identify(
+            content_domains=set(),
+            already_published_modules=[],
+            document_outlines=[],
+            page_corpus=[],
+            valid_block_ids={block_id},
+            valid_page_ids={page_id},
+        )
+        assert [c["proposed_title"] for c in result.candidates] == ["Recovered"]
+        assert result.truncated is False
 
     @pytest.mark.asyncio
     async def test_invalid_json_raw_text_raises(self) -> None:
@@ -865,3 +915,15 @@ class TestF1UuidPairSanity:
         cand = _valid_candidate(cited_block_ids=[b1])
         # source_page_id is NOT in any corpus, but no valid_page_ids supplied.
         assert _validate_candidate(cand, valid_block_ids={b1}) is True
+
+    def test_fixed_cardinality_target_rejects_wrong_card_count(self) -> None:
+        b1 = uuid4()
+        cand = _valid_candidate(cards=4, cited_block_ids=[b1])
+        cardinality = IngestionCardinality(target_cards=5, target_quizzes=None)
+        assert _validate_candidate(cand, valid_block_ids={b1}, cardinality=cardinality) is False
+
+    def test_fixed_cardinality_target_accepts_exact_card_count(self) -> None:
+        b1 = uuid4()
+        cand = _valid_candidate(cards=5, cited_block_ids=[b1])
+        cardinality = IngestionCardinality(target_cards=5, target_quizzes=4)
+        assert _validate_candidate(cand, valid_block_ids={b1}, cardinality=cardinality) is True

@@ -13,8 +13,6 @@ from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceRequest,
-    ModelPolicy,
-    PromptSpec,
     TraceContext,
 )
 from sqlalchemy import select
@@ -23,16 +21,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from platform_service.config import get_settings
 from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.module import Module
+from platform_service.db.repositories.module_read_repository import ModuleReadRepository
 from platform_service.deps import get_ai_client
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 from platform_service.localized import deployment_locales, migrate_legacy_card
 from platform_service.services.card_body_text import card_body_plain_text
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.llm_response_resolver import resolve_parsed_dict
-from platform_service.services.prompts.gap_classification_prompt import (
-    GAP_CLASSIFICATION_TEMPLATE_ID,
-    GAP_CLASSIFICATION_TEMPLATE_VERSION,
-    render_human_message,
-    render_system_prompt,
+from platform_service.services.prompt_registry import GAP_CLASSIFICATION_TEMPLATE_ID
+from platform_service.services.prompt_template_service import PromptTemplateService, prompt_spec_from_rendered
+from platform_service.services.prompt_variables.gap_classification_variables import (
+    build_gap_classification_variables,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,13 +66,17 @@ def _truncated_localized_field(
     return out
 
 
-def module_payload_for_classification(module: Module) -> dict[str, Any]:
+def module_payload_for_classification(
+    module: Module,
+    *,
+    cards: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Build a compact module summary for the classification prompt."""
     settings = get_settings()
     primary = deployment_locales(settings)
-    cards = (module.module_json or {}).get("cards", [])
+    card_dicts = cards if cards is not None else []
     card_summaries: list[dict[str, Any]] = []
-    for idx, card in enumerate(cards, start=1):
+    for idx, card in enumerate(card_dicts, start=1):
         if not isinstance(card, dict):
             continue
         migrated = migrate_legacy_card(dict(card), primary=primary)
@@ -121,12 +124,10 @@ class ModuleGapClassifier:
         session: AsyncSession,
         *,
         client: AIRuntimeClient | None = None,
-        model: str | None = None,
     ) -> None:
         settings = get_settings()
         self._session = session
         self._client = client or get_ai_client()
-        self._model = model or settings.text_model
         self._max_associations = settings.gap_classification_max_associations
 
     async def load_registry_gaps(self) -> list[BehaviouralGap]:
@@ -158,21 +159,27 @@ class ModuleGapClassifier:
             }
             for g in registry
         ]
-        module_payload = module_payload_for_classification(module)
+        card_rows = await ModuleReadRepository(self._session).list_cards(module.id)
+        module_payload = module_payload_for_classification(
+            module,
+            cards=[card_row_to_dict(row) for row in card_rows],
+        )
+
+        rendered = await PromptTemplateService().render(
+            self._session,
+            template_id=GAP_CLASSIFICATION_TEMPLATE_ID,
+            variant_key=None,
+            variables=build_gap_classification_variables(
+                max_associations=self._max_associations,
+                module_payload=module_payload,
+                registry_gaps=registry_payload,
+            ),
+        )
 
         request = InferenceRequest(
             request_id=str(uuid.uuid4()),
             generation_type=GenerationType.MODULE_GAP_CLASSIFICATION,
-            model_policy=ModelPolicy(model=self._model),
-            prompt=PromptSpec(
-                template_id=GAP_CLASSIFICATION_TEMPLATE_ID,
-                template_version=GAP_CLASSIFICATION_TEMPLATE_VERSION,
-                resolved_system_prompt=render_system_prompt(max_associations=self._max_associations),
-                resolved_human_message=render_human_message(
-                    module_payload=module_payload,
-                    registry_gaps=registry_payload,
-                ),
-            ),
+            prompt=prompt_spec_from_rendered(rendered),
             constraints=GenerationConstraints(language="en", output_format="json"),
             trace_context=TraceContext(),
         )

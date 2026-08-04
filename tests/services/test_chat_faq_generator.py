@@ -34,8 +34,10 @@ def _inference_response(
     return InferenceResponse(
         request_id="r-faq",
         generation_type=GenerationType.CHAT_FAQ_SYNTHESIS,
-        provider="openai",
-        model="gpt-4o-mini",
+        provider="google",
+        model="gemini-2.5-flash",
+        max_tokens=8192,
+        temperature=0.2,
         raw_text="",
         parsed_json=parsed_json,
         latency_ms=1,
@@ -68,6 +70,7 @@ class TestChatFaqGenerator:
         results = await ChatFaqGenerator(client=ai_mock).synthesize(tenant_id, clusters)
         assert len(results) == 2
         assert results[0].question_localized["bn"] == "শিশুর কাশি"
+        assert "en" not in results[0].question_localized
         assert results[0].occurrence_count == 5
         assert results[0].rank == 1
 
@@ -80,3 +83,4 @@ class TestChatFaqGenerator:
         results = await ChatFaqGenerator(client=ai_mock).synthesize(tenant_id, clusters)
         assert len(results) == 1
         assert results[0].question_localized["bn"] == "child cough"
+        assert "en" not in results[0].question_localized

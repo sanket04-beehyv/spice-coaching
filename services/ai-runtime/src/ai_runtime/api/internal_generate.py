@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from mc_contracts.enums import GenerationType
+from mc_contracts.errors import ErrorCode
 from mc_contracts.internal_ai import InferenceRequest, InferenceResponse
+from mc_foundation.problem import AppError
 
 from ai_runtime.config import get_settings
 from ai_runtime.security import require_internal_token
@@ -34,22 +36,23 @@ async def generate(
     try:
         gt = GenerationType(generation_type)
     except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown generation_type '{generation_type}'. Valid: {[e.value for e in GenerationType]}",
-        )
+        raise AppError(
+            ErrorCode.BAD_REQUEST.value,
+            f"Unknown generation_type '{generation_type}'. Valid: {[e.value for e in GenerationType]}",
+            status=400,
+        ) from None
 
     if body.generation_type != gt:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Path generation_type '{generation_type}' does not match body '{body.generation_type.value}'",
+        raise AppError(
+            ErrorCode.BAD_REQUEST.value,
+            f"Path generation_type '{generation_type}' does not match body '{body.generation_type.value}'",
+            status=400,
         )
 
     logger.info(
-        "generate request_id=%s type=%s provider=%s model=%s",
+        "generate request_id=%s type=%s provider=%s",
         body.request_id,
         gt.value,
         get_settings().ai_provider,
-        body.model_policy.model,
     )
     return await _executor.execute(body)

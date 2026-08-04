@@ -13,6 +13,7 @@ from datetime import datetime
 from uuid import UUID
 
 from mc_contracts.sync import (
+    AssignedVideosBundle,
     ChatFaqsSyncBundle,
     ConfigSyncBundle,
     GapsSyncBundle,
@@ -23,10 +24,11 @@ from mc_contracts.sync import (
     SourceDocumentThumbnailsPresignResponse,
     TriggersSyncBundle,
 )
+from mc_foundation.objectstore import ObjectStore
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.config import Settings
-from platform_service.services.object_storage import ObjectStorageClient
+from platform_service.services.sync.assigned_videos_builder import AssignedVideosBuilder
 from platform_service.services.sync.chat_faqs_bundle_builder import ChatFaqsBundleBuilder
 from platform_service.services.sync.config_bundle_builder import ConfigBundleBuilder
 from platform_service.services.sync.gaps_bundle_builder import GapsBundleBuilder
@@ -45,6 +47,7 @@ class SyncService:
         self._config = ConfigBundleBuilder(session)
         self._modules = ModulesBundleBuilder(session)
         self._published_source_documents = PublishedSourceDocumentsBuilder(session)
+        self._assigned_videos = AssignedVideosBuilder(session)
         self._triggers = TriggersBundleBuilder(session)
         self._gaps = GapsBundleBuilder(session)
         self._chat_faqs = ChatFaqsBundleBuilder(session)
@@ -53,7 +56,7 @@ class SyncService:
         self,
         *,
         source_document_ids: list[UUID],
-        storage: ObjectStorageClient,
+        storage: ObjectStore,
         settings: Settings | None = None,
         tenant_id: UUID | None = None,
     ) -> SourceDocumentsPresignResponse:
@@ -68,7 +71,7 @@ class SyncService:
         self,
         *,
         source_document_ids: list[UUID],
-        storage: ObjectStorageClient,
+        storage: ObjectStore,
         settings: Settings | None = None,
         tenant_id: UUID | None = None,
     ) -> SourceDocumentThumbnailsPresignResponse:
@@ -83,7 +86,7 @@ class SyncService:
         self,
         *,
         module_ids: list[UUID],
-        storage: ObjectStorageClient,
+        storage: ObjectStore,
         settings: Settings | None = None,
         tenant_id: UUID | None = None,
     ) -> ModuleThumbnailsPresignResponse:
@@ -115,7 +118,7 @@ class SyncService:
     async def get_published_source_documents_bundle(
         self,
         *,
-        storage: ObjectStorageClient,
+        storage: ObjectStore,
         domain: str | None = None,
         limit: int = 200,
         offset: int = 0,
@@ -124,6 +127,25 @@ class SyncService:
         return await self._published_source_documents.build(
             storage=storage,
             domain=domain,
+            limit=limit,
+            offset=offset,
+            settings=settings,
+        )
+
+    async def get_assigned_videos_bundle(
+        self,
+        *,
+        user_id: int,
+        storage: ObjectStore,
+        organization_ids: list[int] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        settings: Settings | None = None,
+    ) -> AssignedVideosBundle:
+        return await self._assigned_videos.build(
+            user_id=user_id,
+            storage=storage,
+            organization_ids=organization_ids,
             limit=limit,
             offset=offset,
             settings=settings,

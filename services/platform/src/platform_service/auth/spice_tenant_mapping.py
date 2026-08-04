@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import HTTPException
+from mc_contracts.errors import ErrorCode
+from mc_foundation.problem import AppError
 
 from platform_service.config import Settings, get_settings
 from platform_service.tenant_mapping import parse_spice_tenant_id_map
@@ -35,14 +36,16 @@ def require_platform_tenant_for_spice_tenant(
 ) -> UUID:
     """Resolve SPICE tenant id to platform UUID or raise HTTP 403."""
     if spice_tenant_id is None:
-        raise HTTPException(
-            status_code=403,
-            detail="authenticated user has no tenantId; tenant mapping required",
+        raise AppError(
+            ErrorCode.TENANT_MISMATCH.value,
+            "authenticated user has no tenantId; tenant mapping required",
+            status=403,
         )
     mapped = map_spice_tenant_to_platform(spice_tenant_id, settings=settings)
     if mapped is None:
-        raise HTTPException(
-            status_code=403,
-            detail=f"no platform tenant mapping configured for SPICE tenantId={spice_tenant_id}",
+        raise AppError(
+            ErrorCode.TENANT_MISMATCH.value,
+            f"no platform tenant mapping configured for SPICE tenantId={spice_tenant_id}",
+            status=403,
         )
     return mapped

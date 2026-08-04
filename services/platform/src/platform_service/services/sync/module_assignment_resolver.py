@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.models.chw_module_assignment import CHWModuleAssignment
+from platform_service.db.models.module import Module
+from platform_service.db.models.module_family import ModuleFamily
+from platform_service.db.module_availability import is_training_module_family
 from platform_service.services.user_service import get_all_users
 
 
-async def resolve_assigned_module_ids(
-    session: AsyncSession,
+def _assignment_filters(
     *,
     user_id: int,
-    organization_ids: list[int] | None = None,
-) -> set[UUID]:
-    """Return module IDs assigned to ``user_id`` via group, geo, or individual rules."""
+    organization_ids: list[int] | None,
+) -> list:
     users_by_id = {u["id"]: u for u in get_all_users()}
     caller_user = users_by_id.get(user_id)
 
@@ -66,8 +68,47 @@ async def resolve_assigned_module_ids(
         # Fallback if user_id is not in hardcoded users
         filters.append(CHWModuleAssignment.user_id == user_id)
 
+    return filters
+
+
+async def resolve_assigned_module_ids(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    organization_ids: list[int] | None = None,
+) -> set[UUID]:
+    """Return module IDs assigned to ``user_id`` via group, geo, or individual rules."""
+    filters = _assignment_filters(user_id=user_id, organization_ids=organization_ids)
     if not filters:
         return set()
 
-    stmt = select(CHWModuleAssignment.module_id).where(or_(*filters))
+    stmt = (
+        select(CHWModuleAssignment.module_id)
+        .join(Module, CHWModuleAssignment.module_id == Module.id)
+        .join(ModuleFamily, Module.module_family_id == ModuleFamily.id)
+        .where(or_(*filters), is_training_module_family())
+    )
     return set((await session.execute(stmt)).scalars().all())
+
+
+async def resolve_assigned_modules(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    organization_ids: list[int] | None = None,
+) -> dict[UUID, datetime]:
+    """Return module_id -> latest assigned_at for modules assigned to ``user_id``."""
+    filters = _assignment_filters(user_id=user_id, organization_ids=organization_ids)
+    if not filters:
+        return {}
+
+    stmt = (
+        select(
+            CHWModuleAssignment.module_id,
+            func.max(CHWModuleAssignment.assigned_at),
+        )
+        .where(or_(*filters))
+        .group_by(CHWModuleAssignment.module_id)
+    )
+    res = await session.execute(stmt)
+    return {row[0]: row[1] for row in res.all()}

@@ -45,8 +45,8 @@ MicroCoaching is a **Python monorepo** that powers AI-assisted health coaching f
 | Framework | FastAPI (both services), Celery (async workers) |
 | Architecture style | Monorepo microservices — layered MVC inside platform |
 | Deployable units | `platform-api`, `platform-celery-worker`, `platform-celery-beat`, `ai-runtime`, `migrate` (one-shot) |
-| Data stores | PostgreSQL + pgvector, Redis, ClickHouse, MinIO |
-| External dependencies | Google Vertex/Gemini (primary), OpenAI (optional), SPICE auth-service (production), MinIO/S3 |
+| Data stores | PostgreSQL (+ pgvector when `VECTOR_STORE_BACKEND=pgvector`), Redis, ClickHouse, object storage (MinIO or S3) |
+| External dependencies | Google Vertex/Gemini, SPICE auth-service (production), MinIO/S3 |
 
 ---
 
@@ -70,12 +70,11 @@ graph LR
     subgraph "External Services"
         SPICE[SPICE Auth Service]
         Vertex[Google Vertex AI / Gemini]
-        OpenAI[OpenAI API]
         MinIO[(MinIO / S3)]
     end
 
     subgraph "Data Tier"
-        PG[(PostgreSQL + pgvector)]
+        PG[(PostgreSQL + VectorStore)]
         Redis[(Redis)]
         CH[(ClickHouse)]
     end
@@ -90,7 +89,6 @@ graph LR
     Platform --> CH
     Platform --> MinIO
     AIRuntime --> Vertex
-    AIRuntime -.->|optional| OpenAI
 ```
 
 ### External Dependencies
@@ -99,7 +97,6 @@ graph LR
 |--------|---------|---------|------------|
 | **SPICE auth-service** | platform-api | JWT validation, admin vs device authorization planes | `POST {SPICE_AUTH_BASE_URL}/authenticate` |
 | **Google Vertex AI / Gemini** | ai-runtime | Inference, vision, transcription, embeddings | SDK via ADC or API key |
-| **OpenAI** | ai-runtime | Alternate provider (inference + embeddings) | API key |
 | **MinIO / S3** | platform-api, workers | Source documents, thumbnails, admin file assets | S3-compatible API |
 | **Analytics dashboard** (separate repo) | Browser | Program-manager analytics UI | Calls platform dashboard routes |
 
@@ -124,13 +121,13 @@ graph LR
 | Web framework | FastAPI | per `uv.lock` | HTTP APIs for platform and ai-runtime | Async-native, OpenAPI, Pydantic v2 integration |
 | ORM | SQLAlchemy 2.x | async (`asyncpg`) | PostgreSQL access in platform | Mature async support; Alembic integration |
 | Migrations | Alembic | `infra/alembic` | Schema versioning | Separate from app startup (explicit upgrade step) |
-| Vector search | pgvector | PostgreSQL extension | Module embeddings for RAG and semantic search | Co-locate vectors with relational module data |
+| Vector search | `mc_foundation.VectorStore` + adapter | Default backend: pgvector | Module embeddings for RAG and semantic search | Call sites are vendor-agnostic; pgvector co-locates vectors with relational module data today |
 | Primary DB | PostgreSQL 15 | pgvector image | System of record | ACID, JSONB, range types for visibility windows |
 | Analytics DB | ClickHouse | 24.4 | Telemetry events, materialized summaries | Columnar OLAP for high-volume event ingest |
 | Cache / queue broker | Redis 7 | Celery broker | Job queue, rate-limit state | Lightweight; no Celery result backend by design |
 | Task queue | Celery | platform workers | Ingest pipeline, post-publish, telemetry drain | Mature Python async job orchestration |
-| Object storage | MinIO | S3-compatible | PDFs, thumbnails, ingest artifacts | Presigned URLs for device offline access |
-| AI providers | google-genai, openai | ai-runtime only | LLM inference and embeddings | Provider SDKs isolated in stateless service |
+| Object storage | MinIO or AWS S3 | S3 API via boto3 | PDFs, thumbnails, ingest artifacts | Presigned URLs for device offline access |
+| AI providers | google-genai | ai-runtime only | LLM inference and embeddings | Provider SDK isolated in stateless service |
 | Auth | SPICE middleware | platform | External IdP integration | Enterprise SSO; admin/device plane split |
 | Observability | python-json-logger, request IDs | mc_foundation | Structured logs, correlation | Shared across services |
 | CI | GitHub Actions | `.github/workflows/ci.yml` | Lint, security scan, typecheck, tests | Gates on `main` and `dev` |
@@ -157,7 +154,7 @@ graph TD
     end
 
     subgraph "Data Tier"
-        PG[("PostgreSQL 15\n+ pgvector")]
+        PG[("PostgreSQL 15\n(+ pgvector adapter)")]
         Redis[("Redis 7\nbroker")]
         CH[("ClickHouse 24.4\nanalytics")]
         MinIO[("MinIO\nobject storage")]
@@ -208,7 +205,7 @@ graph TD
 #### 4.4 — ai-runtime
 
 - **Purpose**: Stateless LLM provider execution — generation, embedding, transcription.
-- **Technology**: Python 3.12, FastAPI, google-genai / openai SDKs.
+- **Technology**: Python 3.12, FastAPI, google-genai SDK.
 - **Exposes**: Internal HTTP on port 8001 (`/internal/generate/*`, `/internal/embed`, `/internal/transcribe`, `/health`).
 - **Depends on**: AI provider credentials only — **no PostgreSQL, Redis, or ClickHouse**.
 - **Entry point**: `services/ai-runtime/src/ai_runtime/main.py`
@@ -263,7 +260,7 @@ graph LR
 | Config | Pydantic settings from env | `config.py` |
 | DB models | SQLAlchemy entities | `db/models/*.py` |
 | Repositories | Persistence queries | `db/repositories/` |
-| Integrations | External service clients | `integrations/ai_runtime_client.py`, ClickHouse/MinIO clients in `deps.py` |
+| Integrations | External service clients | `integrations/ai_runtime_client.py`, ClickHouse client and `ObjectStore` via `deps.py` |
 | Workers (invoked via Celery) | Ingest pipeline, post-publish | `workers/*.py`, `celery_tasks.py` |
 | Contracts | Shared DTOs | `packages/contracts/src/mc_contracts/` |
 
@@ -277,9 +274,9 @@ All paths are relative to `API_ROOT_PATH` (default `/medtronics-api`).
 | `/telemetry` | Device | `POST /events` |
 | `/sync` | Device | `GET /modules`, `/triggers`, `/gaps`, `/config`; presign batches |
 | `/morning` | Device | `GET /cards` |
-| `/admin` | Admin | `/ingest`, `/modules`, `/trigger-bindings`, `/fusion`, `/v3/files` |
+| `/admin` | Admin | `/ingest`, `/modules`, `/trigger-bindings`, `/fusion`, `/files` |
 | `/dashboard` | Admin | `/supervisor/{chw_id}`, `/district/{upazila_id}`, `/llm-quality` |
-| — | Ops | `/health`, `/ready` |
+| — | Ops | `/ready` |
 
 Full contract: [`README.md`](../README.md#canonical-endpoint-contract).
 
@@ -293,12 +290,10 @@ graph LR
         Router["Internal Routers\n/generate, /embed, /transcribe"]
         Exec["PromptExecutor\nprovider dispatch"]
         Google["GoogleProvider\nVertex / API key"]
-        OpenAI["OpenAIProvider"]
     end
 
     HTTP["Platform HTTP"] --> Router --> Exec
     Exec --> Google
-    Exec -.-> OpenAI
 ```
 
 #### Key Modules
@@ -307,7 +302,7 @@ graph LR
 |--------|----------------|-----------|
 | API | Internal endpoints | `api/internal_generate.py`, `api/internal_embed.py`, `api/internal_transcribe.py` |
 | Services | Provider orchestration | `services/prompt_executor.py` |
-| Providers | SDK adapters | `providers/google_provider.py`, `providers/openai_provider.py` |
+| Providers | SDK adapters | `providers/google_provider.py` |
 | Config | Provider selection, model defaults | `config.py` |
 
 #### Internal API
@@ -315,7 +310,7 @@ graph LR
 | Endpoint | Purpose |
 |----------|---------|
 | `POST /internal/generate/{generation_type}` | Unified generation (ingest stages, RAG, quiz, etc.) |
-| `POST /internal/embed` | Text embeddings (dimension aligned with pgvector) |
+| `POST /internal/embed` | Text embeddings (dimension aligned with platform corpus / VectorStore) |
 | `POST /internal/transcribe` | Media transcription for ingest |
 | `GET /health` | Liveness + active provider name |
 
@@ -327,10 +322,13 @@ graph LR
 
 | Store | Type | Purpose | Access pattern |
 |-------|------|---------|----------------|
-| **PostgreSQL** | Relational + pgvector | Modules, ingestion runs, gaps, CHW state, LLM cache | Async SQLAlchemy; platform only |
+| **PostgreSQL** | Relational (+ pgvector when selected) | Modules, ingestion runs, gaps, CHW state, LLM cache; default home for module vectors | Async SQLAlchemy; platform only |
+| **VectorStore** | Protocol + adapter (`mc_foundation`) | Durable embedding upsert/search for RAG and admin semantic search | Platform workers/API/eval via `get_vector_store`; default adapter is pgvector on `module.embedding` |
 | **ClickHouse** | Columnar OLAP | Telemetry events (`coaching_events`), materialized views for dashboards | Batch insert on ingest; dashboard reads |
 | **Redis** | In-memory | Celery broker, rate-limit counters | Async redis client in API |
-| **MinIO** | Object storage | Source PDFs/media, thumbnails, admin uploads | Presigned GET for devices; direct put from workers |
+| **Object storage** | Blobs | Source PDFs/media, thumbnails, admin uploads | Presigned GET for devices; direct put from workers |
+
+Chat FAQ clustering embeds questions in-process via ai-runtime and never writes to `VectorStore`; it is not a durable vector-store consumer.
 
 ### 6.2 Core Data Model
 
@@ -423,19 +421,20 @@ Primary write path: **admin document ingest → published module**.
 
 ```mermaid
 flowchart TD
-    A([Admin uploads PDFs]) --> B[POST /admin/ingest]
-    B --> C[Store files in MinIO]
-    C --> D[Create source_document + ingestion_run rows]
-    D --> E[Enqueue Celery: run_ingest_batch]
-    E --> F[Stage A: Extract pages + content_blocks]
-    F --> G[Stage C: Identify module candidates]
-    G --> H[Stage D: Draft cards → module rows]
-    H --> I{Publish}
-    I --> J[module.lifecycle_status = published]
-    J --> K[Enqueue embedding + quiz + gap jobs]
-    K --> L[ai-runtime: embed + generate]
-    L --> M[Update module.embedding + quiz questions]
-    M --> N([Device syncs via GET /sync/modules])
+    A([Admin uploads PDFs]) --> B[POST /admin/ingest/upload]
+    B --> C[Store files in object storage]
+    C --> D[Create source_document rows status=uploaded]
+    D --> E[POST /admin/ingest JSON source_document_ids]
+    E --> F[Create ingestion_run rows + enqueue Celery]
+    F --> G[Stage A: Extract pages + content_blocks]
+    G --> H[Stage C: Identify module candidates]
+    H --> I[Stage D: Draft cards → module rows]
+    I --> J{Publish}
+    J --> K[module.lifecycle_status = published]
+    K --> L[Enqueue embedding + quiz + gap jobs]
+    L --> M[ai-runtime: embed + generate]
+    M --> N[Update module.embedding + quiz questions]
+    N --> O([Device syncs via GET /sync/modules])
 ```
 
 ---
@@ -444,7 +443,7 @@ flowchart TD
 
 ### 7.1 — Admin Document Ingest (v3.3 Pipeline)
 
-Admin uploads clinical source files. Platform stores them in MinIO, creates `source_document` rows, and enqueues a long-running Celery batch. Workers run stages A (extract), C (identify candidates), D (draft modules), optionally merge into existing module families, then publish. Post-publish workers generate embeddings, quizzes, and gap classifications asynchronously.
+Admin uploads clinical source files. Platform stores them in object storage, creates `source_document` rows, and enqueues a long-running Celery batch. Workers run stages A (extract), C (identify candidates), D (draft modules), optionally merge into existing module families, then publish. Post-publish workers generate embeddings, quizzes, and gap classifications asynchronously.
 
 ```mermaid
 sequenceDiagram
@@ -457,9 +456,13 @@ sequenceDiagram
     participant Worker as celery-worker
     participant AI as ai-runtime
 
-    Admin->>API: POST /admin/ingest (multipart files)
+    Admin->>API: POST /admin/ingest/upload (multipart files)
     API->>MinIO: PUT source objects
-    API->>PG: INSERT source_document, ingestion_run
+    API->>PG: INSERT source_document status=uploaded
+    API-->>Admin: 201 uploaded + source_document_ids
+
+    Admin->>API: POST /admin/ingest (JSON source_document_ids + params)
+    API->>PG: UPDATE ingest metadata + INSERT ingestion_run
     API->>Redis: enqueue platform.run_ingest_batch
     API-->>Admin: 202 batch_queued + poll URLs
 
@@ -472,12 +475,12 @@ sequenceDiagram
     Worker->>Redis: enqueue embedding + quiz tasks
     Worker->>AI: POST /internal/embed
     AI-->>Worker: vectors
-    Worker->>PG: UPDATE module.embedding
+    Worker->>PG: VectorStore.upsert → module.embedding (pgvector adapter)
 ```
 
 ### 7.2 — Coaching RAG Query
 
-CHW asks a question in the app. Platform embeds the question, retrieves similar published modules via pgvector, builds a grounded prompt, and calls ai-runtime for a JSON answer with source attribution.
+CHW asks a question in the app. Platform embeds the question, retrieves similar published modules via `VectorStore.search` (pgvector adapter applies published/tenant/assignable filters in SQL), builds a grounded prompt, and calls ai-runtime for a JSON answer with source attribution.
 
 ```mermaid
 sequenceDiagram
@@ -491,7 +494,7 @@ sequenceDiagram
     CHW->>API: POST /coaching/rag-query
     API->>AI: POST /internal/embed (question)
     AI-->>API: query vector
-    API->>PG: pgvector similarity search on module.embedding
+    API->>PG: VectorStore.search (modules collection)
     PG-->>API: top-k modules + cards
     API->>API: Build grounded prompt + source refs
     API->>AI: POST /internal/generate/coaching_rag
@@ -589,7 +592,7 @@ Configuration is **environment-variable driven** via Pydantic Settings (`platfor
 | `DATABASE_URL` / `database_url` | PostgreSQL async connection |
 | `REDIS_URL` / `redis_url` | Celery broker + rate limiting |
 | `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT` | Analytics DB |
-| `MINIO_*` | Object storage endpoint, credentials, bucket |
+| `OBJECT_STORAGE_*` | Object storage backend (`minio`\|`s3`), endpoint, credentials, bucket, presign mode |
 | `API_ROOT_PATH` | Public route prefix (default `/medtronics-api`) |
 
 **Platform — AI orchestration:**
@@ -598,9 +601,18 @@ Configuration is **environment-variable driven** via Pydantic Settings (`platfor
 |----------|---------|
 | `AI_RUNTIME_BASE_URL` | ai-runtime HTTP base |
 | `AI_RUNTIME_TOKEN` | `X-Internal-Token` for internal calls |
-| `AI_CLOUD_PROVIDER` | `google` or `openai` — must match ai-runtime |
-| `GOOGLE_INFERENCE_MODEL`, `GOOGLE_EMBEDDING_MODEL`, etc. | Model policy forwarded in InferenceRequest |
-| `EMBEDDING_DIMENSION` | pgvector dimension (must match ai-runtime) |
+| `EMBEDDING_DIMENSION` | Corpus embedding dimension (must match ai-runtime; pgvector column typmod when using that adapter) |
+| `VECTOR_STORE_BACKEND` | Durable vector backend (`pgvector` today). Call sites use `mc_foundation.VectorStore`. |
+
+Platform does **not** select inference models. ai-runtime owns model id and
+generation budgets (`max_tokens`, `temperature`) via `generation_profiles`
+keyed by `generation_type`; platform only sends the role plus prompt/content
+constraints on `InferenceRequest`.
+
+**Deploy order:** restart/deploy **ai-runtime** before **platform** when
+cutting over (shared monorepo contracts). Stage C (`module_identification`)
+defaults to `max_tokens=12000` in code (not the former compose `32768`
+override).
 
 **Platform — auth:**
 
@@ -618,7 +630,6 @@ Configuration is **environment-variable driven** via Pydantic Settings (`platfor
 | `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION` | Vertex config |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Service account JSON path |
 | `GOOGLE_API_KEY` / `GEMINI_API_KEY` | Developer API fallback |
-| `OPENAI_API_KEY` | OpenAI provider |
 | `INTERNAL_TOKEN` | Validates platform requests |
 
 ---
@@ -637,7 +648,7 @@ Configuration is **environment-variable driven** via Pydantic Settings (`platfor
 - ⚠️ Extra network hop and operational surface (two services to deploy/monitor)
 - ⚠️ Platform must assemble fully-resolved `InferenceRequest` objects (more contract surface)
 
-**Alternatives considered**: Monolith with inline SDK calls — rejected to prevent platform from importing `google.generativeai` / `openai` (see `docs/PROJECT_NAVIGATION.md`).
+**Alternatives considered**: Monolith with inline SDK calls — rejected to prevent platform from importing `google.generativeai` (see `CLAUDE.md` service boundaries).
 
 ### 9.2 — Module-Centric Model (Not Scenario-Centric)
 
@@ -678,7 +689,7 @@ Configuration is **environment-variable driven** via Pydantic Settings (`platfor
 
 **Status**: Accepted (inferred from implementation)
 **Context**: Transactional module data vs high-volume telemetry vs job queue have different access patterns.
-**Decision**: PostgreSQL (OLTP + vectors), ClickHouse (telemetry OLAP), Redis (queue), MinIO (blobs).
+**Decision**: PostgreSQL (OLTP; vectors via `VectorStore` with pgvector as the default adapter), ClickHouse (telemetry OLAP), Redis (queue), object storage via `ObjectStore` (MinIO or AWS S3).
 **Rationale**: Right tool per workload; ClickHouse ReplacingMergeTree for idempotent telemetry replay.
 **Trade-offs**:
 - ✅ Optimized read paths for dashboards and sync
@@ -711,16 +722,37 @@ Headers: `Authorization: Bearer <jwt>`, optional `client` (`web` for admin, `mob
 
 ### Error Handling
 
-- FastAPI `HTTPException` for API errors with structured `detail` (e.g. `duplicate_content` on ingest conflicts).
-- Readiness returns `503` with per-dependency check map when any dependency fails.
-- Workers log and record failures in `ingestion_run_step.output_summary_jsonb`; ingest stages skip failed candidates rather than blocking the batch.
-- ai-runtime errors propagate via httpx; platform wraps with logging and optional `llm_call_cache` for idempotent retries.
+- All HTTP errors from platform and ai-runtime return **RFC 7807 Problem Details**
+  (`Content-Type: application/problem+json`) with a stable `code` extension.
+  Canonical shape:
+
+  ```json
+  {
+    "type": "docs/error-codes.json#batch_not_found",
+    "title": "Batch Not Found",
+    "status": 404,
+    "detail": "ingest batch not found",
+    "instance": "/admin/ingest/batches/{id}",
+    "code": "batch_not_found"
+  }
+  ```
+
+- Clients map `code` → user-facing copy. `detail` is technical/debug text only.
+- Client catalogue: `docs/error-codes.json`. Server enum: `mc_contracts.errors.ErrorCode`.
+  Runtime primitive: `mc_foundation.problem.AppError`.
+- Request validation (`422`) is one problem with an `errors[]` extension (field locations).
+- Unexpected failures return `500` with `code: internal_error` and a generic detail; stacks stay in logs.
+- Readiness `503` uses `code: service_unavailable` and extension `checks` (per-dependency map).
+- Failed ingest steps persist first-class `ingestion_run_step.error_code` / `error_message`
+  (plus optional `error_jsonb` context). Batch/run poll nodes expose `error_code` and `error_message`.
+- Platform’s `AIRuntimeClient` parses ai-runtime Problem Details and re-raises `AppError` with the
+  **same** `code` (no remapping). Transport failures use `ai_runtime_unreachable`.
 
 ### Observability
 
 - **Logging**: `mc_foundation.logging.setup_logging` — JSON logs in production (`log_json=true` in compose).
 - **Request correlation**: `RequestIdMiddleware` on both services.
-- **Health**: `/health` (liveness), `/ready` (platform dependency matrix).
+- **Health**: `/ready` (platform dependency matrix); ai-runtime `/health` (liveness).
 - **Metrics/tracing**: No dedicated APM integration detected in codebase — relies on structured logs.
 
 ### Configuration Management
@@ -733,7 +765,7 @@ Headers: `Authorization: Bearer <jwt>`, optional `client` (`web` for admin, `mob
 
 ## Appendix A — Dependency Graph
 
-Allowed import boundaries (enforced by convention and documented in `docs/PROJECT_NAVIGATION.md`):
+Allowed import boundaries (enforced by convention; see `CLAUDE.md`):
 
 ```mermaid
 graph LR
@@ -798,7 +830,7 @@ coaching-platform/
 │       └── src/ai_runtime/
 │           ├── main.py             # Stateless FastAPI app
 │           ├── api/                # internal_generate, embed, transcribe
-│           ├── providers/          # Google, OpenAI adapters
+│           ├── providers/          # Google adapter
 │           └── services/           # prompt_executor
 │
 ├── infra/

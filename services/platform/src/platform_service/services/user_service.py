@@ -10,8 +10,68 @@ RAW_DATA = [
         "Lalmonirhat Sadar",
         "MD Salim Reza",
         "01723477249",
-        "Md Abdus Salam",
-        1708515793,
+        "TestBhyv PO",
+        401,
+        "Test sk User",
+        395,
+    ),
+    (
+        "Lalmonirhat",
+        "Lalmonirhat Sadar",
+        "MD Salim Reza",
+        "01723477249",
+        "TestBhyv PO",
+        401,
+        "Test User",
+        394,
+    ),
+    (
+        "Lalmonirhat",
+        "Lalmonirhat Sadar",
+        "MD Salim Reza",
+        "01723477249",
+        "TestBhyv PO",
+        401,
+        "TestBhyvvvv SK",
+        400,
+    ),
+    (
+        "Lalmonirhat",
+        "Lalmonirhat Sadar",
+        "MD Salim Reza",
+        "01723477249",
+        "TestBhyv PO",
+        401,
+        "TestBhyvvv SK",
+        399,
+    ),
+    (
+        "Lalmonirhat",
+        "Lalmonirhat Sadar",
+        "MD Salim Reza",
+        "01723477249",
+        "TestBhyv PO",
+        401,
+        "TestBhyvv SK",
+        398,
+    ),
+    (
+        "Lalmonirhat",
+        "Lalmonirhat Sadar",
+        "MD Salim Reza",
+        "01723477249",
+        "TestBhyv PO",
+        401,
+        "TestBhyv SK",
+        397,
+    ),
+    (
+        "Lalmonirhat",
+        "Lalmonirhat Sadar",
+        "MD Salim Reza",
+        "01723477249",
+        "Test PO",
+        386,
         "Iwa SK",
         87,
     ),
@@ -20,8 +80,8 @@ RAW_DATA = [
         "Lalmonirhat Sadar",
         "MD Salim Reza",
         "01723477249",
-        "Md Abdus Salam",
-        1708515793,
+        "Test PO",
+        386,
         "Test SK",
         388,
     ),
@@ -40,8 +100,8 @@ RAW_DATA = [
         "Lalmonirhat Sadar",
         "MD Salim Reza",
         "01723477249",
-        "Md Abdus Salam",
-        1708515793,
+        "Test Assignment PO",
+        393,
         "CSK Anjuman Ara",
         1729070170,
     ),
@@ -623,3 +683,13 @@ SK_TO_PO_MAP = {row[7]: row[5] for row in RAW_DATA}
 def get_user_po_id(user_id: int) -> int | None:
     """Return the PO user_id for a given SK user_id, or None if not found/not an SK."""
     return SK_TO_PO_MAP.get(user_id)
+
+
+def get_team_members_for_organizer(organizer_id: int) -> list[dict[str, Any]]:
+    """Return SK team members whose parent_id matches the organizer (PO) user id."""
+    return [u for u in get_all_users() if u["role"] == "SK" and u["parent_id"] == organizer_id]
+
+
+def get_all_sk_users() -> list[dict[str, Any]]:
+    """Return all SK-role users (unrestricted team-activity roster when auth is off)."""
+    return [u for u in get_all_users() if u["role"] == "SK"]

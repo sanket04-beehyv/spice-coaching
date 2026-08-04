@@ -19,26 +19,20 @@ from platform_service.services.cross_source_fuser import CrossSourceFuser, Cross
 from platform_service.services.cross_source_fusion_runner import CrossSourceFusionRunner, FusionRunSummary
 from platform_service.services.run_state_service import RUN_SUCCEEDED
 from platform_service.workers.stage_d_draft import StageDOrchestrator, StageDResult
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe(db_session: AsyncSession) -> AsyncIterator[None]:
-    yield
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE module, module_family, module_candidate_draft, "
-            "ingestion_run_step, ingestion_run, source_document "
-            "RESTART IDENTITY CASCADE"
-        )
+    await truncate_tables(
+        db_session,
+        "module, module_family, module_candidate_draft, ingestion_run_step, ingestion_run, source_document",
     )
-    await db_session.commit()
+    yield
 
 
 async def _seed_source_doc(session: AsyncSession, *, title: str = "doc") -> SourceDocument:
@@ -47,8 +41,6 @@ async def _seed_source_doc(session: AsyncSession, *, title: str = "doc") -> Sour
         source_type="pdf",
         primary_language="en",
         content_domain="clinical",
-        assessment_mode="with_quiz",
-        authority_label="BRAC",
         original_storage_path="/tmp/x.pdf",
     )
     session.add(sd)
@@ -181,48 +173,6 @@ def _mock_stage_d_success(module_id: UUID | None = None, cards_count: int = 4) -
     return stage_d
 
 
-def _patch_staged_draft(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    module_id: UUID | None = None,
-    cards_count: int = 4,
-    reason: str | None = None,
-    coverage_ok: bool = True,
-) -> UUID | None:
-    """Bound-session tests draft in a fresh session; patch that staged path."""
-
-    async def _fake(
-        self,
-        *,
-        fusion_run_id,
-        fc_id,
-        group,
-        expected_sources,
-    ):
-        draft_summary = {
-            "candidate_id": str(fc_id),
-            "module_id": str(module_id) if module_id else None,
-            "cards_count": cards_count if module_id is not None else 0,
-            "merged_title": group.merged_title,
-            "insufficient_reason": reason,
-            "cross_source_coverage_ok": coverage_ok,
-        }
-        return (
-            module_id,
-            cards_count if module_id is not None else 0,
-            reason,
-            coverage_ok,
-            draft_summary,
-        )
-
-    monkeypatch.setattr(
-        CrossSourceFusionRunner,
-        "_draft_fused_candidate_in_staged_session",
-        _fake,
-    )
-    return module_id
-
-
 class TestCrossSourceFusionRunnerHappyPath:
     async def test_run_publishes_fused_module_and_records_summary(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
@@ -230,10 +180,17 @@ class TestCrossSourceFusionRunnerHappyPath:
         fx = await _seed_two_source_fusion_inputs(db_session)
         group = _fusion_group(fx.cand_a, fx.cand_b)
         fuser = _mock_fuser([group])
-        module_id = uuid.uuid4()
-        _patch_staged_draft(monkeypatch, module_id=module_id, coverage_ok=True)
+        stage_d = _mock_stage_d_success()
 
-        runner = CrossSourceFusionRunner(db_session, fuser=fuser)
+        runner = CrossSourceFusionRunner(db_session, fuser=fuser, stage_d=stage_d)
+        expected_sources = {str(fx.sd_a.id), str(fx.sd_b.id)}
+        monkeypatch.setattr(
+            runner._draft_orchestrator,
+            "_cards_source_set",
+            AsyncMock(return_value=expected_sources),
+        )
+        monkeypatch.setattr(runner._draft_orchestrator, "_enqueue_post_publish", AsyncMock())
+
         summary = await runner.run(fx.doc_ids)
 
         assert isinstance(summary, FusionRunSummary)
@@ -248,6 +205,7 @@ class TestCrossSourceFusionRunnerHappyPath:
         assert summary.drafts[0]["cross_source_coverage_ok"] is True
 
         fuser.fuse.assert_awaited_once()
+        stage_d.run.assert_awaited()
 
         run_row = await db_session.get(IngestionRun, summary.fusion_run_id)
         assert run_row is not None
@@ -272,11 +230,17 @@ class TestCrossSourceFusionRunnerRetireHeuristic:
         await db_session.commit()
 
         group = _fusion_group(fx.cand_a, fx.cand_b)
-        _patch_staged_draft(monkeypatch, module_id=uuid.uuid4(), coverage_ok=True)
         runner = CrossSourceFusionRunner(
             db_session,
             fuser=_mock_fuser([group]),
+            stage_d=_mock_stage_d_success(),
         )
+        monkeypatch.setattr(
+            runner._draft_orchestrator,
+            "_cards_source_set",
+            AsyncMock(return_value={str(fx.sd_a.id), str(fx.sd_b.id)}),
+        )
+        monkeypatch.setattr(runner._draft_orchestrator, "_enqueue_post_publish", AsyncMock())
 
         summary = await runner.run(fx.doc_ids)
 
@@ -298,11 +262,17 @@ class TestCrossSourceFusionRunnerRetireHeuristic:
         await db_session.commit()
 
         group = _fusion_group(fx.cand_a, fx.cand_b)
-        _patch_staged_draft(monkeypatch, module_id=uuid.uuid4(), coverage_ok=True)
         runner = CrossSourceFusionRunner(
             db_session,
             fuser=_mock_fuser([group]),
+            stage_d=_mock_stage_d_success(),
         )
+        monkeypatch.setattr(
+            runner._draft_orchestrator,
+            "_cards_source_set",
+            AsyncMock(return_value={str(fx.sd_a.id), str(fx.sd_b.id)}),
+        )
+        monkeypatch.setattr(runner._draft_orchestrator, "_enqueue_post_publish", AsyncMock())
 
         summary = await runner.run(fx.doc_ids)
 
@@ -317,12 +287,17 @@ class TestCrossSourceFusionRunnerDraftFailure:
     ) -> None:
         fx = await _seed_two_source_fusion_inputs(db_session)
         group = _fusion_group(fx.cand_a, fx.cand_b)
-        _patch_staged_draft(monkeypatch, module_id=None, reason="RuntimeError", coverage_ok=False)
+        stage_d = MagicMock(spec=StageDOrchestrator)
+        stage_d.run = AsyncMock(side_effect=RuntimeError("Vertex truncated JSON"))
+        stage_d._enqueue_post_publish = AsyncMock()
 
         runner = CrossSourceFusionRunner(
             db_session,
             fuser=_mock_fuser([group]),
+            stage_d=stage_d,
         )
+        enqueue_mock = AsyncMock()
+        monkeypatch.setattr(runner._draft_orchestrator, "_enqueue_post_publish", enqueue_mock)
 
         summary = await runner.run(fx.doc_ids)
 
@@ -330,6 +305,7 @@ class TestCrossSourceFusionRunnerDraftFailure:
         assert summary.fused_modules_failed == 1
         assert summary.drafts[0]["module_id"] is None
         assert summary.drafts[0]["insufficient_reason"] == "RuntimeError"
+        enqueue_mock.assert_not_awaited()
 
     async def test_coverage_warning_still_publishes_module(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
@@ -337,15 +313,25 @@ class TestCrossSourceFusionRunnerDraftFailure:
         fx = await _seed_two_source_fusion_inputs(db_session)
         group = _fusion_group(fx.cand_a, fx.cand_b)
         module_id = uuid.uuid4()
-        _patch_staged_draft(monkeypatch, module_id=module_id, coverage_ok=False)
+        stage_d = _mock_stage_d_success(module_id=module_id)
 
         runner = CrossSourceFusionRunner(
             db_session,
             fuser=_mock_fuser([group]),
+            stage_d=stage_d,
         )
+        # Both coverage attempts see only one source — accept best-effort on attempt 2.
+        monkeypatch.setattr(
+            runner._draft_orchestrator,
+            "_cards_source_set",
+            AsyncMock(return_value={str(fx.sd_a.id)}),
+        )
+        enqueue_mock = AsyncMock()
+        monkeypatch.setattr(runner._draft_orchestrator, "_enqueue_post_publish", enqueue_mock)
 
         summary = await runner.run(fx.doc_ids)
 
         assert summary.fused_modules_published == 1
         assert summary.fused_modules_with_coverage_warning == 1
         assert summary.drafts[0]["cross_source_coverage_ok"] is False
+        enqueue_mock.assert_awaited_once()

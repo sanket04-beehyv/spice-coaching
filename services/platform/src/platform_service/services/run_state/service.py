@@ -8,14 +8,24 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from platform_service.db.models.ingest_batch import IngestBatch
 from platform_service.db.models.ingestion_run import IngestionRun
 from platform_service.services.run_state.claims import RunClaimMixin
 from platform_service.services.run_state.constants import (
+    _ACTIVE_RUN_STATUSES,
+    BATCH_FAILED,
+    BATCH_PARTIALLY_SUCCEEDED,
+    BATCH_QUEUED,
+    BATCH_SUCCEEDED,
     FUSION_RUN_TYPE,
     RUN_PARTIALLY_SUCCEEDED,
+    RUN_QUEUED,
     RUN_RUNNING,
     ConcurrentFusionRunError,
     ConcurrentRunError,
+    as_error_object,
+    now_utc,
+    rollup_batch_status,
 )
 from platform_service.services.run_state.steps import RunStepMixin
 
@@ -31,7 +41,7 @@ class RunStateService(RunClaimMixin, RunStepMixin):
             select(IngestionRun)
             .where(
                 IngestionRun.source_document_id == source_document_id,
-                IngestionRun.status == RUN_RUNNING,
+                IngestionRun.status.in_(tuple(_ACTIVE_RUN_STATUSES)),
             )
             .order_by(IngestionRun.started_at.desc())
             .limit(1)
@@ -67,10 +77,43 @@ class RunStateService(RunClaimMixin, RunStepMixin):
             if active_fusion is not None:
                 raise ConcurrentFusionRunError(doc_id, active_fusion.id)
 
-    async def start_run(
+    async def create_batch(
+        self,
+        *,
+        assessment_mode: str = "with_quiz",
+        ingestion_instructions: str | None = None,
+        cards_per_module: int | None = None,
+        quizzes_per_module: int | None = None,
+        triggered_by: UUID | None = None,
+    ) -> IngestBatch:
+        batch = IngestBatch(
+            status=BATCH_QUEUED,
+            assessment_mode=assessment_mode,
+            ingestion_instructions=ingestion_instructions,
+            cards_per_module=cards_per_module,
+            quizzes_per_module=quizzes_per_module,
+            triggered_by=triggered_by,
+        )
+        self._session.add(batch)
+        await self._session.flush()
+        return batch
+
+    async def get_batch(self, batch_id: UUID) -> IngestBatch | None:
+        return await self._session.get(IngestBatch, batch_id)
+
+    async def list_runs_for_batch(self, batch_id: UUID) -> list[IngestionRun]:
+        result = await self._session.execute(
+            select(IngestionRun)
+            .where(IngestionRun.ingest_batch_id == batch_id)
+            .order_by(IngestionRun.started_at.asc(), IngestionRun.id.asc())
+        )
+        return list(result.scalars().all())
+
+    async def create_queued_run(
         self,
         *,
         source_document_id: UUID,
+        ingest_batch_id: UUID,
         triggered_by: UUID | None = None,
     ) -> IngestionRun:
         await self._lock_source_document(source_document_id)
@@ -79,6 +122,86 @@ class RunStateService(RunClaimMixin, RunStepMixin):
             raise ConcurrentRunError(source_document_id, existing.id)
         run = IngestionRun(
             source_document_id=source_document_id,
+            ingest_batch_id=ingest_batch_id,
+            status=RUN_QUEUED,
+            triggered_by=triggered_by,
+        )
+        self._session.add(run)
+        try:
+            await self._session.flush()
+        except IntegrityError as exc:
+            await self._session.rollback()
+            existing = await self.find_active_run(source_document_id)
+            if existing is not None:
+                raise ConcurrentRunError(source_document_id, existing.id) from exc
+            raise
+        return run
+
+    async def activate_queued_run(self, run_id: UUID) -> IngestionRun:
+        """Attach to a queued/running/partially_succeeded run for pipeline work.
+
+        Retry reopens terminal runs to ``running`` before enqueue; this also
+        accepts ``partially_succeeded`` so a worker can attach safely.
+        """
+        run = await self.get_run(run_id)
+        if run is None:
+            raise ValueError(f"ingestion_run {run_id} not found")
+        if run.status == RUN_RUNNING:
+            return run
+        if run.status == RUN_QUEUED:
+            run.status = RUN_RUNNING
+            await self._session.flush()
+            return run
+        if run.status == RUN_PARTIALLY_SUCCEEDED:
+            run.status = RUN_RUNNING
+            run.completed_at = None
+            await self._session.flush()
+            return run
+        raise ValueError(f"ingestion_run {run_id} cannot be activated from status {run.status!r}")
+
+    async def refresh_batch_status(self, batch_id: UUID) -> IngestBatch | None:
+        batch = await self.get_batch(batch_id)
+        if batch is None:
+            return None
+        runs = await self.list_runs_for_batch(batch_id)
+        status = rollup_batch_status([r.status for r in runs])
+        batch.status = status
+        if status in (
+            BATCH_SUCCEEDED,
+            BATCH_FAILED,
+            BATCH_PARTIALLY_SUCCEEDED,
+        ):
+            if batch.completed_at is None:
+                batch.completed_at = now_utc()
+        else:
+            batch.completed_at = None
+        await self._session.flush()
+        return batch
+
+    async def batch_has_awaiting_input(self, batch_id: UUID) -> bool:
+        """True when any non-fusion run in the batch has an awaiting_input step."""
+        runs = await self.list_runs_for_batch(batch_id)
+        for run in runs:
+            if self.is_fusion_run(run):
+                continue
+            if await self.run_has_awaiting_input(run.id):
+                return True
+        return False
+
+    async def start_run(
+        self,
+        *,
+        source_document_id: UUID,
+        triggered_by: UUID | None = None,
+        ingest_batch_id: UUID | None = None,
+    ) -> IngestionRun:
+        await self._lock_source_document(source_document_id)
+        existing = await self.find_active_run(source_document_id)
+        if existing is not None:
+            raise ConcurrentRunError(source_document_id, existing.id)
+        run = IngestionRun(
+            source_document_id=source_document_id,
+            ingest_batch_id=ingest_batch_id,
             status=RUN_RUNNING,
             triggered_by=triggered_by,
         )
@@ -97,6 +220,7 @@ class RunStateService(RunClaimMixin, RunStepMixin):
         self,
         *,
         source_document_ids: list[UUID],
+        ingest_batch_id: UUID | None = None,
     ) -> IngestionRun:
         if not source_document_ids:
             raise ValueError("source_document_ids must not be empty")
@@ -105,6 +229,7 @@ class RunStateService(RunClaimMixin, RunStepMixin):
         await self.assert_no_active_fusion_overlap(source_document_ids)
         run = IngestionRun(
             source_document_id=anchor,
+            ingest_batch_id=ingest_batch_id,
             status=RUN_RUNNING,
             error_jsonb={
                 "type": FUSION_RUN_TYPE,
@@ -136,7 +261,7 @@ class RunStateService(RunClaimMixin, RunStepMixin):
 
     @staticmethod
     def is_fusion_run(run: IngestionRun) -> bool:
-        return (run.error_jsonb or {}).get("type") == FUSION_RUN_TYPE
+        return as_error_object(run.error_jsonb).get("type") == FUSION_RUN_TYPE
 
     async def find_best_poll_run(self, source_document_id: UUID) -> IngestionRun | None:
         run = await self.find_active_run(source_document_id)

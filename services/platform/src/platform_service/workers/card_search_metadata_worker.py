@@ -1,8 +1,8 @@
 """Post-publish card search metadata workers.
 
-Generates bilingual lexical enrichment for all module cards in one LLM call,
-persists to ``module_json.cards[i].search_metadata``, then chains module-level
-search metadata generation.
+Generates locale-keyed lexical enrichment (primary locale only) for all module
+cards in one LLM call, persists to ``module_card.search_metadata_jsonb``,
+then chains module-level search metadata generation.
 """
 
 from __future__ import annotations
@@ -11,9 +11,13 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from mc_contracts.errors import ErrorCode
+
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.module import Module
+from platform_service.db.repositories.module_read_repository import ModuleReadRepository
 from platform_service.db.repositories.module_write_repository import ModuleWriteRepository
+from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.card_search_metadata_generator import CardSearchMetadataGenerator
 from platform_service.services.post_publish_step import finish_post_publish_step
 
@@ -57,12 +61,16 @@ async def _complete_card_step(
     card_step_id: UUID | None,
     success: bool,
     output_summary: dict[str, Any] | None = None,
+    error_code: str | None = None,
+    error_message: str | None = None,
     error: dict[str, Any] | None = None,
 ) -> None:
     await finish_post_publish_step(
         step_id=card_step_id,
         success=success,
         output_summary=output_summary,
+        error_code=error_code,
+        error_message=error_message,
         error=error,
     )
 
@@ -96,13 +104,16 @@ async def generate_card_search_metadata_batch(
                 await _complete_card_step(
                     card_step_id=card_step_id,
                     success=False,
+                    error_code=ErrorCode.MODULE_NOT_FOUND.value,
+                    error_message=f"module {module_id} not found",
                     error={"type": "ModuleNotFound", "message": f"module {module_id} not found"},
                 )
                 _chain_module_metadata()
                 return 0
 
-            cards = (module.module_json or {}).get("cards", [])
-            card_indices = [idx for idx, card in enumerate(cards) if isinstance(card, dict)]
+            card_rows = await ModuleReadRepository(session).list_cards(module_id)
+            cards = [card_row_to_dict(row) for row in card_rows]
+            card_indices = list(range(len(cards)))
 
             if not card_indices:
                 logger.info(
@@ -146,7 +157,7 @@ async def generate_card_search_metadata_batch(
                 return 0
 
             generator = CardSearchMetadataGenerator()
-            result = await generator.generate_for_module(module, to_generate)
+            result = await generator.generate_for_module(module, to_generate, cards=cards)
 
             succeeded_indices = sorted(result.metadata_by_index)
             failed_indices = sorted(result.failed_indices)
@@ -167,6 +178,8 @@ async def generate_card_search_metadata_batch(
                     card_step_id=card_step_id,
                     success=False,
                     output_summary=output_summary,
+                    error_code=ErrorCode.CARD_SEARCH_METADATA_FAILED.value,
+                    error_message=(result.error or "unknown")[:500],
                     error={"type": "GenerationFailed", "message": result.error},
                 )
                 _chain_module_metadata()
@@ -190,15 +203,18 @@ async def generate_card_search_metadata_batch(
                 skipped_indices=skipped_indices,
             )
             step_success = bool(succeeded_indices) or bool(skipped_indices)
+            step_error = (
+                {"type": "PartialFailure", "message": result.error}
+                if result.error and failed_indices
+                else None
+            )
             await _complete_card_step(
                 card_step_id=card_step_id,
                 success=step_success,
                 output_summary=output_summary,
-                error=(
-                    {"type": "PartialFailure", "message": result.error}
-                    if result.error and failed_indices
-                    else None
-                ),
+                error_code=None if step_success else ErrorCode.CARD_SEARCH_METADATA_FAILED.value,
+                error_message=None if step_success else (result.error or "card search metadata failed")[:500],
+                error=step_error,
             )
             _chain_module_metadata()
             return len(to_generate)

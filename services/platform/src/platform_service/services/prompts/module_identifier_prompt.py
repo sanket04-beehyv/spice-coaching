@@ -5,10 +5,8 @@ behavioural-TOPIC modules from a corpus, with branch logic per
 source_document.content_domain:
 
 - clinical → emit initial_training candidates for comprehensive training manuals
-- supervisor_update → emit content_update candidates with previous/current/
-  rationale fields populated
 - digital → emit digital_proficiency candidates
-- clinical_with_app_action → clinical content tied to in-app workflows
+- operational → emit initial_training candidates for field/ops workflows
 
 The architecture-reset removed the gap-driven prompting from this stage:
 gaps are runtime telemetry, not source-document structure. The pipeline
@@ -25,22 +23,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from mc_contracts.enums import ContentDomain
 from mc_foundation.locale import get_locale_metadata, locale_display_name
 
 from platform_service.config import get_settings
+from platform_service.module_domains import module_domain_catalog_for_prompt
 from platform_service.services.prompt_id_codec import PromptIdCodec
 from platform_service.services.prompts.symbol_verbalization import render_locale_map_field_schema
-
-MODULE_IDENTIFIER_TEMPLATE_ID = "v33-stage-c-module-identifier"
-# v6: content_domain replaces authority_kind; added clinical_with_app_action branch.
-# v7: add bilingual module descriptions (locale-keyed description map).
-# v8: optional admin ingestion steering guidance (USER_INGESTION_GUIDANCE).
-# v9: ingestion guidance is a hard scope filter; per-candidate
-#     ingestion_instruction_rationale when guidance is present.
-# v10: ingestion guidance + rationale field only when USER_INGESTION_GUIDANCE
-#      is present — restores dev/v7-equivalent prompts for normal ingests.
-# v12: monolingual deployment — primary locale only.
-MODULE_IDENTIFIER_TEMPLATE_VERSION = 12
 
 _INGESTION_GUIDANCE_SYSTEM_SECTION = """\
 INGESTION GUIDANCE MODE (USER_INGESTION_GUIDANCE is present in the human message):
@@ -61,6 +50,23 @@ _INGESTION_RATIONALE_JSON_FIELD = (
     "which part of the guidance this candidate satisfies and how the cited "
     'corpus supports it",\n'
 )
+
+_CARDINALITY_GUIDANCE_SYSTEM_SECTION = """\
+INGEST CARDINALITY TARGETS (admin requested fixed counts):
+- Set `estimated_card_count` to exactly {target_cards} for EVERY candidate.
+- Set `estimated_quiz_count` to exactly {target_quizzes} for EVERY candidate.
+- Do not vary these counts per candidate when targets are specified.
+"""
+
+_CARDINALITY_CARDS_ONLY_SECTION = """\
+INGEST CARDINALITY TARGET (admin requested fixed card count):
+- Set `estimated_card_count` to exactly {target_cards} for EVERY candidate.
+"""
+
+_CARDINALITY_QUIZZES_ONLY_SECTION = """\
+INGEST CARDINALITY TARGET (admin requested fixed quiz count):
+- Set `estimated_quiz_count` to exactly {target_quizzes} for EVERY candidate.
+"""
 
 _SYSTEM_PROMPT_BASE = """\
 You are drafting BEHAVIOURAL TOPIC modules for community health workers (CHWs)
@@ -101,8 +107,8 @@ GROUPING RULES — do NOT over-fragment, do NOT under-emit:
    reference tables (e.g. "Healthcare Services by Facility Level") are
    JOB AIDS — the CHW fills them out or looks at them on the job, not
    topics they internalise through training. Detection cues:
-   - Page or section heading begins with {annexure_terms}
-     or similar.
+   - Page or section heading begins with "Annexure", "Appendix", "Job Aid",
+     "layXud", {annexure_terms}, or similar.
    - Content is dominated by blank fields, tick-box rows, signature
      lines, or columnar reference data the user fills in or looks up.
    The training-content equivalent (e.g. "How to fill the NCD reporting
@@ -111,7 +117,12 @@ GROUPING RULES — do NOT over-fragment, do NOT under-emit:
 
 DO NOT invent topics. Only group and label content present in the source corpus.
 
-{ingestion_guidance_section}
+For `domain`, pick the single best topical label for admin filtering — the
+disease, program area, or skill the module primarily teaches (e.g. ANC module
+→ "anc", hypertension chapter → "hypertension", digital app workflow →
+"digital"). Do NOT default every candidate to the same value.
+
+{ingestion_guidance_section}{cardinality_guidance_section}
 You are receiving:
 1. Document outline — section structure with page ranges
 2. Already-published modules — DO NOT duplicate
@@ -146,9 +157,10 @@ For EACH candidate module, return a JSON object with these fields:
     }},
     ...
   ],
-  "estimated_card_count": integer (3-7),
-  "estimated_quiz_count": integer (3-10),
+  "estimated_card_count": integer ({card_count_schema}),
+  "estimated_quiz_count": integer ({quiz_count_schema}),
   "proposed_module_type": "refresher" | "content_update" | "digital_proficiency" | "initial_training",
+  "domain": "string — snake_case program topic bucket for admin filtering; prefer a specific label from the corpus (e.g. dengue, pneumonia) when the source has a dedicated chapter, otherwise use the closest common domain when one fits: {module_domain_catalog}. Use snake_case; do not invent unrelated domains.",
   "clinical_review_notes": "string — what the reviewer should validate",
 {ingestion_rationale_field}  {content_update_fields}
 }}
@@ -172,46 +184,31 @@ These are comprehensive training materials that teach foundational clinical
 knowledge and procedures. The previous_practice_summary, current_practice_summary,
 rationale_summary fields should be empty/null for these candidates."""
 
-_BRANCH_SUPERVISOR_UPDATE = """\
-This corpus contains a SUPERVISOR UPDATE (a recent change in protocol or guidance).
-Emit modules with proposed_module_type = "content_update". Each candidate MUST extract:
-- previous_practice_summary: what was done before the change
-- current_practice_summary: what is done now
-- rationale_summary: why the change happened
-
-The candidate's scope_summary captures the overall topic; the three summaries
-above carry the delta-specific framing."""
-
 _BRANCH_DIGITAL = """\
 This corpus contains DIGITAL workflow content. Emit modules with
 proposed_module_type = "digital_proficiency". Card body will be procedural
 (workflow steps), not clinical. Cite content_blocks of type 'figure' for
 screenshots or workflow diagrams when present."""
 
-_BRANCH_CLINICAL_WITH_APP_ACTION = """\
-This corpus contains CLINICAL content tied to in-app actions (e.g. UHIS/SPICE
-workflows embedded in clinical training). Emit modules with
-proposed_module_type = "initial_training". Emphasise the clinical decision or
-procedure AND the corresponding app steps the CHW performs. Card body should
-pair clinical rationale with actionable workflow steps. Cite content_blocks of
-type 'figure' for app screenshots or workflow diagrams when present."""
-
-_BRANCH_MIXED = """\
-This corpus contains MIXED content domains. For each candidate, choose
-proposed_module_type based on which source documents its provenance comes from:
-- if ANY cited block is from a supervisor_update document → content_update
-  (and you MUST extract previous/current/rationale summaries)
-- if all cited blocks are from digital-domain documents → digital_proficiency
-- if all cited blocks are from clinical_with_app_action documents → initial_training
-  (clinical + app workflow framing per the clinical_with_app_action branch)
-- otherwise → initial_training
-"""
-
+_BRANCH_OPERATIONAL = """\
+This corpus contains OPERATIONAL content (field activities, reporting,
+safeguarding, organisational / programme workflows — not clinical protocols
+and not app-UI digital proficiency). Emit modules with
+proposed_module_type = "initial_training". Card body should teach the
+operational procedure the CHW follows on the job. The
+previous_practice_summary, current_practice_summary, rationale_summary
+fields should be empty/null for these candidates."""
 
 _CONTENT_UPDATE_FIELDS = """\
 "previous_practice_summary": "string or null — what was done before (content_update only)",
   "current_practice_summary": "string or null — what is done now (content_update only)",
   "rationale_summary": "string or null — why it changed (content_update only)\""""
+
+_BRANCH_BY_DOMAIN: dict[str, str] = {
+    ContentDomain.CLINICAL.value: _BRANCH_CLINICAL,
+    ContentDomain.DIGITAL.value: _BRANCH_DIGITAL,
+    ContentDomain.OPERATIONAL.value: _BRANCH_OPERATIONAL,
+}
 
 
 def _annexure_terms_phrase(primary_locale: str) -> str:
@@ -225,25 +222,53 @@ def _annexure_terms_phrase(primary_locale: str) -> str:
     return f"{quoted}, or similar"
 
 
-def _branch_instructions_for(content_domains: set[str]) -> str:
-    """Pick the correct branch text for the workspace's content-domain mix."""
-    if not content_domains:
-        return _BRANCH_CLINICAL
-    if "supervisor_update" in content_domains and len(content_domains) > 1:
-        return _BRANCH_MIXED
-    if content_domains == {"supervisor_update"}:
-        return _BRANCH_SUPERVISOR_UPDATE
-    if content_domains == {"digital"}:
-        return _BRANCH_DIGITAL
-    if content_domains == {"clinical_with_app_action"}:
-        return _BRANCH_CLINICAL_WITH_APP_ACTION
+def branch_instructions_for(content_domains: set[str]) -> str:
+    """Pick the correct branch text for the workspace's content-domain mix.
+
+    Ingest sets one content_domain at a time; when the set is empty or mixed,
+    fall back to the clinical (default) branch.
+    """
+    if len(content_domains) == 1:
+        sole = next(iter(content_domains))
+        branch = _BRANCH_BY_DOMAIN.get(sole)
+        if branch is not None:
+            return branch
     return _BRANCH_CLINICAL
+
+
+def _cardinality_guidance_section(
+    *,
+    target_cards: int | None,
+    target_quizzes: int | None,
+) -> str:
+    if target_cards is not None and target_quizzes is not None:
+        return _CARDINALITY_GUIDANCE_SYSTEM_SECTION.format(
+            target_cards=target_cards,
+            target_quizzes=target_quizzes,
+        )
+    if target_cards is not None:
+        return _CARDINALITY_CARDS_ONLY_SECTION.format(target_cards=target_cards)
+    if target_quizzes is not None:
+        return _CARDINALITY_QUIZZES_ONLY_SECTION.format(target_quizzes=target_quizzes)
+    return ""
+
+
+def _count_schema_text(lo: int, hi: int) -> str:
+    if lo == hi:
+        return str(lo)
+    return f"{lo}-{hi}"
 
 
 def render_system_prompt(
     content_domains: set[str],
     *,
     ingestion_instructions: str | None = None,
+    card_min_count: int | None = None,
+    card_max_count: int | None = None,
+    quiz_min_count: int | None = None,
+    quiz_max_count: int | None = None,
+    target_cards: int | None = None,
+    target_quizzes: int | None = None,
     deployment_primary_locale: str | None = None,
     deployment_region_context: str | None = None,
 ) -> str:
@@ -251,6 +276,11 @@ def render_system_prompt(
     settings = get_settings()
     primary_locale = deployment_primary_locale or settings.deployment_primary_locale
     region_context = deployment_region_context or settings.deployment_region_context
+
+    card_lo = card_min_count if card_min_count is not None else settings.card_min_count
+    card_hi = card_max_count if card_max_count is not None else settings.card_max_count
+    quiz_lo = quiz_min_count if quiz_min_count is not None else settings.quiz_min_questions
+    quiz_hi = quiz_max_count if quiz_max_count is not None else settings.quiz_max_questions
 
     if ingestion_instructions:
         ingestion_guidance_section = _INGESTION_GUIDANCE_SYSTEM_SECTION
@@ -271,11 +301,18 @@ def render_system_prompt(
     return _SYSTEM_PROMPT_BASE.format(
         deployment_region_context=region_context,
         annexure_terms=_annexure_terms_phrase(primary_locale),
+        module_domain_catalog=module_domain_catalog_for_prompt(),
         ingestion_guidance_section=ingestion_guidance_section,
-        content_domain_branch_instructions=_branch_instructions_for(content_domains),
+        cardinality_guidance_section=_cardinality_guidance_section(
+            target_cards=target_cards,
+            target_quizzes=target_quizzes,
+        ),
+        content_domain_branch_instructions=branch_instructions_for(content_domains),
         ingestion_rationale_field=ingestion_rationale_field,
         content_update_fields=_CONTENT_UPDATE_FIELDS,
         description_field_schema=description_field_schema,
+        card_count_schema=_count_schema_text(card_lo, card_hi),
+        quiz_count_schema=_count_schema_text(quiz_lo, quiz_hi),
     )
 
 

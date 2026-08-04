@@ -25,7 +25,10 @@ class RetrievedModuleHit(BaseModel):
     module_id: UUID
     title: LocalizedString
     domain: str
-    cosine_distance: float = Field(..., description="pgvector cosine distance; lower is more similar")
+    cosine_distance: float = Field(
+        ...,
+        description="Cosine distance from VectorStore search; lower is more similar",
+    )
 
 
 SourceTypeLiteral = Literal[
@@ -59,7 +62,7 @@ class SourceAttribution(BaseModel):
     storage_path: str
     object_name: str | None = Field(
         default=None,
-        description="MinIO object key when storage_path is bucket/key; null for legacy filesystem paths.",
+        description="Object storage key when storage_path is bucket/key; null for legacy filesystem paths.",
     )
     original_filename: str | None = None
     content_sha256: str | None = None
@@ -75,7 +78,7 @@ class SourceAttribution(BaseModel):
     presigned_expires_seconds: int | None = None
     linked_module_ids: list[UUID] = Field(
         default_factory=list,
-        description="Published modules from retrieval that cite this source_document.",
+        description="Cited modules that link this source_document.",
     )
 
 

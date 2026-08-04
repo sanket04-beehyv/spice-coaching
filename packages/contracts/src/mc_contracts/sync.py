@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from mc_contracts.enums import ContentDomain
 from mc_contracts.localized import LocaleConfig, LocalizedOptions, LocalizedString
 
 
@@ -52,8 +53,6 @@ class SourceDocumentSyncPayload(BaseModel):
     source_type: str
     primary_language: str
     content_domain: str
-    assessment_mode: str
-    authority_label: str
     version_label: str | None = None
     publication_date: date | None = None
     original_filename: str | None = None
@@ -77,6 +76,8 @@ class ModuleSyncPayload(BaseModel):
     domain: str
     sub_domain: str | None
     module_type: str
+    # Single content-domain tag for Learning Library / Practice Zone (Clinical | Digital | Operational).
+    content_domain: ContentDomain = ContentDomain.CLINICAL
     tenant_id: UUID | None
     estimated_minutes: int
     difficulty_level: str
@@ -101,18 +102,68 @@ class ModuleFamilySyncPayload(BaseModel):
     current_published_module_id: UUID | None
 
 
+class AssignedModulePayload(BaseModel):
+    module_id: UUID
+    assigned_at: datetime
+
+
+class VideoProgressPayload(BaseModel):
+    """Current watch progress for a single video."""
+
+    last_position_ms: int
+    percent_watched: float
+    completed: bool
+    last_watched_at: datetime
+
+
+class AssignedVideoPayload(BaseModel):
+    """One video assigned to a device user for offline learning."""
+
+    video_id: UUID
+    title: str
+    description: str | None = None
+    thumbnail_storage_path: str | None = None
+    thumbnail_presigned_url: str | None = None
+    thumbnail_presigned_expires_seconds: int | None = None
+    duration_ms: int | None = None
+    assigned_at: datetime
+    video_progress: VideoProgressPayload | None = None
+
+
+class AssignedVideosBundle(BaseModel):
+    """Paginated list of videos assigned to a user."""
+
+    videos: list[AssignedVideoPayload] = Field(default_factory=list)
+    total_videos: int
+    total_pages: int
+    limit: int
+    offset: int
+    server_time_utc: str
+
+
+class RequestedModulePayload(BaseModel):
+    """One CHW training request for offline history on the device."""
+
+    request_id: UUID
+    module_id: UUID | None = None
+    requested_module_name: str | None = None
+    reason: str | None = None
+    submitted_at: datetime
+
+
 class ModulesSyncBundle(BaseModel):
     modules: list[ModuleSyncPayload]
     module_families: list[ModuleFamilySyncPayload]
-    assigned_module_ids: list[UUID] = Field(default_factory=list)
+    assigned_module_ids: list[AssignedModulePayload] = Field(default_factory=list)
+    requested_modules: list[RequestedModulePayload] = Field(default_factory=list)
     server_time_utc: str
 
 
 class PublishedSourceDocumentPayload(BaseModel):
-    """Presigned access for one source document linked to a published module.
+    """Presigned access for one source document with ``sync_published_visible=true``.
 
-    Module metadata and cards come from ``GET /sync/modules``; this payload only
-    supplies downloadable URLs for linked source documents.
+    This payload supplies downloadable URLs for published-visible source documents
+    (knowledge uploads and any other docs flagged for device sync).
     """
 
     source_document_id: UUID
@@ -125,7 +176,7 @@ class PublishedSourceDocumentPayload(BaseModel):
 
 
 class PublishedSourceDocumentsBundle(BaseModel):
-    """Presigned URLs for source documents linked to published modules."""
+    """Presigned URLs for source documents with ``sync_published_visible=true``."""
 
     source_documents: list[PublishedSourceDocumentPayload]
     missing_ids: list[UUID] = Field(default_factory=list)

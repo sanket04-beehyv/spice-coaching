@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from mc_contracts.localized import LocalizedString
 from sqlalchemy import delete, select
@@ -44,7 +44,7 @@ class ChatFaqRepository:
             )
             return
 
-        now = datetime.now(UTC)
+        now = computed_at
         for row in rows:
             stmt = (
                 pg_insert(ChatFrequentQuestion)

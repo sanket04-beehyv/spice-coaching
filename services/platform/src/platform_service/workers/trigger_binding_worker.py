@@ -6,6 +6,8 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from mc_contracts.errors import ErrorCode
+
 from platform_service.config import get_settings
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.module import Module
@@ -62,6 +64,8 @@ async def bind_assessment_triggers_for_module(
                 await finish_post_publish_step(
                     step_id=step_id,
                     success=False,
+                    error_code=ErrorCode.MODULE_NOT_FOUND.value,
+                    error_message=f"module {module_id} not found",
                     error={"type": "ModuleNotFound", "message": f"module {module_id} not found"},
                 )
                 _enqueue_embedding(module_id, embedding_step_id)
@@ -152,6 +156,8 @@ async def bind_assessment_triggers_for_module(
         await finish_post_publish_step(
             step_id=step_id,
             success=False,
+            error_code=ErrorCode.TRIGGER_BINDING_FAILED.value,
+            error_message=str(exc)[:500],
             error={"type": type(exc).__name__, "message": str(exc)[:500]},
         )
         _enqueue_embedding(module_id, embedding_step_id)

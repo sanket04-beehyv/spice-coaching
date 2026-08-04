@@ -15,6 +15,8 @@ from tests.extractors.fixture_builders import (
     build_clean_english_pptx,
     build_corrupted_pdf,
     build_empty_pdf,
+    build_formatted_english_docx,
+    build_formatted_english_pptx,
     build_image_only_pdf,
     build_unicode_bangla_pdf,
 )
@@ -89,6 +91,14 @@ class TestPptxExtraction:
         for p in pages:
             assert p.markdown.startswith("# ")
 
+    def test_formatted_pptx_extracts_bold_and_bullets(self, tmp_path: Path) -> None:
+        pptx = build_formatted_english_pptx(tmp_path / "formatted.pptx")
+        pages = extract_pages(pptx, "pptx")
+        md = pages[0].markdown
+        assert "**bold lead-in**" in md
+        assert "  - Bulleted clinical point" in md
+        assert "<b>" not in md
+
 
 # ── DOCX ───────────────────────────────────────────────────────────────
 
@@ -109,6 +119,17 @@ class TestDocxExtraction:
         # Heading 2 → "## "
         assert "## Risk Factors" in md
         assert "## Referral Decisions" in md
+
+    def test_formatted_docx_extracts_bold_and_lists(self, tmp_path: Path) -> None:
+        docx = build_formatted_english_docx(tmp_path / "formatted.docx")
+        pages = extract_pages(docx, "docx")
+        md = pages[0].markdown
+        assert "**bold emphasis**" in md
+        assert "- First bullet item" in md
+        assert "- Second bullet item" in md
+        assert "1. Numbered step one" in md
+        assert "2. Numbered step two" in md
+        assert "<b>" not in md
 
 
 # ── Dispatcher ─────────────────────────────────────────────────────────

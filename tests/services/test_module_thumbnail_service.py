@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from mc_foundation.objectstore import ObjectNotFoundError
 from platform_service.config import Settings
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.db.validators import ValidationError
@@ -13,14 +14,13 @@ from platform_service.services.module_thumbnail_service import (
     resolve_default_module_thumbnail,
     validate_module_thumbnail_storage_path,
 )
-from platform_service.services.object_storage import ObjectNotFoundError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _BUCKET = "medtronics-storage"
 
 
 def _settings() -> Settings:
-    return Settings(minio_bucket_name=_BUCKET)
+    return Settings(object_storage_bucket_name=_BUCKET)
 
 
 @pytest.mark.asyncio
@@ -63,10 +63,20 @@ async def test_validate_module_thumbnail_storage_path_none_clears() -> None:
 
 @pytest.mark.asyncio
 async def test_validate_module_thumbnail_rejects_bad_prefix() -> None:
-    path = f"{_BUCKET}/media/bad.png"
+    path = f"{_BUCKET}/other/bad.png"
     with pytest.raises(ValidationError) as exc_info:
         await validate_module_thumbnail_storage_path(path, settings=_settings())
     assert exc_info.value.code == "invalid_thumbnail_object_prefix"
+
+
+@pytest.mark.asyncio
+async def test_validate_module_thumbnail_accepts_media_prefix() -> None:
+    path = f"{_BUCKET}/media/thumb.png"
+    storage = MagicMock()
+    storage.stat_object = AsyncMock()
+    result = await validate_module_thumbnail_storage_path(path, settings=_settings(), storage=storage)
+    assert result == path
+    storage.stat_object.assert_awaited_once_with(path)
 
 
 @pytest.mark.asyncio

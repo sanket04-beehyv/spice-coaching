@@ -3,14 +3,21 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from mc_contracts.admin_assignments import (
     AssignmentCreateRequest,
     AssignmentResponse,
     UserResponse,
 )
+from mc_contracts.admin_module_demand import (
+    ModuleDemandAssignRequest,
+    ModuleDemandAssignResponse,
+)
+from mc_contracts.errors import ErrorCode
+from mc_foundation.problem import AppError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from platform_service.auth.spice_identity import resolve_tenant_id_for_admin
 from platform_service.deps import get_db
 from platform_service.services.module_assignment_service import (
     AssignmentNotFoundError,
@@ -18,6 +25,7 @@ from platform_service.services.module_assignment_service import (
     ModuleAssignmentService,
     ModuleNotFoundError,
 )
+from platform_service.services.module_demand_service import ModuleDemandService
 from platform_service.services.user_service import get_all_users
 
 router = APIRouter(prefix="/admin", tags=["admin-dashboard"])
@@ -48,9 +56,45 @@ async def create_assignments(
     try:
         return await service.create_assignments(body, assigned_by)
     except ModuleNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, str(exc), status=404) from exc
     except AssignmentValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise AppError(ErrorCode.ASSIGNMENT_VALIDATION_ERROR.value, str(exc), status=400) from exc
+
+
+@router.post(
+    "/module-demand/modules/{module_id}/assign",
+    response_model=ModuleDemandAssignResponse,
+    status_code=201,
+)
+async def assign_module_from_demand(
+    request: Request,
+    module_id: UUID,
+    body: ModuleDemandAssignRequest,
+    tenant_id: UUID | None = Query(
+        default=None,
+        description="Optional tenant UUID override (admin principals only when auth is enabled).",
+    ),
+    session: AsyncSession = Depends(get_db),
+) -> ModuleDemandAssignResponse:
+    """Bulk individual assign from the demand summary flow, with audit trail."""
+    tenant_id = resolve_tenant_id_for_admin(request, tenant_id)
+    spice_user = getattr(request.state, "spice_user", None)
+    assigned_by = spice_user.id if spice_user and spice_user.id is not None else 1
+    actor = str(assigned_by)
+
+    service = ModuleDemandService(session)
+    try:
+        return await service.assign_to_requestors(
+            module_id=module_id,
+            user_ids=body.user_ids,
+            assigned_by=assigned_by,
+            actor=actor,
+            tenant_id=tenant_id,
+        )
+    except ModuleNotFoundError as exc:
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, str(exc), status=404) from exc
+    except AssignmentValidationError as exc:
+        raise AppError(ErrorCode.ASSIGNMENT_VALIDATION_ERROR.value, str(exc), status=400) from exc
 
 
 @router.delete("/assignments/{assignment_id}")
@@ -63,7 +107,7 @@ async def revoke_assignment(
     try:
         return await service.revoke_assignment(assignment_id)
     except AssignmentNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise AppError(ErrorCode.ASSIGNMENT_NOT_FOUND.value, str(exc), status=404) from exc
 
 
 @router.get("/users", response_model=list[UserResponse])

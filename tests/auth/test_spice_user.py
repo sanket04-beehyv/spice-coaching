@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from mc_foundation.problem import AppError
 from platform_service.auth.spice_context import SpiceUserContext
 from platform_service.auth.spice_user import resolve_spice_actor
 from platform_service.config import Settings, get_settings
@@ -40,9 +40,9 @@ def test_resolve_spice_actor_raises_when_auth_enabled_and_no_user(
     monkeypatch.setenv("SPICE_AUTH_ENABLED", "true")
     get_settings.cache_clear()
     request = SimpleNamespace(state=SimpleNamespace(spice_user=None))
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(AppError) as exc:
         resolve_spice_actor(request)  # type: ignore[arg-type]
-    assert exc.value.status_code == 401
+    assert exc.value.status == 401
 
 
 def test_resolve_spice_actor_uses_username() -> None:

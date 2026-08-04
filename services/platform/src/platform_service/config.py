@@ -8,7 +8,7 @@ here so they are env-overridable and unit-testable.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal, Self
+from typing import Self
 from uuid import UUID
 
 from mc_contracts.localized import LocaleConfig
@@ -19,17 +19,12 @@ from pydantic_settings import SettingsConfigDict
 
 from platform_service.tenant_mapping import parse_spice_tenant_id_map
 
-_INSECURE_DB_PASSWORDS = frozenset({"dpkgyl", "postgres"})
-_PLACEHOLDER_VALUES = frozenset(
-    {
-        "replace-with-strong-db-password",
-        "replace-with-strong-internal-token",
-        "replace-with-minio-access-key",
-        "replace-with-minio-secret-key",
-    }
-)
-
-AiCloudProvider = Literal["google", "openai"]
+_DEV_AI_RUNTIME_TOKEN = "dev-internal-token"
+_DEV_OBJECT_STORAGE_ACCESS_KEY = "minioadmin"
+_INSECURE_DB_PASSWORDS = frozenset({"postgres"})
+_DEPLOYED_ENVS = frozenset({"production", "staging"})
+_OBJECT_STORAGE_BACKENDS = frozenset({"minio", "s3"})
+_OBJECT_STORAGE_PRESIGN_MODES = frozenset({"direct", "proxy"})
 
 
 class Settings(BaseAppSettings):
@@ -41,14 +36,14 @@ class Settings(BaseAppSettings):
 
     app_name: str = "platform-api"
     # Public URL prefix for all platform-api routes (e.g. /medtronics-api).
-    api_root_path: str = "/medtronics-api"
+    api_root_path: str = "/medtronics-api/"
 
     # ── Database ──────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/microcoaching"
     # Sourced from env in production. Default None so a missing env var
     # surfaces clearly at first DB connection rather than silently using
     # someone's stale local password.
-    database_password: SecretStr | None = None
+    database_password: str | None = None
     database_pool_size: int = 5
     database_max_overflow: int = 10
     database_pool_recycle: int = 3600
@@ -58,8 +53,8 @@ class Settings(BaseAppSettings):
     telemetry_buffer_drain_batch_size: int = 100
     telemetry_buffer_drain_interval_seconds: int = 60
 
-    # Comma-separated CORS origins.
-    cors_allow_origins: str = "http://localhost:5173,http://localhost:3000"
+    # Comma-separated CORS origins. Use ``*`` only in local development.
+    cors_allow_origins: str = "*"
 
     # ── ClickHouse ────────────────────────────────────────────
     clickhouse_host: str = "localhost"
@@ -69,22 +64,22 @@ class Settings(BaseAppSettings):
     clickhouse_password: str = ""
 
     # ── AI Runtime (internal call) ────────────────────────────
-    ai_runtime_base_url: str = "http://localhost:8001"
+    ai_runtime_base_url: str = "http://localhost:8000"
     ai_runtime_timeout_seconds: float = 600.0
     ai_runtime_transcribe_timeout_seconds: float = 600.0
     # Service token sent in X-Internal-Token header.
-    ai_runtime_token: SecretStr = SecretStr("")
+    ai_runtime_token: str = _DEV_AI_RUNTIME_TOKEN
 
     # ── SPICE auth-service (token validation) ───────────────────
-    spice_auth_enabled: bool = True
+    spice_auth_enabled: bool = False
     # Auth-service root as seen by platform (direct or reverse-proxy).
     # e.g. http://authservice:8089 or http://gateway/auth-service
-    spice_auth_base_url: str = "http://localhost:8089"
+    spice_auth_base_url: str = "https://spice-dev-backend.uhis.labsplatform.com/auth-service/"
     spice_auth_timeout_seconds: float = 5.0
     # Fallback ``client`` header when the caller omits it (SPICE mobile = mob).
     spice_auth_default_client: str = "mob"
     # Comma-separated path suffixes exempt from auth (under api_root_path).
-    spice_auth_exempt_paths: str = "health,ready"
+    spice_auth_exempt_paths: str = "ready"
     # Comma-separated relative path prefixes (under api_root_path) per authorization plane.
     spice_admin_path_prefixes: str = "admin,dashboard"
     spice_device_path_prefixes: str = "telemetry,sync,morning,coaching"
@@ -103,10 +98,13 @@ class Settings(BaseAppSettings):
     deployment_primary_locale: str = "bn"
     deployment_region_context: str = "rural Bangladesh"
 
-    # ── Embedding ─────────────────────────────────────────────
+    # ── Embedding / vector store ──────────────────────────────
     embedding_dimension: int = 768
     top_k: int = 5
     retrieval_require_validated: bool = False
+    # Durable vector backend. Call sites use mc_foundation.VectorStore;
+    # only ``pgvector`` is implemented today (vectors stay on module.embedding).
+    vector_store_backend: str = "pgvector"
 
     # ── Safety ────────────────────────────────────────────────
     spice_referral_destinations: str = (
@@ -139,6 +137,11 @@ class Settings(BaseAppSettings):
             # Covers cases like "///" or whitespace-only.
             return ""
         return f"/{clean}"
+
+    def api_path(self, path: str) -> str:
+        """Return *path* prefixed with :pyattr:`api_root_path_normalized`."""
+        normalized = path if path.startswith("/") else f"/{path}"
+        return f"{self.api_root_path_normalized}{normalized}"
 
     @property
     def spice_auth_authenticate_url(self) -> str:
@@ -222,14 +225,9 @@ class Settings(BaseAppSettings):
     # candidate's quality_flags_jsonb but DO NOT reject the candidate.
     stage_c_insufficient_source_min_tokens: int = 50
     stage_c_insufficient_source_min_headings: int = 1
-    # Default `module.domain` value when Stage 2's candidate doesn't carry
-    # a domain. Override via DEFAULT_MODULE_DOMAIN env var.
+    # Default `module.domain` when Stage C omits or emits an unknown domain.
+    # Override via DEFAULT_MODULE_DOMAIN env var.
     default_module_domain: str = "rmnch"
-    # Output-token budget for the identification LLM call. Bumped from 32K
-    # to 60K to give the LLM room to emit 25-30 candidates with full
-    # provenance for one chunk's worth of corpus content. Override via
-    # STAGE_C_MAX_OUTPUT_TOKENS env var.
-    stage_c_max_output_tokens: int = 12_000
     # ── Stage 2 — token-budget chunker ──────────────────────────
     # Target tokens per chunk. Empirical data from Run 6 on the SK manual:
     # 35K finished in ~4 min, 40K and 68K both timed out at the 15-min
@@ -264,7 +262,7 @@ class Settings(BaseAppSettings):
     quiz_min_questions: int = 3
     quiz_max_questions: int = 10
     card_min_count: int = 3
-    card_max_count: int = 7
+    card_max_count: int = 10
 
     # ── Post-publish — behavioural gap classification ───────────
     post_publish_gap_classification_enabled: bool = False
@@ -298,14 +296,30 @@ class Settings(BaseAppSettings):
     chat_faq_weekly_hour_utc: int = 2
     chat_faq_weekly_day_of_week: int = 0  # 0=Sunday (Celery crontab convention)
 
-    # ── Stage 2-draft — optional published-module merge ─────────
-    # When enabled, Stage D may merge newly drafted cards into a similar
-    # active (non-retired) published module.
-    stage_d_published_merge_enabled: bool = True
+    # ── Module demand summary (daily Celery beat) ────────────────
+    module_demand_summary_daily_hour_utc: int = 3
+
+    # ── Module creation suggestions (daily Celery beat) ──────────
+    module_creation_suggestions_daily_hour_utc: int = 4
+    module_creation_suggestions_max_evidence: int = 80
+    module_creation_suggestions_max_suggestions: int = 20
+    module_creation_suggestions_llm_timeout_seconds: float = 60.0
+
+    # ── Chat feedback summary (weekly Celery beat) ───────────────
+    chat_feedback_summary_weekly_hour_utc: int = 3
+    chat_feedback_summary_weekly_day_of_week: int = 0  # 0=Sunday (Celery crontab convention)
+    chat_feedback_summary_llm_timeout_seconds: float = 90.0
+    chat_feedback_summary_first_run_lookback_days: int = 90
+    chat_feedback_summary_max_positive_online_samples: int = 10
+    chat_feedback_summary_max_positive_offline_samples: int = 10
+    chat_feedback_summary_max_negative_online_samples: int = 30
+    chat_feedback_summary_max_negative_offline_samples: int = 30
+
+    # ── Stage 2-draft — published-module merge tuning ───────────
+    # Stage D always attempts merge into a similar active (non-retired)
+    # published module (fusion drafts opt out via StageDOrchestrator).
     # Pre-filter existing modules by title similarity before sending to the LLM.
     stage_d_published_merge_prefilter_limit: int = 25
-    # Output-token budget for the merge LLM call.
-    stage_d_published_merge_max_output_tokens: int = 4_000
     # Deterministic content gate: fraction of existing cards that must match
     # the new card set (by text similarity or shared source_block_id).
     stage_d_published_merge_min_existing_card_match_ratio: float = 0.0
@@ -338,17 +352,26 @@ class Settings(BaseAppSettings):
     # Max seconds the ingest batch worker waits for a thumbnail Celery task before Stage A.
     ingest_thumbnail_wait_seconds: int = 300
 
-    # ── Object storage ──────────────────────────────────────────
-    minio_endpoint: str = "localhost:9100"
-    minio_presigned_endpoint: str | None = None
-    minio_access_key: SecretStr = SecretStr("")
-    minio_secret_key: SecretStr = SecretStr("")
-    minio_bucket_name: str = "medtronics-storage"
-    # When false, missing buckets raise at first upload instead of make_bucket (production default).
-    minio_auto_create_bucket: bool = True
-    minio_secure: bool = False
-    minio_region: str = "us-east-1"
+    # ── Object storage (MinIO or AWS S3 via boto3) ───────────────
+    # ``minio`` (local compose default) or ``s3`` (AWS / S3-compatible cloud).
+    object_storage_backend: str = "minio"
+    # Required for backend=minio; optional override for backend=s3.
+    object_storage_endpoint: str | None = "localhost:9100"
+    object_storage_presigned_endpoint: str | None = None
+    # ``proxy`` signs against OBJECT_STORAGE_PRESIGNED_ENDPOINT (compose/nginx);
+    # ``direct`` signs against the data endpoint / AWS regional host.
+    object_storage_presign_mode: str = "proxy"
+    # Empty keys + backend=s3 → default AWS credential chain (env / instance role / IRSA).
+    object_storage_access_key: SecretStr = SecretStr(_DEV_OBJECT_STORAGE_ACCESS_KEY)
+    object_storage_secret_key: SecretStr = SecretStr(_DEV_OBJECT_STORAGE_ACCESS_KEY)
+    object_storage_bucket_name: str = "medtronics-storage"
+    # Honored only for backend=minio; forced off for backend=s3 in the adapter.
+    object_storage_auto_create_bucket: bool = True
+    object_storage_secure: bool = False
+    object_storage_region: str = "us-east-1"
     admin_file_allowed_prefixes: str = "uploads,source-documents,media,ingest,module-thumbnails"
+    # Single write prefix for POST /admin/files (must be in admin_file_allowed_prefixes).
+    admin_file_upload_prefix: str = "uploads"
     admin_file_max_upload_bytes: int = 100 * 1024 * 1024
     admin_file_presigned_max_seconds: int = 24 * 60 * 60
 
@@ -358,7 +381,6 @@ class Settings(BaseAppSettings):
     coaching_rag_context_max_chars: int = Field(28_000, ge=1_000, le=100_000)
 
     # ── Module editor attachments (module_json inline refs) ───
-    module_attachment_allowed_prefix: str = "media"
     module_attachment_max_per_module: int = 20
     module_attachment_max_per_card: int = 10
 
@@ -369,45 +391,6 @@ class Settings(BaseAppSettings):
             for prefix in self.admin_file_allowed_prefixes.split(",")
             if prefix.strip().strip("/")
         )
-
-    # ── AI Runtime model selection ──────────────────────────────
-    # Selects which model *names* platform sends in InferenceRequest.model_policy.
-    # Must match ai-runtime's AI_CLOUD_PROVIDER / ai_provider (same env var in compose).
-    ai_cloud_provider: AiCloudProvider = "openai"
-
-    google_inference_model: str = "gemini-2.5-flash"
-    google_identification_model: str = "gemini-2.5-pro"
-    google_embedding_model: str = "text-embedding-005"
-    google_vision_model: str = "gemini-2.5-flash"
-
-    openai_inference_model: str = "gpt-4o-mini"
-    openai_identification_model: str = "gpt-4o-mini"
-    openai_embedding_model: str = "text-embedding-3-small"
-    openai_vision_model: str = "gpt-4o-mini"
-
-    @property
-    def text_model(self) -> str:
-        return (
-            self.openai_inference_model if self.ai_cloud_provider == "openai" else self.google_inference_model
-        )
-
-    @property
-    def identification_model(self) -> str:
-        return (
-            self.openai_identification_model
-            if self.ai_cloud_provider == "openai"
-            else self.google_identification_model
-        )
-
-    @property
-    def embedding_model(self) -> str:
-        return (
-            self.openai_embedding_model if self.ai_cloud_provider == "openai" else self.google_embedding_model
-        )
-
-    @property
-    def vision_model(self) -> str:
-        return self.openai_vision_model if self.ai_cloud_provider == "openai" else self.google_vision_model
 
     @property
     def deployment_locale_config(self) -> LocaleConfig:
@@ -430,32 +413,77 @@ class Settings(BaseAppSettings):
         return value.strip()
 
     @model_validator(mode="after")
+    def _validate_admin_file_upload_prefix(self) -> Self:
+        clean = self.admin_file_upload_prefix.strip().strip("/")
+        if not clean:
+            clean = "uploads"
+        parts = clean.split("/")
+        if any(part in ("", ".", "..") or "\\" in part for part in parts):
+            raise ValueError("admin_file_upload_prefix contains an unsafe path segment")
+        normalised = "/".join(parts)
+        top = normalised.split("/", maxsplit=1)[0]
+        if top not in self.admin_file_allowed_prefix_set:
+            raise ValueError(
+                f"admin_file_upload_prefix {normalised!r} is not in "
+                f"admin_file_allowed_prefixes {sorted(self.admin_file_allowed_prefix_set)}"
+            )
+        self.admin_file_upload_prefix = normalised
+        return self
+
+    @model_validator(mode="after")
+    def _validate_object_storage(self) -> Self:
+        backend = self.object_storage_backend.strip().lower()
+        if backend not in _OBJECT_STORAGE_BACKENDS:
+            raise ValueError(
+                f"OBJECT_STORAGE_BACKEND must be one of {sorted(_OBJECT_STORAGE_BACKENDS)}; "
+                f"got {self.object_storage_backend!r}"
+            )
+        self.object_storage_backend = backend
+
+        mode = self.object_storage_presign_mode.strip().lower()
+        if mode not in _OBJECT_STORAGE_PRESIGN_MODES:
+            raise ValueError(
+                f"OBJECT_STORAGE_PRESIGN_MODE must be one of "
+                f"{sorted(_OBJECT_STORAGE_PRESIGN_MODES)}; got {self.object_storage_presign_mode!r}"
+            )
+        self.object_storage_presign_mode = mode
+
+        if backend == "minio":
+            if not (self.object_storage_endpoint or "").strip():
+                raise ValueError("OBJECT_STORAGE_ENDPOINT is required when OBJECT_STORAGE_BACKEND=minio")
+            access = self.object_storage_access_key.get_secret_value()
+            secret = self.object_storage_secret_key.get_secret_value()
+            if not access or not secret:
+                raise ValueError(
+                    "OBJECT_STORAGE_ACCESS_KEY and OBJECT_STORAGE_SECRET_KEY are required "
+                    "when OBJECT_STORAGE_BACKEND=minio"
+                )
+        if backend == "s3":
+            # Never auto-create buckets against AWS from the app.
+            self.object_storage_auto_create_bucket = False
+        return self
+
+    @model_validator(mode="after")
     def _validate_production_safety(self) -> Self:
-        if self.app_env != "production":
+        if self.app_env not in _DEPLOYED_ENVS:
             return self
         errors: list[str] = []
-        database_password = (
-            self.database_password.get_secret_value().strip() if self.database_password else ""
-        )
-        if not database_password or database_password in _INSECURE_DB_PASSWORDS:
+        if not self.database_password or self.database_password in _INSECURE_DB_PASSWORDS:
             errors.append("DATABASE_PASSWORD must be set to a non-default value in production")
-        if database_password in _PLACEHOLDER_VALUES:
-            errors.append("DATABASE_PASSWORD must not use a placeholder value in production")
-        token_value = self.ai_runtime_token.get_secret_value().strip()
-        if not token_value:
-            errors.append("AI_RUNTIME_TOKEN must be configured in production")
-        if len(token_value) < 32 or token_value in _PLACEHOLDER_VALUES:
-            errors.append("AI_RUNTIME_TOKEN must be at least 32 chars and not a placeholder")
-        minio_access_key = self.minio_access_key.get_secret_value().strip()
-        if not minio_access_key:
-            errors.append("MINIO_ACCESS_KEY must be configured in production")
-        if minio_access_key in _PLACEHOLDER_VALUES:
-            errors.append("MINIO_ACCESS_KEY must not use a placeholder value")
-        minio_secret_key = self.minio_secret_key.get_secret_value().strip()
-        if not minio_secret_key:
-            errors.append("MINIO_SECRET_KEY must be configured in production")
-        if minio_secret_key in _PLACEHOLDER_VALUES:
-            errors.append("MINIO_SECRET_KEY must not use a placeholder value")
+        if self.ai_runtime_token == _DEV_AI_RUNTIME_TOKEN:
+            errors.append("AI_RUNTIME_TOKEN must not use the dev default in production")
+        access = self.object_storage_access_key.get_secret_value()
+        secret = self.object_storage_secret_key.get_secret_value()
+        if access or secret:
+            if access == _DEV_OBJECT_STORAGE_ACCESS_KEY:
+                errors.append("OBJECT_STORAGE_ACCESS_KEY must not use the dev default in production")
+            if secret == _DEV_OBJECT_STORAGE_ACCESS_KEY:
+                errors.append("OBJECT_STORAGE_SECRET_KEY must not use the dev default in production")
+        elif self.object_storage_backend != "s3":
+            errors.append(
+                "OBJECT_STORAGE_ACCESS_KEY and OBJECT_STORAGE_SECRET_KEY are required "
+                "in production unless OBJECT_STORAGE_BACKEND=s3 (IAM / default credential chain)"
+            )
         if not self.spice_auth_enabled:
             errors.append("SPICE_AUTH_ENABLED must be true in production")
         if not self.spice_tenant_id_map.strip():

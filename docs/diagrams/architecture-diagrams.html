@@ -85,7 +85,6 @@ graph LR
     subgraph "External Services"
         SPICE[SPICE Auth Service]
         Vertex[Google Vertex AI / Gemini]
-        OpenAI[OpenAI API]
         MinIO[(MinIO / S3)]
     end
 
@@ -105,7 +104,6 @@ graph LR
     Platform --> CH
     Platform --> MinIO
     AIRuntime --> Vertex
-    AIRuntime -.->|optional| OpenAI
   </div>
 </div>
 
@@ -184,12 +182,10 @@ graph LR
         Router["Internal Routers\n/generate, /embed, /transcribe"]
         Exec["PromptExecutor\nprovider dispatch"]
         Google["GoogleProvider\nVertex / API key"]
-        OpenAI["OpenAIProvider"]
     end
 
     HTTP["Platform HTTP"] --> Router --> Exec
     Exec --> Google
-    Exec -.-> OpenAI
   </div>
 </div>
 
@@ -283,19 +279,20 @@ erDiagram
   <div class="diagram-title">Diagram 6: 6.3 Data Flow</div>
   <div class="mermaid">
 flowchart TD
-    A([Admin uploads PDFs]) --> B[POST /admin/ingest]
+    A([Admin uploads PDFs]) --> B[POST /admin/ingest/upload]
     B --> C[Store files in MinIO]
-    C --> D[Create source_document + ingestion_run rows]
-    D --> E[Enqueue Celery: run_ingest_batch]
-    E --> F[Stage A: Extract pages + content_blocks]
-    F --> G[Stage C: Identify module candidates]
-    G --> H[Stage D: Draft cards → module rows]
-    H --> I{Publish}
-    I --> J[module.lifecycle_status = published]
-    J --> K[Enqueue embedding + quiz + gap jobs]
-    K --> L[ai-runtime: embed + generate]
-    L --> M[Update module.embedding + quiz questions]
-    M --> N([Device syncs via GET /sync/modules])
+    C --> D[Create source_document rows status=uploaded]
+    D --> E[POST /admin/ingest JSON source_document_ids]
+    E --> F[Create ingestion_run rows + enqueue Celery]
+    F --> G[Stage A: Extract pages + content_blocks]
+    G --> H[Stage C: Identify module candidates]
+    H --> I[Stage D: Draft cards → module rows]
+    I --> J{Publish}
+    J --> K[module.lifecycle_status = published]
+    K --> L[Enqueue embedding + quiz + gap jobs]
+    L --> M[ai-runtime: embed + generate]
+    M --> N[Update module.embedding + quiz questions]
+    N --> O([Device syncs via GET /sync/modules])
   </div>
 </div>
 
@@ -313,9 +310,13 @@ sequenceDiagram
     participant Worker as celery-worker
     participant AI as ai-runtime
 
-    Admin->>API: POST /admin/ingest (multipart files)
+    Admin->>API: POST /admin/ingest/upload (multipart files)
     API->>MinIO: PUT source objects
-    API->>PG: INSERT source_document, ingestion_run
+    API->>PG: INSERT source_document status=uploaded
+    API-->>Admin: 201 uploaded + source_document_ids
+
+    Admin->>API: POST /admin/ingest (JSON source_document_ids + params)
+    API->>PG: UPDATE ingest metadata + INSERT ingestion_run
     API->>Redis: enqueue platform.run_ingest_batch
     API-->>Admin: 202 batch_queued + poll URLs
 

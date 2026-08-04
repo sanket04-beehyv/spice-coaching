@@ -9,6 +9,10 @@ from uuid import UUID
 
 from platform_service.config import get_settings
 from platform_service.db.repositories.source_repository import SourceRepository
+from platform_service.workers.extractors.extraction_markdown import (
+    normalize_extraction_markdown,
+    persist_markdown_content,
+)
 from platform_service.workers.extractors.page_renderer import (
     UnsupportedRenderError,
     load_cached_page_png,
@@ -53,7 +57,7 @@ async def run_vision_path(
                 exc,
             )
         score = score_page(text_md, primary_language=primary_language)
-        return ("vision_failed", text_md, None, score)
+        return ("vision_failed", normalize_extraction_markdown(text_md), None, score)
 
     image_path = persist_rendered_page_image(source_document_id, page_number, png_bytes)
     try:
@@ -70,7 +74,7 @@ async def run_vision_path(
             exc,
         )
         score = score_page(text_md, primary_language=primary_language)
-        return ("vision_failed", text_md, image_path, score)
+        return ("vision_failed", normalize_extraction_markdown(text_md), image_path, score)
 
     vision_score = score_page(result.markdown, primary_language=primary_language)
     return ("vision", result.markdown, image_path, vision_score)
@@ -168,7 +172,7 @@ async def _retry_vision_for_page(
             vision_score = score_page(result.markdown, primary_language=primary_language)
             await repo.update_page_extraction(
                 page_id,
-                markdown_content=result.markdown,
+                markdown_content=persist_markdown_content(result.markdown),
                 extraction_method="vision",
                 extraction_quality_score=vision_score.composite_score,
             )

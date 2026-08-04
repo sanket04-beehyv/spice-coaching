@@ -33,8 +33,35 @@ import pytest_asyncio
 from platform_service.config import get_settings
 from platform_service.db.base import SessionLocal, get_engine, reset_engine_caches
 from sqlalchemy import text as _text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
+
+# Serialize TRUNCATE across test connections — concurrent AccessExclusiveLock
+# acquisition deadlocks when SessionLocal / wipe fixtures overlap.
+_WIPE_ADVISORY_LOCK_KEY = 874_201_337
+
+
+async def truncate_tables(session: AsyncSession, tables_csv: str, *, attempts: int = 8) -> None:
+    """TRUNCATE ``tables_csv`` under an advisory lock with deadlock retries."""
+    await session.rollback()
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            await session.execute(_text(f"SELECT pg_advisory_lock({_WIPE_ADVISORY_LOCK_KEY})"))
+            try:
+                await session.execute(_text(f"TRUNCATE {tables_csv} RESTART IDENTITY CASCADE"))
+                await session.commit()
+            finally:
+                await session.execute(_text(f"SELECT pg_advisory_unlock({_WIPE_ADVISORY_LOCK_KEY})"))
+                await session.commit()
+            return
+        except DBAPIError as exc:
+            last_exc = exc
+            await session.rollback()
+            await _asyncio.sleep(0.05 * (attempt + 1))
+    assert last_exc is not None
+    raise last_exc
 
 
 def _has_test_db() -> bool:
@@ -49,10 +76,18 @@ requires_db = pytest.mark.skipif(
 
 def platform_path(path: str) -> str:
     """Full HTTP path including the platform API root prefix."""
-    root = get_settings().api_root_path_normalized
-    if not path.startswith("/"):
-        path = f"/{path}"
-    return f"{root}{path}"
+    return get_settings().api_path(path)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _disable_spice_auth_for_tests() -> Iterator[None]:
+    """API tests assume open access unless they explicitly exercise auth."""
+    os.environ["SPICE_AUTH_ENABLED"] = "false"
+    try:
+        get_settings.cache_clear()
+    except Exception:
+        pass
+    yield
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -67,30 +102,14 @@ def _align_database_url_with_test_url() -> Iterator[None]:
     if test_url:
         # Take precedence over any inherited DATABASE_URL.
         os.environ["DATABASE_URL"] = test_url
-        # Default test DB password matches the docker container we
-        # document above. Honour an explicit override if set.
-        os.environ.setdefault("DATABASE_PASSWORD", "postgres")
+        # Do not set DATABASE_PASSWORD here — CI unsets it and embeds credentials
+        # in DATABASE_URL_TEST; forcing a default reintroduces secret-env races.
         # Clear any previously-cached settings.
         try:
             get_settings.cache_clear()
         except Exception:
             pass
     yield
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _disable_spice_auth_for_tests(_align_database_url_with_test_url: None) -> Iterator[None]:
-    """Most API/worker tests build minimal apps without SPICE JWT headers."""
-    os.environ["SPICE_AUTH_ENABLED"] = "false"
-    try:
-        get_settings.cache_clear()
-    except Exception:
-        pass
-    yield
-    try:
-        get_settings.cache_clear()
-    except Exception:
-        pass
 
 
 @pytest.fixture(scope="session")
@@ -178,3 +197,29 @@ async def db_session(test_db_url: str) -> AsyncIterator[AsyncSession]:
         engine = get_engine()
         await engine.dispose()
         reset_engine_caches()
+
+
+@pytest.fixture(autouse=True)
+def mock_prompt_templates(monkeypatch: pytest.MonkeyPatch):
+    """Stub DB-backed prompt rendering for unit tests without seeded templates."""
+    from uuid import uuid4
+
+    from platform_service.services.prompt_template_service import PromptTemplateService, RenderedPrompt
+
+    async def _render(
+        self: PromptTemplateService,
+        session: AsyncSession | None,
+        *,
+        template_id: str,
+        variant_key: str | None,
+        variables: dict[str, str],
+    ) -> RenderedPrompt:
+        return RenderedPrompt(
+            template_id=template_id,
+            template_version=1,
+            prompt_template_id=uuid4(),
+            resolved_system_prompt=f"system:{template_id}",
+            resolved_human_message=f"human:{template_id}",
+        )
+
+    monkeypatch.setattr(PromptTemplateService, "render", _render)

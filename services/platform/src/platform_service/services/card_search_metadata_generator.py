@@ -1,4 +1,4 @@
-"""LLM generator: produce bilingual search metadata for module cards."""
+"""LLM generator: produce locale-keyed search metadata for module cards."""
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceRequest,
-    ModelPolicy,
-    PromptSpec,
     TraceContext,
 )
 from mc_foundation.locale import LOCALIZED_CARD_TEXT_FIELDS
@@ -25,6 +23,7 @@ from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 from platform_service.localized import (
     deployment_locales,
     localized_list_field_has_content,
+    localized_synonyms_has_content,
     migrate_legacy_card,
     migrate_legacy_suffix_list_field,
 )
@@ -32,13 +31,12 @@ from platform_service.services.card_body_text import card_body_plain_text
 from platform_service.services.llm_response_resolver import resolve_parsed_dict
 from platform_service.services.module_search_metadata_generator import (
     _clean_str_list,
-    _clean_synonyms,
+    _localized_synonyms,
 )
-from platform_service.services.prompts.card_search_metadata_prompt import (
-    CARD_SEARCH_METADATA_TEMPLATE_ID,
-    CARD_SEARCH_METADATA_TEMPLATE_VERSION,
-    render_human_message_for_module,
-    render_system_prompt,
+from platform_service.services.prompt_registry import CARD_SEARCH_METADATA_TEMPLATE_ID
+from platform_service.services.prompt_template_service import PromptTemplateService, prompt_spec_from_rendered
+from platform_service.services.prompt_variables.card_search_metadata_variables import (
+    build_card_search_metadata_variables,
 )
 
 logger = logging.getLogger(__name__)
@@ -176,7 +174,7 @@ def normalize_card_search_metadata(
             max_items=max_retrieval_hints,
         ),
         "keywords": _localized_str_list(payload, "keywords", primary=primary, max_items=max_keywords),
-        "synonyms_en": _clean_synonyms(payload.get("synonyms_en"), max_items=max_synonyms),
+        "synonyms": _localized_synonyms(payload, "synonyms", primary=primary, max_items=max_synonyms),
         "questions": _localized_str_list(payload, "questions", primary=primary, max_items=max_questions),
     }
 
@@ -186,7 +184,7 @@ def card_metadata_has_searchable_content(metadata: dict[str, Any]) -> bool:
     for key in ("retrieval_hints", "keywords", "questions"):
         if localized_list_field_has_content(metadata, key):
             return True
-    return bool(metadata.get("synonyms_en"))
+    return localized_synonyms_has_content(metadata)
 
 
 def parse_batch_card_search_metadata(
@@ -246,11 +244,9 @@ class CardSearchMetadataGenerator:
         self,
         *,
         client: AIRuntimeClient | None = None,
-        model: str | None = None,
     ) -> None:
         settings = get_settings()
         self._client = client or get_ai_client()
-        self._model = model or settings.text_model
         self._max_retrieval_hints = settings.card_search_metadata_max_retrieval_hints
         self._max_keywords = settings.card_search_metadata_max_keywords
         self._max_synonyms = settings.card_search_metadata_max_synonyms
@@ -260,16 +256,18 @@ class CardSearchMetadataGenerator:
         self,
         module: Module,
         card_indices: list[int],
+        *,
+        cards: list[dict[str, Any]] | None = None,
     ) -> CardSearchMetadataBatchResult:
         if not card_indices:
             return CardSearchMetadataBatchResult(metadata_by_index={}, failed_indices=[])
 
-        cards = (module.module_json or {}).get("cards", [])
+        card_list = cards if cards is not None else []
         card_payloads: list[dict[str, Any]] = []
         for card_index in card_indices:
-            if card_index < 0 or card_index >= len(cards):
+            if card_index < 0 or card_index >= len(card_list):
                 continue
-            card = cards[card_index]
+            card = card_list[card_index]
             if not isinstance(card, dict):
                 continue
             card_payloads.append(card_only_payload_for_search_metadata(card, card_index=card_index))
@@ -283,26 +281,26 @@ class CardSearchMetadataGenerator:
         settings = get_settings()
         requested_indices = {payload["card_index"] for payload in card_payloads}
 
+        rendered = await PromptTemplateService().render(
+            None,
+            template_id=CARD_SEARCH_METADATA_TEMPLATE_ID,
+            variant_key=None,
+            variables=build_card_search_metadata_variables(
+                max_retrieval_hints=self._max_retrieval_hints,
+                max_keywords=self._max_keywords,
+                max_synonyms=self._max_synonyms,
+                max_questions=self._max_questions,
+                module_context=module_context_for_search_metadata(module),
+                card_payloads=card_payloads,
+                deployment_primary_locale=settings.deployment_primary_locale,
+                deployment_region_context=settings.deployment_region_context,
+            ),
+        )
+
         request = InferenceRequest(
             request_id=str(uuid.uuid4()),
             generation_type=GenerationType.CARD_SEARCH_METADATA,
-            model_policy=ModelPolicy(model=self._model),
-            prompt=PromptSpec(
-                template_id=CARD_SEARCH_METADATA_TEMPLATE_ID,
-                template_version=CARD_SEARCH_METADATA_TEMPLATE_VERSION,
-                resolved_system_prompt=render_system_prompt(
-                    max_retrieval_hints=self._max_retrieval_hints,
-                    max_keywords=self._max_keywords,
-                    max_synonyms=self._max_synonyms,
-                    max_questions=self._max_questions,
-                    deployment_primary_locale=settings.deployment_primary_locale,
-                    deployment_region_context=settings.deployment_region_context,
-                ),
-                resolved_human_message=render_human_message_for_module(
-                    module_context=module_context_for_search_metadata(module),
-                    card_payloads=card_payloads,
-                ),
-            ),
+            prompt=prompt_spec_from_rendered(rendered),
             constraints=GenerationConstraints(language="en", output_format="json"),
             trace_context=TraceContext(),
         )
@@ -364,7 +362,12 @@ class CardSearchMetadataGenerator:
         *,
         card_index: int,
     ) -> CardSearchMetadataResult:
-        batch_result = await self.generate_for_module(module, [card_index])
+        padded_cards: list[dict[str, Any]] = [{} for _ in range(card_index)] + [card]
+        batch_result = await self.generate_for_module(
+            module,
+            [card_index],
+            cards=padded_cards,
+        )
         metadata = batch_result.metadata_by_index.get(card_index)
         if metadata is not None:
             return CardSearchMetadataResult(metadata=metadata)

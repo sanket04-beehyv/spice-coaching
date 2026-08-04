@@ -17,8 +17,6 @@ from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceRequest,
-    ModelPolicy,
-    PromptSpec,
     TraceContext,
 )
 
@@ -27,12 +25,9 @@ from platform_service.deps import get_ai_client
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 from platform_service.services.card_normalisation import normalise_draft_card
 from platform_service.services.llm_response_resolver import resolve_parsed_dict
-from platform_service.services.prompts.card_drafter_prompt import (
-    CARD_DRAFTER_TEMPLATE_ID,
-    CARD_DRAFTER_TEMPLATE_VERSION,
-    render_human_message,
-    render_system_prompt,
-)
+from platform_service.services.prompt_registry import CARD_DRAFTER_TEMPLATE_ID
+from platform_service.services.prompt_template_service import PromptTemplateService, prompt_spec_from_rendered
+from platform_service.services.prompt_variables.card_drafter_variables import build_card_drafter_variables
 
 logger = logging.getLogger(__name__)
 
@@ -63,12 +58,8 @@ class CardDrafter:
     def __init__(
         self,
         client: AIRuntimeClient | None = None,
-        *,
-        model: str | None = None,
     ) -> None:
-        settings = get_settings()
         self._client = client or get_ai_client()
-        self._model = model or settings.text_model
 
     async def draft(
         self,
@@ -77,6 +68,8 @@ class CardDrafter:
         cited_blocks: list[dict[str, Any]],
         valid_block_ids: set[uuid.UUID],
         trace_context: TraceContext | None = None,
+        card_min_count: int | None = None,
+        card_max_count: int | None = None,
     ) -> CardDrafterResult:
         """Run the card drafter for one candidate.
 
@@ -86,26 +79,28 @@ class CardDrafter:
         """
         settings = get_settings()
         module_type = candidate.get("proposed_module_type", "refresher")
+        resolved_card_min = card_min_count if card_min_count is not None else settings.card_min_count
+        resolved_card_max = card_max_count if card_max_count is not None else settings.card_max_count
 
-        system_prompt = render_system_prompt(
-            module_type=module_type,
-            card_min_count=settings.card_min_count,
-            card_max_count=settings.card_max_count,
-            deployment_primary_locale=settings.deployment_primary_locale,
-            deployment_region_context=settings.deployment_region_context,
+        rendered = await PromptTemplateService().render(
+            None,
+            template_id=CARD_DRAFTER_TEMPLATE_ID,
+            variant_key=None,
+            variables=build_card_drafter_variables(
+                module_type=module_type,
+                card_min_count=resolved_card_min,
+                card_max_count=resolved_card_max,
+                candidate=candidate,
+                cited_blocks=cited_blocks,
+                deployment_primary_locale=settings.deployment_primary_locale,
+                deployment_region_context=settings.deployment_region_context,
+            ),
         )
-        human_message = render_human_message(candidate=candidate, cited_blocks=cited_blocks)
 
         request = InferenceRequest(
             request_id=str(uuid.uuid4()),
             generation_type=GenerationType.CARD_DRAFTING,
-            model_policy=ModelPolicy(model=self._model),
-            prompt=PromptSpec(
-                template_id=CARD_DRAFTER_TEMPLATE_ID,
-                template_version=CARD_DRAFTER_TEMPLATE_VERSION,
-                resolved_system_prompt=system_prompt,
-                resolved_human_message=human_message,
-            ),
+            prompt=prompt_spec_from_rendered(rendered),
             constraints=GenerationConstraints(
                 language=settings.deployment_primary_locale,
                 output_format="json",
@@ -152,9 +147,9 @@ class CardDrafter:
 
         # Cap at max — preserves the count guidance for the LLM but lets
         # us truncate long outputs gracefully.
-        if len(cards) > settings.card_max_count:
-            logger.info("Card drafter returned %d cards; capping to %d", len(cards), settings.card_max_count)
-            cards = cards[: settings.card_max_count]
+        if len(cards) > resolved_card_max:
+            logger.info("Card drafter returned %d cards; capping to %d", len(cards), resolved_card_max)
+            cards = cards[:resolved_card_max]
 
         # Per the architecture reset, the drafter no longer rejects on
         # min-count: a 1-card module is still a renderable module, and

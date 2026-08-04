@@ -12,20 +12,17 @@ from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.services.module_search_metadata_generator import SearchMetadataResult
 from platform_service.workers.search_metadata_worker import generate_search_metadata_for_module
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe(db_session: AsyncSession) -> AsyncIterator[None]:
+    await truncate_tables(db_session, "module, module_family")
     yield
-    await db_session.rollback()
-    await db_session.execute(text("TRUNCATE module, module_family RESTART IDENTITY CASCADE"))
-    await db_session.commit()
 
 
 async def _seed_module(session: AsyncSession) -> Module:
@@ -52,11 +49,11 @@ class TestSearchMetadataWorker:
         module = await _seed_module(db_session)
         metadata = {
             "schema_version": 1,
-            "keywords": {"bn": ["cough"], "en": []},
-            "search_phrases": {"bn": ["child cough"], "en": []},
-            "synonyms": {"en": {}},
-            "topic_tags": ["respiratory"],
-            "clinical_conditions": [],
+            "keywords": {"bn": ["cough"]},
+            "search_phrases": {"bn": ["child cough"]},
+            "synonyms": {"bn": {}},
+            "topic_tags": {"bn": ["respiratory"]},
+            "clinical_conditions": {"bn": []},
             "audience": "chw_field_worker",
             "rationale": "ok",
         }
@@ -121,11 +118,11 @@ class TestSearchMetadataWorker:
         module = await _seed_module(db_session)
         metadata = {
             "schema_version": 1,
-            "keywords": {"bn": ["cough"], "en": []},
-            "search_phrases": {"bn": ["child cough"], "en": []},
-            "synonyms": {"en": {}},
-            "topic_tags": ["respiratory"],
-            "clinical_conditions": [],
+            "keywords": {"bn": ["cough"]},
+            "search_phrases": {"bn": ["child cough"]},
+            "synonyms": {"bn": {}},
+            "topic_tags": {"bn": ["respiratory"]},
+            "clinical_conditions": {"bn": []},
             "audience": "chw_field_worker",
             "rationale": "ok",
         }

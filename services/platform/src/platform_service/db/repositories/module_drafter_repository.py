@@ -23,6 +23,7 @@ from platform_service.config import get_settings
 from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_family import ModuleFamily
+from platform_service.db.module_availability import LIFECYCLE_REVIEW_PENDING
 from platform_service.db.repositories.module_gap_repository import ModuleGapRepository
 from platform_service.localized import (
     candidate_description_localized,
@@ -31,6 +32,7 @@ from platform_service.localized import (
     to_localized_string,
 )
 from platform_service.services.card_normalisation import project_runtime_card
+from platform_service.services.module_card_service import ModuleCardService
 from platform_service.services.module_thumbnail_service import resolve_default_module_thumbnail
 
 
@@ -43,6 +45,30 @@ def _slugify(text: str) -> str:
     cleaned = re.sub(r"\s+", "-", (text or "").strip().lower())
     cleaned = re.sub(r"[^\w\-]+", "", cleaned, flags=re.UNICODE)
     return cleaned[:80] or "module"
+
+
+def _cards_for_persistence(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Project runtime fields while preserving ``card_family_id`` when present."""
+    out: list[dict[str, Any]] = []
+    for card in cards:
+        projected = project_runtime_card(card)
+        family_id = card.get("card_family_id")
+        if family_id:
+            projected["card_family_id"] = family_id
+        out.append(projected)
+    return out
+
+
+def _cards_without_search_metadata(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop per-card search_metadata so merged drafts always get fresh enrichment."""
+    cleaned: list[dict[str, Any]] = []
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        stripped = dict(card)
+        stripped.pop("search_metadata", None)
+        cleaned.append(stripped)
+    return cleaned
 
 
 def _first_card_primary_title(cards_payload: list[dict[str, Any]]) -> str:
@@ -107,11 +133,8 @@ class ModuleDrafterRepository:
         validator soft-warning summary. Pipeline never gates on these.
         """
         version = await self._next_version(family.id)
-        # Strip per-card transient fields the LLM included for downstream
-        # use (e.g., `card_family_id`, `field_flags`) but normalise their
-        # keys so the runtime payload is stable.
-        cards_payload = [project_runtime_card(c) for c in cards]
-        module_json: dict[str, Any] = {"cards": cards_payload}
+        cards_payload = _cards_for_persistence(cards)
+        module_json: dict[str, Any] = {}
 
         # Title: first card primary title, else candidate proposed_title.
         proposed_title = candidate.get("proposed_title", "") or ""
@@ -131,7 +154,7 @@ class ModuleDrafterRepository:
             module_family_id=family.id,
             version=version,
             title_localized=title_localized,
-            description_localized=candidate.get("description_localized"),
+            description_localized=candidate_description_localized(candidate),
             domain=candidate.get("domain") or get_settings().default_module_domain,
             sub_domain=candidate.get("sub_domain"),
             module_type=candidate.get("proposed_module_type", "refresher"),
@@ -149,6 +172,8 @@ class ModuleDrafterRepository:
         self._session.add(module)
         await self._session.flush()
 
+        await ModuleCardService(self._session).append_cards(module.id, cards_payload)
+
         gap_description = primary_text(title_localized) or proposed_title or ""
         await self._create_and_link_primary_gap(module, description=gap_description)
 
@@ -157,82 +182,84 @@ class ModuleDrafterRepository:
 
         return module
 
-    async def create_merged_draft_module(
+    async def create_review_pending_in_matched_family(
         self,
         *,
-        matched_published: Module,
+        matched: Module,
         candidate: dict[str, Any],
         cards: list[dict[str, Any]],
         source_document_ids: list[UUID],
         quality_flags: dict[str, Any] | None = None,
         match_rationale: str | None = None,
+        is_merge_secondary: bool = False,
     ) -> Module:
-        """New draft version in the matched published module's family.
+        """New ``review_pending`` version in the matched module's family.
 
-        Reuses `primary_gap_id` from the published row. Sets
-        `supersedes_module_id` to the published module being retired.
+        Does not retire the matched tip, set ``supersedes_module_id``, or
+        rewrite ``family.current_published_module_id`` — those happen on
+        admin override-merge. Secondary rows carry merge lineage flags.
         """
-        version = await self._next_version(matched_published.module_family_id)
-        cards_payload = [project_runtime_card(c) for c in cards]
-        module_json: dict[str, Any] = {"cards": cards_payload}
+        version = await self._next_version(matched.module_family_id)
+        # Always strip card search_metadata so post-publish enrichment is fresh
+        # for both primary (new-doc) and secondary (LLM-merged) paths.
+        cards_payload = _cards_for_persistence(_cards_without_search_metadata(cards))
+        module_json: dict[str, Any] = {}
 
         proposed_title = candidate.get("proposed_title", "") or ""
         first_card_title_primary = _first_card_primary_title(cards_payload)
         primary_title = (
-            first_card_title_primary
-            or primary_text(matched_published.title_localized)
-            or proposed_title.strip()
+            first_card_title_primary or primary_text(matched.title_localized) or proposed_title.strip()
         )
         title_localized = to_localized_string(primary_title or None)
         if not primary_text(title_localized):
             raise ValueError(
-                f"create_merged_draft_module: no usable title (proposed_title={proposed_title!r})"
+                f"create_review_pending_in_matched_family: no usable title "
+                f"(proposed_title={proposed_title!r})"
             )
 
-        _module_type = candidate.get("proposed_module_type", matched_published.module_type)
+        _module_type = candidate.get("proposed_module_type", matched.module_type)
 
-        merged_quality = _merge_quality_flags(
-            quality_flags,
-            superseded_module_id=matched_published.id,
-            match_rationale=match_rationale,
-        )
+        if is_merge_secondary:
+            persisted_quality = _merge_quality_flags(
+                quality_flags,
+                matched_module_id=matched.id,
+                match_rationale=match_rationale,
+            )
+        else:
+            persisted_quality = quality_flags
 
-        thumbnail_storage_path = matched_published.thumbnail_storage_path
+        thumbnail_storage_path = matched.thumbnail_storage_path
         if not thumbnail_storage_path:
             thumbnail_storage_path = await resolve_default_module_thumbnail(
                 self._session, source_document_ids
             )
 
         module = Module(
-            module_family_id=matched_published.module_family_id,
+            module_family_id=matched.module_family_id,
             version=version,
             title_localized=title_localized,
-            description_localized=candidate_description_localized(candidate)
-            or matched_published.description_localized,
-            domain=candidate.get("domain") or matched_published.domain,
-            sub_domain=candidate.get("sub_domain") or matched_published.sub_domain,
+            description_localized=candidate_description_localized(candidate) or matched.description_localized,
+            domain=candidate.get("domain") or matched.domain,
+            sub_domain=candidate.get("sub_domain") or matched.sub_domain,
             module_type=_module_type,
-            tenant_id=matched_published.tenant_id,
-            primary_gap_id=matched_published.primary_gap_id,
-            estimated_minutes=int(candidate.get("estimated_minutes", matched_published.estimated_minutes)),
-            difficulty_level=candidate.get("difficulty_level", matched_published.difficulty_level),
+            tenant_id=matched.tenant_id,
+            primary_gap_id=matched.primary_gap_id,
+            estimated_minutes=int(candidate.get("estimated_minutes", matched.estimated_minutes)),
+            difficulty_level=candidate.get("difficulty_level", matched.difficulty_level),
             source_document_ids=list(source_document_ids),
             thumbnail_storage_path=thumbnail_storage_path,
             module_json=module_json,
-            quality_flags_jsonb=merged_quality,
-            lifecycle_status="draft",
+            quality_flags_jsonb=persisted_quality,
+            lifecycle_status=LIFECYCLE_REVIEW_PENDING,
             clinically_reviewed=False,
             published_at=None,
-            supersedes_module_id=matched_published.id,
+            merge_source_module_id=matched.id,
         )
         self._session.add(module)
         await self._session.flush()
 
-        await ModuleGapRepository(self._session).copy_links(matched_published.id, module.id)
-
-        family = await self._session.get(ModuleFamily, matched_published.module_family_id)
-        if family is not None:
-            family.current_published_module_id = module.id
+        await ModuleCardService(self._session).append_cards(module.id, cards_payload)
+        await ModuleGapRepository(self._session).copy_links(matched.id, module.id)
         await self._session.flush()
         return module
 
@@ -268,7 +295,7 @@ class ModuleDrafterRepository:
 def _merge_quality_flags(
     existing: dict[str, Any] | None,
     *,
-    superseded_module_id: UUID,
+    matched_module_id: UUID,
     match_rationale: str | None,
 ) -> dict[str, Any]:
     out: dict[str, Any] = dict(existing) if existing else {}
@@ -277,7 +304,7 @@ def _merge_quality_flags(
         flags.append("published_module_merged")
     out["flags"] = flags
     out["merge_lineage"] = {
-        "superseded_module_id": str(superseded_module_id),
+        "matched_module_id": str(matched_module_id),
         "match_rationale": match_rationale or "",
     }
     return out

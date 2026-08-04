@@ -1,4 +1,4 @@
-"""Build presigned source-document payloads for published modules."""
+"""Build presigned payloads for sync-published-visible source documents."""
 
 from __future__ import annotations
 
@@ -8,14 +8,13 @@ from uuid import UUID
 from mc_contracts.sync import (
     PublishedSourceDocumentPayload,
     PublishedSourceDocumentsBundle,
+    SourceDocumentThumbnailPresignedUrlPayload,
 )
+from mc_foundation.objectstore import ObjectStore
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.config import Settings
-from platform_service.db.repositories.module_repository import ModuleRepository
 from platform_service.db.repositories.source_repository import SourceRepository
-from platform_service.services.card_provenance import resolve_card_provenance
-from platform_service.services.object_storage import ObjectStorageClient
 from platform_service.services.sync.presign_service import SyncPresignService
 
 
@@ -27,47 +26,25 @@ class PublishedSourceDocumentsBuilder:
     async def build(
         self,
         *,
-        storage: ObjectStorageClient,
+        storage: ObjectStore,
         domain: str | None = None,
         limit: int = 200,
         offset: int = 0,
         settings: Settings | None = None,
     ) -> PublishedSourceDocumentsBundle:
-        """Return presigned URLs for source documents linked to published modules."""
-        modules = await ModuleRepository(self._session).list_modules(
-            status="published",
-            latest_version_only=True,
+        """Return presigned URLs for documents with ``sync_published_visible=true``."""
+        docs = await SourceRepository(self._session).list_sync_published_visible_documents(
             domain=domain,
             limit=limit,
             offset=offset,
         )
-
-        doc_ids: list[UUID] = []
-        seen_doc_ids: set[UUID] = set()
-
-        for module in modules:
-            cards = list((module.module_json or {}).get("cards", []))
-            if cards:
-                context = await resolve_card_provenance(self._session, cards, storage=None)
-                for row in context.provenance_by_block.values():
-                    if row.source_document_id not in seen_doc_ids:
-                        seen_doc_ids.add(row.source_document_id)
-                        doc_ids.append(row.source_document_id)
-
-            for doc_id in module.source_document_ids or []:
-                if doc_id not in seen_doc_ids:
-                    seen_doc_ids.add(doc_id)
-                    doc_ids.append(doc_id)
-
-        visible_doc_ids: list[UUID] = []
-        if doc_ids:
-            docs = await SourceRepository(self._session).list_source_documents_by_ids(doc_ids)
-            visible_ids = {doc.id for doc in docs if doc.sync_published_visible}
-            visible_doc_ids = [doc_id for doc_id in doc_ids if doc_id in visible_ids]
+        visible_doc_ids = [doc.id for doc in docs]
+        doc_by_id = {doc.id: doc for doc in docs}
 
         presigned_by_doc: dict[UUID, str | None] = {}
         presigned_expires_by_doc: dict[UUID, int | None] = {}
         missing_ids: list[UUID] = []
+        thumb_by_id: dict[UUID, SourceDocumentThumbnailPresignedUrlPayload] = {}
 
         if visible_doc_ids:
             doc_presign = await self._presign.get_source_document_presigned_urls(
@@ -80,17 +57,12 @@ class PublishedSourceDocumentsBuilder:
                 presigned_expires_by_doc[entry.source_document_id] = entry.expires_seconds
             missing_ids = list(doc_presign.missing_ids)
 
-        thumb_by_id = {}
-        if visible_doc_ids:
             thumb_presign = await self._presign.get_source_document_thumbnail_presigned_urls(
                 source_document_ids=visible_doc_ids,
                 storage=storage,
                 settings=settings,
             )
             thumb_by_id = {entry.source_document_id: entry for entry in thumb_presign.urls}
-
-        docs = await SourceRepository(self._session).list_source_documents_by_ids(visible_doc_ids)
-        doc_by_id = {doc.id: doc for doc in docs}
 
         source_documents = [
             PublishedSourceDocumentPayload(

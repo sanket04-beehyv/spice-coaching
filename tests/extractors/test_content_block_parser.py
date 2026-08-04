@@ -36,6 +36,12 @@ class TestParagraphs:
         assert "Para one." in para_texts
         assert "Para two." in para_texts
 
+    def test_inline_markdown_stripped_from_paragraph(self) -> None:
+        blocks = parse_page_blocks("Measure **BP** daily.")
+        paragraph = next(b for b in blocks if b.block_type == "paragraph")
+        assert paragraph.content_text == "Measure BP daily."
+        assert "**" not in paragraph.content_text
+
 
 class TestLists:
     def test_unordered_list(self) -> None:
@@ -58,7 +64,8 @@ class TestTables:
         blocks = parse_page_blocks(md)
         tables = [b for b in blocks if b.block_type == "table"]
         assert len(tables) == 1
-        assert "| col1" in tables[0].content_text
+        assert tables[0].content_text == "col1  col2\na  b"
+        assert "|" not in tables[0].content_text
 
 
 class TestFigures:
@@ -67,6 +74,7 @@ class TestFigures:
         blocks = parse_page_blocks(md)
         figures = [b for b in blocks if b.block_type == "figure"]
         assert len(figures) == 1
+        assert figures[0].content_text == "alt text"
 
 
 class TestCallouts:

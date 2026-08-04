@@ -10,6 +10,7 @@ import base64
 import logging
 
 import httpx
+from mc_contracts.errors import ErrorCode
 from mc_contracts.internal_ai import (
     EmbedRequest,
     EmbedResponse,
@@ -18,10 +19,28 @@ from mc_contracts.internal_ai import (
     TranscribeRequest,
     TranscribeResponse,
 )
+from mc_foundation.problem import AppError, parse_problem_body
 
 from platform_service.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _raise_ai_runtime_http_error(exc: httpx.HTTPStatusError) -> None:
+    """Re-raise upstream Problem Details as AppError without remapping codes."""
+    status = exc.response.status_code
+    try:
+        payload = exc.response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict) and (payload.get("code") or payload.get("type")):
+        raise parse_problem_body(payload, fallback_status=status) from exc
+    detail = (exc.response.text or "")[:500] or f"ai-runtime returned HTTP {status}"
+    raise AppError(
+        ErrorCode.AI_RUNTIME_ERROR.value,
+        detail,
+        status=status if status >= 400 else 502,
+    ) from exc
 
 
 class AIRuntimeClient:
@@ -40,7 +59,7 @@ class AIRuntimeClient:
     ) -> None:
         settings = get_settings()
         self._base_url = (base_url or settings.ai_runtime_base_url).rstrip("/")
-        self._token = token or settings.ai_runtime_token.get_secret_value()
+        self._token = token or settings.ai_runtime_token
         self._timeout = timeout or settings.ai_runtime_timeout_seconds
         self._transcribe_timeout = transcribe_timeout or settings.ai_runtime_transcribe_timeout_seconds
         self._client = httpx.AsyncClient(timeout=self._timeout)
@@ -68,7 +87,7 @@ class AIRuntimeClient:
                 request.request_id,
                 exc.response.text[:200],
             )
-            raise
+            _raise_ai_runtime_http_error(exc)
         except httpx.RequestError as exc:
             logger.error(
                 "ai-runtime unreachable generation_type=%s request_id=%s: %s",
@@ -76,7 +95,12 @@ class AIRuntimeClient:
                 request.request_id,
                 exc,
             )
-            raise
+            raise AppError(
+                ErrorCode.AI_RUNTIME_UNREACHABLE.value,
+                f"ai-runtime unreachable: {exc}",
+                status=502,
+            ) from exc
+        raise AssertionError("unreachable")
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """Request text embeddings from ai-runtime.
@@ -87,9 +111,23 @@ class AIRuntimeClient:
         headers = {"X-Internal-Token": self._token, "Content-Type": "application/json"}
 
         payload = EmbedRequest(texts=texts)
-        resp = await self._client.post(url, json=payload.model_dump(), headers=headers)
-        resp.raise_for_status()
-        return EmbedResponse.model_validate(resp.json()).embeddings
+        try:
+            resp = await self._client.post(url, json=payload.model_dump(), headers=headers)
+            resp.raise_for_status()
+            return EmbedResponse.model_validate(resp.json()).embeddings
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "ai-runtime embed returned %s: %s", exc.response.status_code, exc.response.text[:200]
+            )
+            _raise_ai_runtime_http_error(exc)
+        except httpx.RequestError as exc:
+            logger.error("ai-runtime embed unreachable: %s", exc)
+            raise AppError(
+                ErrorCode.AI_RUNTIME_UNREACHABLE.value,
+                f"ai-runtime unreachable: {exc}",
+                status=502,
+            ) from exc
+        raise AssertionError("unreachable")
 
     async def transcribe_media(self, media_bytes: bytes, mime_type: str) -> str:
         """Request speech transcription from ai-runtime."""
@@ -99,6 +137,24 @@ class AIRuntimeClient:
             data_base64=base64.b64encode(media_bytes).decode("utf-8"),
             mime_type=mime_type,
         )
-        resp = await self._transcribe_client.post(url, json=payload.model_dump(mode="json"), headers=headers)
-        resp.raise_for_status()
-        return TranscribeResponse.model_validate(resp.json()).text.strip()
+        try:
+            resp = await self._transcribe_client.post(
+                url, json=payload.model_dump(mode="json"), headers=headers
+            )
+            resp.raise_for_status()
+            return TranscribeResponse.model_validate(resp.json()).text.strip()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "ai-runtime transcribe returned %s: %s",
+                exc.response.status_code,
+                exc.response.text[:200],
+            )
+            _raise_ai_runtime_http_error(exc)
+        except httpx.RequestError as exc:
+            logger.error("ai-runtime transcribe unreachable: %s", exc)
+            raise AppError(
+                ErrorCode.AI_RUNTIME_UNREACHABLE.value,
+                f"ai-runtime unreachable: {exc}",
+                status=502,
+            ) from exc
+        raise AssertionError("unreachable")

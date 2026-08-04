@@ -7,7 +7,18 @@ import uuid
 from pathlib import Path
 
 import anyio
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from mc_contracts.errors import ErrorCode
+from mc_foundation.objectstore import (
+    ContentDisposition,
+    ObjectNotFoundError,
+    ObjectStorageError,
+    ObjectStore,
+    ObjectTooLargeError,
+    StoredObject,
+    safe_basename,
+)
+from mc_foundation.problem import AppError
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,16 +28,6 @@ from platform_service.db.models.file_upload import FileUpload
 from platform_service.db.repositories.file_upload_repository import FileUploadRepository
 from platform_service.deps import get_db, get_object_storage_client
 from platform_service.services.file_digest import sha256_hex_file
-from platform_service.services.object_storage import (
-    ContentDisposition,
-    ObjectNotFoundError,
-    ObjectStorageClient,
-    ObjectStorageError,
-    ObjectTooLargeError,
-    StoredObject,
-    _normalise_prefix,
-    safe_basename,
-)
 from platform_service.services.upload_provenance import build_upload_metadata, record_file_upload
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ _SUFFIX_CONTENT_TYPE: dict[str, str] = {
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 router = APIRouter(
-    prefix="/admin/v3/files",
+    prefix="/admin/files",
     tags=["admin-files"],
 )
 
@@ -125,12 +126,13 @@ async def _stream_uploadfile_to_path_capped(
         while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
             total += len(chunk)
             if total > max_bytes:
-                raise HTTPException(status_code=413, detail="file exceeds maximum allowed size")
+                raise AppError(
+                    ErrorCode.PAYLOAD_TOO_LARGE.value,
+                    "file exceeds maximum allowed size",
+                    status=413,
+                )
             await anyio.to_thread.run_sync(lambda c=chunk, f=first: _append_bytes_to_path(dest, c, first=f))
             first = False
-    except HTTPException:
-        dest.unlink(missing_ok=True)
-        raise
     except Exception:
         dest.unlink(missing_ok=True)
         raise
@@ -140,31 +142,20 @@ async def _stream_uploadfile_to_path_capped(
 async def upload_file(
     request: Request,
     file: UploadFile = File(..., description="File to upload to object storage"),
-    prefix: str = Form("uploads", description="Object key prefix inside the configured bucket"),
-    storage: ObjectStorageClient = Depends(get_object_storage_client),
+    storage: ObjectStore = Depends(get_object_storage_client),
     settings: Settings = Depends(get_settings),
     db: AsyncSession = Depends(get_db),
 ) -> FileUploadResponse:
-    """Upload a file into the configured MinIO bucket."""
+    """Upload a file into the configured object-storage bucket."""
     if not file.filename:
-        raise HTTPException(status_code=400, detail="filename is required")
+        raise AppError(ErrorCode.FILENAME_REQUIRED.value, "filename is required", status=400)
 
     suffix = Path(file.filename).suffix.lower()
     if suffix not in _ALLOWED_UPLOAD_SUFFIXES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"unsupported file type {suffix!r}; accepted: {sorted(_ALLOWED_UPLOAD_SUFFIXES)}",
-        )
-
-    try:
-        normalised_prefix = _normalise_prefix(prefix)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    top = normalised_prefix.split("/", maxsplit=1)[0]
-    if top not in settings.admin_file_allowed_prefix_set:
-        raise HTTPException(
-            status_code=400,
-            detail=f"unsupported prefix {prefix!r}; accepted: {sorted(settings.admin_file_allowed_prefix_set)}",
+        raise AppError(
+            ErrorCode.BAD_REQUEST.value,
+            f"unsupported file type {suffix!r}; accepted: {sorted(_ALLOWED_UPLOAD_SUFFIXES)}",
+            status=400,
         )
 
     staging_dir = Path(settings.upload_dir) / "admin_file_staging"
@@ -194,7 +185,7 @@ async def upload_file(
             else:
                 return _file_upload_response_from_row(existing, reused_existing=True)
 
-        object_name = f"{normalised_prefix}/{uuid.uuid4()}_{safe}"
+        object_name = f"{settings.admin_file_upload_prefix}/{uuid.uuid4()}_{safe}"
         content_type = _SUFFIX_CONTENT_TYPE.get(suffix, "application/octet-stream")
         try:
             stored = await storage.put_object_from_local_file(
@@ -207,17 +198,25 @@ async def upload_file(
                 ),
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise AppError(ErrorCode.BAD_REQUEST.value, str(exc), status=400) from exc
         except ObjectTooLargeError as exc:
-            raise HTTPException(status_code=413, detail="file exceeds maximum allowed size") from exc
+            raise AppError(
+                ErrorCode.PAYLOAD_TOO_LARGE.value,
+                "file exceeds maximum allowed size",
+                status=413,
+            ) from exc
         except ObjectStorageError as exc:
             logger.exception("Object storage upload failed for filename=%r", file.filename)
-            raise HTTPException(status_code=502, detail="object storage upload failed") from exc
+            raise AppError(
+                ErrorCode.OBJECT_STORAGE_ERROR.value,
+                "object storage upload failed",
+                status=502,
+            ) from exc
     finally:
         staging_path.unlink(missing_ok=True)
 
     if stored is None:
-        raise HTTPException(status_code=502, detail="object storage upload failed")
+        raise AppError(ErrorCode.OBJECT_STORAGE_ERROR.value, "object storage upload failed", status=502)
 
     await record_file_upload(
         file_upload_repo=FileUploadRepository(db),
@@ -259,14 +258,15 @@ async def get_presigned_url(
         "auto",
         description="'auto' uses inline for PDF/images and attachment otherwise; override with inline|attachment.",
     ),
-    storage: ObjectStorageClient = Depends(get_object_storage_client),
+    storage: ObjectStore = Depends(get_object_storage_client),
     settings: Settings = Depends(get_settings),
 ) -> PresignedUrlResponse:
     """Return a time-limited GET URL for an uploaded object."""
     if expires_seconds > settings.admin_file_presigned_max_seconds:
-        raise HTTPException(
-            status_code=400,
-            detail=f"expires_seconds must be <= {settings.admin_file_presigned_max_seconds}",
+        raise AppError(
+            ErrorCode.BAD_REQUEST.value,
+            f"expires_seconds must be <= {settings.admin_file_presigned_max_seconds}",
+            status=400,
         )
 
     try:
@@ -276,12 +276,16 @@ async def get_presigned_url(
             disposition=disposition,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise AppError(ErrorCode.BAD_REQUEST.value, str(exc), status=400) from exc
     except ObjectNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="object not found") from exc
+        raise AppError(ErrorCode.OBJECT_NOT_FOUND.value, "object not found", status=404) from exc
     except ObjectStorageError as exc:
         logger.exception("Presigned URL generation failed for object_name=%r", object_name)
-        raise HTTPException(status_code=502, detail="object storage presign failed") from exc
+        raise AppError(
+            ErrorCode.OBJECT_STORAGE_ERROR.value,
+            "object storage presign failed",
+            status=502,
+        ) from exc
 
     return PresignedUrlResponse(
         url=presigned.url,

@@ -8,9 +8,11 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient
 from mc_contracts.morning import MorningCardsResponse
+from mc_foundation.problem import register_problem_handlers
 from platform_service.api.morning import router as morning_router
 from platform_service.auth.rate_limit_middleware import RateLimitMiddleware
 from platform_service.auth.spice_auth_middleware import SpiceAuthMiddleware
@@ -71,6 +73,11 @@ async def integration_client(
     get_settings.cache_clear()
 
     app = FastAPI()
+    register_problem_handlers(
+        app,
+        validation_error_type=RequestValidationError,
+        http_exception_type=HTTPException,
+    )
     api_router = APIRouter(prefix=API_ROOT)
     api_router.include_router(morning_router)
     app.include_router(api_router)

@@ -3,7 +3,8 @@
     "packages/contracts/src",
     "packages/foundation/src",
     "services/ai-runtime/src",
-    "services/platform/src"
+    "services/platform/src",
+    "eval/src"
   ],
   "exclude": [
     "**/__pycache__",
