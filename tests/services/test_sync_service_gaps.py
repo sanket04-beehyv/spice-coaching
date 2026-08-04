@@ -122,13 +122,11 @@ async def test_partial_completion_empty_when_all_questions_answered(
         CHWModuleCompletion(
             chw_id=chw_id,
             module_family_id=module.module_family_id,
-            latest_attempt_module_id=module.id,
-            latest_quiz_score=1.0,
-            latest_attempt_passed=True,
+            latest_attempt_passed=False,
+            attempts_since_last_pass=0,
         )
     )
     await db_session.flush()
-
     repo = ModuleCompletionRepository(db_session)
     await repo.mark_completed(
         chw_id=chw_id,

@@ -23,7 +23,7 @@ Local development uses permissive defaults (`APP_ENV=development`, `SPICE_AUTH_E
 | `APP_ENV` | `staging` or `production` |
 | `DATABASE_PASSWORD` | Non-empty; must not be `postgres` |
 | `AI_RUNTIME_TOKEN` | Must not be `dev-internal-token` |
-| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | Must not be dev defaults (`minioadmin`) |
+| `OBJECT_STORAGE_ACCESS_KEY` / `OBJECT_STORAGE_SECRET_KEY` | Must not be dev defaults (`minioadmin`) when set; empty keys allowed only with `OBJECT_STORAGE_BACKEND=s3` (IAM) |
 | `SPICE_AUTH_ENABLED` | Must be `true` |
 | `SPICE_TENANT_ID_MAP` | Required JSON or `id=uuid` map |
 | `CORS_ALLOW_ORIGINS` | Must not include `*` |
@@ -229,7 +229,7 @@ Wait until:
 ### 7) Ingest returns `batch_queued` but pipeline never progresses
 
 **Symptom**
-- `POST /admin/ingest` returns `202` with `batch_queued`, but `GET /admin/ingest/by-document/{id}` never shows a running `ingestion_run`.
+- `POST /admin/ingest` returns `202` with `batch_queued` (after `POST /admin/ingest/upload` staged the files), but `GET /admin/ingest/batches/{batch_id}` never shows progressing nodes / stays `queued`.
 
 **Root Cause**
 - Pipeline work runs on `platform-celery-worker`, not inside `platform-api`. The worker must be running and able to reach MinIO (ingest objects are downloaded from object storage during Stage A).
@@ -237,7 +237,7 @@ Wait until:
 **Fix**
 - Confirm `docker compose ps` shows `platform-celery-worker` up.
 - Check worker logs: `docker compose logs platform-celery-worker`.
-- Ensure the worker has the same `minio_*` settings as `platform-api` (see `docker-compose.yml`).
+- Ensure the worker has the same `object_storage_*` settings as `platform-api` (see `docker-compose.yml`).
 
 ---
 

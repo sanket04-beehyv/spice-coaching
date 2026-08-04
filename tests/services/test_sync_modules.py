@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.chw_module_assignment import CHWModuleAssignment
 from platform_service.db.models.chw_training_request import CHWTrainingRequest
@@ -24,7 +26,7 @@ from platform_service.services.module_card_service import (
 from platform_service.services.sync_service import SyncService
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import requires_db
+from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
@@ -41,6 +43,15 @@ _SAMPLE_SEARCH_METADATA = {
     "audience": "chw",
     "rationale": "",
 }
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _wipe_sync_module_data(db_session: AsyncSession) -> AsyncIterator[None]:
+    await truncate_tables(
+        db_session,
+        "chw_module_assignment, chw_training_request, module_card, module_quiz_question, module, module_family",
+    )
+    yield
 
 
 async def _make_published_module(
@@ -95,7 +106,6 @@ async def _make_source_document(
         source_type="pdf",
         primary_language="bn",
         content_domain="clinical",
-        assessment_mode="with_quiz",
         version_label="2026-Q1",
         publication_date=date(2026, 1, 15),
         original_storage_path=_STORAGE_PATH,
@@ -150,7 +160,6 @@ async def test_modules_bundle_includes_source_document_details(db_session: Async
     assert first.source_type == "pdf"
     assert first.primary_language == "bn"
     assert first.content_domain == "clinical"
-    assert first.assessment_mode == "with_quiz"
     assert first.version_label == "2026-Q1"
     assert first.publication_date == date(2026, 1, 15)
     assert first.original_filename == "manual.pdf"
@@ -159,7 +168,9 @@ async def test_modules_bundle_includes_source_document_details(db_session: Async
     assert second.title == "Doc B"
     assert second.has_thumbnail is False
 
+    assert by_id[with_docs.id].content_domain == "clinical"
     assert by_id[without_docs.id].source_documents == []
+    assert by_id[without_docs.id].content_domain == "clinical"
 
 
 @pytest.mark.asyncio
@@ -331,9 +342,7 @@ async def test_modules_bundle_assigned_module_ids(db_session: AsyncSession) -> N
 @pytest.mark.asyncio
 @requires_db
 async def test_modules_bundle_requested_modules(db_session: AsyncSession) -> None:
-    # Use an ID outside the hardcoded user directory so geo/PO assignment
-    # leftovers from other tests cannot pollute assigned_module_ids.
-    chw_id = uuid4().int % (10**15) + 1
+    chw_id = 1313053891
     module = await _make_published_module(db_session, source_document_ids=None)
     earlier = datetime.now(UTC) - timedelta(hours=2)
     later = datetime.now(UTC) - timedelta(hours=1)
@@ -378,7 +387,7 @@ async def test_modules_bundle_requested_modules(db_session: AsyncSession) -> Non
 @pytest.mark.asyncio
 @requires_db
 async def test_modules_bundle_requested_modules_tenant_scope(db_session: AsyncSession) -> None:
-    chw_id = uuid4().int % (10**15) + 1
+    chw_id = 1313053892
     tenant_a = uuid4()
     tenant_b = uuid4()
     global_row = CHWTrainingRequest(

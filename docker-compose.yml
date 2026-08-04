@@ -53,8 +53,8 @@ services:
     image: quay.io/minio/minio:RELEASE.2024-09-09T16-59-28Z
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-microcoaching}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-microcoaching123}
+      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY:-microcoaching}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_KEY:-microcoaching123}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
@@ -96,7 +96,6 @@ services:
       ai_runtime_token: ${AI_RUNTIME_TOKEN:-dev-internal-token}
       ai_runtime_timeout_seconds: ${AI_RUNTIME_TIMEOUT_SECONDS:-600}
       ai_runtime_transcribe_timeout_seconds: ${AI_RUNTIME_TRANSCRIBE_TIMEOUT_SECONDS:-600}
-      stage_d_published_merge_enabled: ${STAGE_D_PUBLISHED_MERGE_ENABLED:-true}
       stage_d_published_merge_prefilter_limit: ${STAGE_D_PUBLISHED_MERGE_PREFILTER_LIMIT:-25}
       stage_d_published_merge_min_existing_card_match_ratio: ${STAGE_D_PUBLISHED_MERGE_MIN_EXISTING_CARD_MATCH_RATIO:-0.0}
       stage_d_published_merge_card_similarity_threshold: ${STAGE_D_PUBLISHED_MERGE_CARD_SIMILARITY_THRESHOLD:-0.0}
@@ -107,14 +106,16 @@ services:
       search_metadata_max_synonyms: ${SEARCH_METADATA_MAX_SYNONYMS:-10}
       search_metadata_max_tags: ${SEARCH_METADATA_MAX_TAGS:-10}
       # Local compose MinIO (host .env may set localhost:19902 for non-compose runs).
-      minio_endpoint: minio:9000
-      minio_presigned_endpoint: minio:9000
-      minio_access_key: ${MINIO_ACCESS_KEY:-microcoaching}
-      minio_secret_key: ${MINIO_SECRET_KEY:-microcoaching123}
-      minio_bucket_name: ${MINIO_BUCKET_NAME:-medtronics-storage}
-      minio_auto_create_bucket: ${MINIO_AUTO_CREATE_BUCKET:-true}
-      minio_secure: "false"
-      minio_region: ${MINIO_REGION:-us-east-1}
+      object_storage_backend: minio
+      object_storage_endpoint: minio:9000
+      object_storage_presigned_endpoint: minio:9000
+      object_storage_presign_mode: proxy
+      object_storage_access_key: ${OBJECT_STORAGE_ACCESS_KEY:-microcoaching}
+      object_storage_secret_key: ${OBJECT_STORAGE_SECRET_KEY:-microcoaching123}
+      object_storage_bucket_name: ${OBJECT_STORAGE_BUCKET_NAME:-medtronics-storage}
+      object_storage_auto_create_bucket: ${OBJECT_STORAGE_AUTO_CREATE_BUCKET:-true}
+      object_storage_secure: "false"
+      object_storage_region: ${OBJECT_STORAGE_REGION:-us-east-1}
       admin_file_allowed_prefixes: ${ADMIN_FILE_ALLOWED_PREFIXES:-uploads,source-documents,media,ingest,module-thumbnails}
       admin_file_upload_prefix: ${ADMIN_FILE_UPLOAD_PREFIX:-uploads}
       admin_file_presigned_max_seconds: ${ADMIN_FILE_PRESIGNED_MAX_SECONDS:-86400}
@@ -161,7 +162,6 @@ services:
       ai_runtime_token: ${AI_RUNTIME_TOKEN:-dev-internal-token}
       ai_runtime_timeout_seconds: ${AI_RUNTIME_TIMEOUT_SECONDS:-600}
       ai_runtime_transcribe_timeout_seconds: ${AI_RUNTIME_TRANSCRIBE_TIMEOUT_SECONDS:-600}
-      stage_d_published_merge_enabled: ${STAGE_D_PUBLISHED_MERGE_ENABLED:-true}
       stage_d_published_merge_prefilter_limit: ${STAGE_D_PUBLISHED_MERGE_PREFILTER_LIMIT:-25}
       stage_d_published_merge_min_existing_card_match_ratio: ${STAGE_D_PUBLISHED_MERGE_MIN_EXISTING_CARD_MATCH_RATIO:-0.0}
       stage_d_published_merge_card_similarity_threshold: ${STAGE_D_PUBLISHED_MERGE_CARD_SIMILARITY_THRESHOLD:-0.0}
@@ -186,14 +186,16 @@ services:
       chat_feedback_summary_max_positive_offline_samples: ${CHAT_FEEDBACK_SUMMARY_MAX_POSITIVE_OFFLINE_SAMPLES:-10}
       chat_feedback_summary_max_negative_online_samples: ${CHAT_FEEDBACK_SUMMARY_MAX_NEGATIVE_ONLINE_SAMPLES:-30}
       chat_feedback_summary_max_negative_offline_samples: ${CHAT_FEEDBACK_SUMMARY_MAX_NEGATIVE_OFFLINE_SAMPLES:-30}
-      minio_endpoint: minio:9000
-      minio_presigned_endpoint: minio:9000
-      minio_access_key: ${MINIO_ACCESS_KEY:-microcoaching}
-      minio_secret_key: ${MINIO_SECRET_KEY:-microcoaching123}
-      minio_bucket_name: ${MINIO_BUCKET_NAME:-medtronics-storage}
-      minio_auto_create_bucket: ${MINIO_AUTO_CREATE_BUCKET:-true}
-      minio_secure: "false"
-      minio_region: ${MINIO_REGION:-us-east-1}
+      object_storage_backend: minio
+      object_storage_endpoint: minio:9000
+      object_storage_presigned_endpoint: minio:9000
+      object_storage_presign_mode: proxy
+      object_storage_access_key: ${OBJECT_STORAGE_ACCESS_KEY:-microcoaching}
+      object_storage_secret_key: ${OBJECT_STORAGE_SECRET_KEY:-microcoaching123}
+      object_storage_bucket_name: ${OBJECT_STORAGE_BUCKET_NAME:-medtronics-storage}
+      object_storage_auto_create_bucket: ${OBJECT_STORAGE_AUTO_CREATE_BUCKET:-true}
+      object_storage_secure: "false"
+      object_storage_region: ${OBJECT_STORAGE_REGION:-us-east-1}
       app_env: ${APP_ENV:-development}
       log_service_name: platform-celery-worker
       log_json: "true"

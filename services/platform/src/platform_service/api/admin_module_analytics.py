@@ -6,13 +6,15 @@ import logging
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from mc_contracts.admin_module_analytics import (
     ModuleLifecycleActionRequest,
     ModuleLifecycleEventPayload,
     ModuleLifecycleStatePayload,
     ModulePerformanceSummary,
 )
+from mc_contracts.errors import ErrorCode
+from mc_foundation.problem import AppError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.models.module import Module
@@ -35,9 +37,10 @@ def _validate_lifecycle_status(lifecycle_status: str | None) -> str | None:
     if lifecycle_status is None:
         return None
     if lifecycle_status not in VALID_LIFECYCLE_STATUSES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"lifecycle_status must be one of: {', '.join(sorted(VALID_LIFECYCLE_STATUSES))}",
+        raise AppError(
+            ErrorCode.INVALID_QUERY.value,
+            f"lifecycle_status must be one of: {', '.join(sorted(VALID_LIFECYCLE_STATUSES))}",
+            status=422,
         )
     return lifecycle_status
 
@@ -64,9 +67,9 @@ async def deactivate_module(
     try:
         state = await repo.deactivate(module_id, actor_id=action.actor_id, reason=action.reason)
     except ModuleNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, str(exc), status=404) from exc
     except ModuleLifecycleError as exc:
-        raise HTTPException(status_code=409, detail=exc.message) from exc
+        raise AppError(ErrorCode.MODULE_LIFECYCLE_ERROR.value, exc.message, status=409) from exc
     logger.info(
         "module_deactivated module_id=%s family_id=%s actor_id=%s",
         module_id,
@@ -95,9 +98,9 @@ async def reactivate_module(
     try:
         state = await repo.reactivate(module_id, actor_id=action.actor_id, reason=action.reason)
     except ModuleNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, str(exc), status=404) from exc
     except ModuleLifecycleError as exc:
-        raise HTTPException(status_code=409, detail=exc.message) from exc
+        raise AppError(ErrorCode.MODULE_LIFECYCLE_ERROR.value, exc.message, status=409) from exc
     logger.info(
         "module_reactivated module_id=%s family_id=%s actor_id=%s",
         module_id,
@@ -126,7 +129,7 @@ async def list_module_lifecycle(
     repo = ModuleLifecycleRepository(session)
     module = await session.get(Module, module_id)
     if module is None:
-        raise HTTPException(status_code=404, detail=f"module {module_id} not found")
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, f"module {module_id} not found", status=404)
     events = await repo.list_lifecycle_events(module_id)
     return [
         ModuleLifecycleEventPayload(
@@ -145,7 +148,10 @@ async def list_module_lifecycle(
 async def module_performance_analytics(
     from_dt: datetime | None = Query(None, alias="from"),
     to_dt: datetime | None = Query(None, alias="to"),
-    lifecycle_status: str | None = Query(None, description="draft | published | retired | deactivated"),
+    lifecycle_status: str | None = Query(
+        None,
+        description="draft | published | retired | deactivated | review_pending",
+    ),
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),

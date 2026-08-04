@@ -107,6 +107,26 @@
     "status": "active"
   },
   {
+    "id": "b7c4e91a-2f8d-5a1e-9c3b-6d0e4f8a1b2c",
+    "template_id": "module-creation-suggestion",
+    "version": 1,
+    "variant_key": null,
+    "generation_type": "module_creation_suggestion",
+    "system_prompt_template": "You help coaching-platform content admins decide which training modules to create next.\nYou receive:\n1) A catalog of EXISTING DRAFT modules (id + title) for this tenant.\n2) Deduped CHW chatbot questions that had no module_id.\n3) Deduped free-text module request names that had no module_id.\n\nTask: group the evidence into suggested modules.\n\nRules:\n- Prefer matching evidence to an existing draft when the topic clearly fits. Use ONLY draft ids from the catalog.\n- When no draft fits, propose a concise new topic name (English) under proposed_topic.\n- Each suggestion must be either matched_module_id OR proposed_topic (not both).\n- Attach evidence via the provided keys (evidence_question_keys / evidence_request_keys).\n- Prefer precision: do not force weak matches onto drafts.\n- At most {max_suggestions} suggestions, ranked by evidence volume (most demand first).\n- Return STRICT JSON only.\n\nOutput shape:\n{{\n  \"suggestions\": [\n    {{\n      \"matched_module_id\": \"uuid-from-catalog-or-null\",\n      \"proposed_topic\": \"new topic or null\",\n      \"rationale\": \"1-2 sentences\",\n      \"evidence_question_keys\": [\"normalized_key\", ...],\n      \"evidence_request_keys\": [\"normalized_key\", ...]\n    }}\n  ]\n}}\n",
+    "human_message_template": "## SUGGESTION DATE (UTC) ##\n{suggestion_date}\n\n## DRAFT MODULE CATALOG ##\n{draft_catalog_json}\n\n## DEDUPED CHAT QUESTIONS ##\n{questions_json}\n\n## DEDUPED FREE-TEXT MODULE REQUESTS ##\n{requests_json}",
+    "required_variables": [
+      "max_suggestions",
+      "suggestion_date",
+      "draft_catalog_json",
+      "questions_json",
+      "requests_json"
+    ],
+    "title": "Module creation suggestion",
+    "description": "Daily mapping of unattributed demand to draft modules or new topics",
+    "change_notes": "Initial seed for module creation suggestions job",
+    "status": "active"
+  },
+  {
     "id": "5ca253ca-abc0-529b-8df4-65dda09b76d8",
     "template_id": "search-metadata",
     "version": 1,

@@ -7,8 +7,10 @@ from uuid import UUID
 
 import pytest
 import pytest_asyncio
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient
+from mc_foundation.problem import register_problem_handlers
 from platform_service.api.admin_prompts import router as admin_prompts_router
 from platform_service.config import get_settings
 from platform_service.deps import get_db
@@ -25,6 +27,11 @@ _SEED_ID = "00000000-0000-4000-8000-000000000001"
 @pytest_asyncio.fixture
 async def app(db_session: AsyncSession) -> AsyncIterator[FastAPI]:
     app_obj = FastAPI()
+    register_problem_handlers(
+        app_obj,
+        validation_error_type=RequestValidationError,
+        http_exception_type=HTTPException,
+    )
     api_router = APIRouter(prefix=get_settings().api_root_path_normalized)
     api_router.include_router(admin_prompts_router)
     app_obj.include_router(api_router)

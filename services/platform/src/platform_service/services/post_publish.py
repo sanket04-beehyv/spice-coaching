@@ -1,4 +1,4 @@
-"""Post-publish helpers (quiz gating by source assessment_mode)."""
+"""Post-publish helpers (quiz gating by ingest_batch assessment_mode)."""
 
 from __future__ import annotations
 
@@ -7,21 +7,19 @@ from uuid import UUID
 from mc_contracts.enums import AssessmentMode
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from platform_service.db.repositories.source_repository import SourceRepository
+from platform_service.services.ingestion_cardinality import load_batch_for_run
 
 
-async def should_generate_quiz_for_sources(
+async def should_generate_quiz_for_run(
     session: AsyncSession,
-    source_document_ids: list[UUID],
+    ingestion_run_id: UUID,
 ) -> bool:
-    """Return True when at least one constituent source requests quizzes.
+    """Return True when the run's batch requests quizzes.
 
-    When every linked source_document has assessment_mode=read_only, skip
-    quiz generation. Empty id list defaults to True (legacy / unknown provenance).
+    ``assessment_mode=read_only`` skips quiz generation. Missing batch defaults
+    to True (legacy / unknown provenance).
     """
-    if not source_document_ids:
+    batch = await load_batch_for_run(session, ingestion_run_id)
+    if batch is None:
         return True
-    docs = await SourceRepository(session).list_source_documents_by_ids(source_document_ids)
-    if not docs:
-        return True
-    return any(d.assessment_mode == AssessmentMode.WITH_QUIZ.value for d in docs)
+    return batch.assessment_mode == AssessmentMode.WITH_QUIZ.value

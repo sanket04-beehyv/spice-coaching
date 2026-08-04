@@ -25,8 +25,7 @@ from platform_service.db.repositories.module_gap_repository import ModuleGapRepo
 from platform_service.deps import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.api.conftest import wipe_api_tables
-from tests.conftest import platform_path, requires_db
+from tests.conftest import platform_path, requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
@@ -37,7 +36,7 @@ def _test_chw_id() -> int:
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    await wipe_api_tables(db_session)
+    await truncate_tables(db_session, "chw_behavioural_gap_state, behavioural_gap, module, module_family")
     yield
 
 

@@ -22,8 +22,12 @@ def _test_chw_id() -> int:
 @pytest.fixture(autouse=True)
 def _gap_state_telemetry_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Existing worker tests target behavioural-gap telemetry mode."""
+    from platform_service.config import get_settings
+
+    monkeypatch.setenv("TELEMETRY_BEHAVIOURAL_GAP_STATE_ENABLED", "true")
+    get_settings.cache_clear()
     monkeypatch.setattr(
-        module_completion_worker.get_settings(),
+        get_settings(),
         "telemetry_behavioural_gap_state_enabled",
         True,
     )

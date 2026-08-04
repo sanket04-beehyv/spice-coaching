@@ -169,8 +169,6 @@ class ModuleIdentifier:
         )
 
         response = await self._client.generate(request)
-        if response.error:
-            raise ModuleIdentifierError(f"ai-runtime error: {response.error}")
 
         # Parse output — accept either parsed_json or raw_text. Real
         # corpora regularly hit max_tokens mid-string; mirror the salvage
@@ -179,7 +177,7 @@ class ModuleIdentifier:
         # propagating a JSONDecodeError up the orchestrator.
         payload: Any = response.parsed_json
         truncated = False
-        if payload is None:
+        if payload is None and response.raw_text.strip():
             try:
                 payload = json.loads(response.raw_text, strict=False)
             except json.JSONDecodeError:
@@ -213,6 +211,8 @@ class ModuleIdentifier:
                     "Stage 2 LLM output was truncated; salvaged %d complete candidate(s)",
                     len(recovered) if isinstance(recovered, list) else 0,
                 )
+        if payload is None and response.error:
+            raise ModuleIdentifierError(f"ai-runtime error: {response.error}")
 
         candidates = _extract_candidates(payload)
         # Translate short tokens (d1/p47/b231) back to real UUIDs before

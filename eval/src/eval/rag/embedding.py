@@ -1,4 +1,4 @@
-"""Embedding retrieval via ai-runtime + pgvector cosine distance."""
+"""Embedding retrieval via ai-runtime + VectorStore cosine distance search."""
 
 from __future__ import annotations
 
@@ -7,11 +7,13 @@ from uuid import UUID
 
 from platform_service.config import get_settings
 from platform_service.db.base import SessionLocal
-from platform_service.db.repositories.module_read_repository import ModuleReadRepository
+from platform_service.db.models.module import Module
 from platform_service.exceptions import EmbeddingDimensionError
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 from platform_service.services.embedding_vector import assert_embedding_dimension
 from platform_service.services.module_search_text import module_text_for_search
+from platform_service.vectorstore import MODULES_COLLECTION, get_vector_store
+from sqlalchemy import select
 
 from eval.rag.corpus import (
     _title_parts_from_localized,
@@ -64,12 +66,26 @@ class EmbeddingRetriever:
             raise RuntimeError(str(exc)) from exc
 
         async with SessionLocal() as session:
-            repo = ModuleReadRepository(session)
-            pairs = await repo.search_by_embedding(
-                query_vector=vec,
-                limit=k,
-                tenant_id=self._tenant_id,
+            filters: dict[str, object] = {"lifecycle_status": "published"}
+            if self._tenant_id is not None:
+                filters["tenant_id"] = self._tenant_id
+            store = get_vector_store(session)
+            matches = await store.search(
+                MODULES_COLLECTION,
+                vec,
+                top_k=k,
+                filters=filters,
             )
+            ordered_ids = [UUID(match["id"]) for match in matches]
+            if not ordered_ids:
+                return []
+            rows = (await session.execute(select(Module).where(Module.id.in_(ordered_ids)))).scalars().all()
+            modules_by_id = {module.id: module for module in rows}
+            pairs = [
+                (modules_by_id[module_id], float(match["distance"]))
+                for module_id, match in zip(ordered_ids, matches, strict=True)
+                if module_id in modules_by_id
+            ]
             cards_by_module = await load_cards_by_module_ids([module.id for module, _ in pairs])
 
         hits: list[EmbeddingHit] = []

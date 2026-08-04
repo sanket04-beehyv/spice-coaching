@@ -71,6 +71,13 @@ def create_celery_app() -> Celery:
                     minute=0,
                 ),
             },
+            "refresh-module-creation-suggestions": {
+                "task": "platform.refresh_module_creation_suggestions",
+                "schedule": crontab(
+                    hour=settings.module_creation_suggestions_daily_hour_utc,
+                    minute=0,
+                ),
+            },
         },
     )
 

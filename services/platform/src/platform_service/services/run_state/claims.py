@@ -31,7 +31,15 @@ class RunClaimMixin:
         result = await self._session.execute(
             text("""
                 UPDATE ingestion_run
-                SET error_jsonb = COALESCE(error_jsonb, '{}'::jsonb)
+                -- jsonb || coerces non-objects into arrays; only merge onto objects.
+                SET error_jsonb = (
+                        CASE
+                            WHEN error_jsonb IS NULL
+                              OR jsonb_typeof(error_jsonb) <> 'object'
+                            THEN '{}'::jsonb
+                            ELSE error_jsonb
+                        END
+                    )
                     || jsonb_build_object(
                         CAST(:claim_key AS text),
                         jsonb_build_object(
@@ -45,6 +53,7 @@ class RunClaimMixin:
                   AND status IN ('running', 'partially_succeeded')
                   AND (
                     error_jsonb IS NULL
+                    OR jsonb_typeof(error_jsonb) <> 'object'
                     OR error_jsonb->CAST(:claim_key AS text) IS NULL
                     OR error_jsonb->CAST(:claim_key AS text)->>'claim_token' = :claim_token
                     -- Stale-takeover branch: compare heartbeat as timestamptz,
@@ -70,7 +79,14 @@ class RunClaimMixin:
         result = await self._session.execute(
             text("""
                 UPDATE ingestion_run
-                SET error_jsonb = COALESCE(error_jsonb, '{}'::jsonb)
+                SET error_jsonb = (
+                        CASE
+                            WHEN error_jsonb IS NULL
+                              OR jsonb_typeof(error_jsonb) <> 'object'
+                            THEN '{}'::jsonb
+                            ELSE error_jsonb
+                        END
+                    )
                     || jsonb_build_object(
                         CAST(:claim_key AS text),
                         jsonb_build_object(
@@ -81,6 +97,7 @@ class RunClaimMixin:
                         )
                     )
                 WHERE id = :run_id
+                  AND jsonb_typeof(error_jsonb) = 'object'
                   AND error_jsonb->CAST(:claim_key AS text)->>'claim_token'
                       = CAST(:claim_token AS text)
                 RETURNING id
@@ -101,6 +118,7 @@ class RunClaimMixin:
                 UPDATE ingestion_run
                 SET error_jsonb = error_jsonb - CAST(:claim_key AS text)
                 WHERE id = :run_id
+                  AND jsonb_typeof(error_jsonb) = 'object'
                   AND error_jsonb->CAST(:claim_key AS text)->>'claim_token'
                       = CAST(:claim_token AS text)
             """),

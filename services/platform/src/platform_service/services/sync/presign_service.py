@@ -16,6 +16,12 @@ from mc_contracts.sync import (
     SourceDocumentThumbnailPresignedUrlPayload,
     SourceDocumentThumbnailsPresignResponse,
 )
+from mc_foundation.objectstore import (
+    ObjectNotFoundError,
+    ObjectStorageError,
+    ObjectStore,
+    looks_like_object_storage_storage_path,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.config import Settings, get_settings
@@ -23,12 +29,6 @@ from platform_service.db.models.module import Module
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.db.repositories.module_repository import ModuleRepository
 from platform_service.db.repositories.source_repository import SourceRepository
-from platform_service.services.object_storage import (
-    ObjectNotFoundError,
-    ObjectStorageClient,
-    ObjectStorageError,
-    looks_like_object_storage_storage_path,
-)
 from platform_service.services.source_thumbnail_service import presign_thumbnail
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class SyncPresignService:
         self,
         *,
         source_document_ids: list[UUID],
-        storage: ObjectStorageClient,
+        storage: ObjectStore,
         settings: Settings | None = None,
         tenant_id: UUID | None = None,
     ) -> SourceDocumentsPresignResponse:
@@ -55,7 +55,7 @@ class SyncPresignService:
         """
         settings = settings or get_settings()
         ttl = settings.admin_file_presigned_max_seconds
-        bucket_name = settings.minio_bucket_name
+        bucket_name = settings.object_storage_bucket_name
 
         if not source_document_ids:
             return SourceDocumentsPresignResponse(
@@ -135,7 +135,7 @@ class SyncPresignService:
         self,
         *,
         source_document_ids: list[UUID],
-        storage: ObjectStorageClient,
+        storage: ObjectStore,
         settings: Settings | None = None,
         tenant_id: UUID | None = None,
     ) -> SourceDocumentThumbnailsPresignResponse:
@@ -188,7 +188,7 @@ class SyncPresignService:
         self,
         *,
         module_ids: list[UUID],
-        storage: ObjectStorageClient,
+        storage: ObjectStore,
         settings: Settings | None = None,
         tenant_id: UUID | None = None,
     ) -> ModuleThumbnailsPresignResponse:
@@ -237,7 +237,7 @@ class SyncPresignService:
         entity_by_id: dict[UUID, SourceDocument | Module],
         get_storage_path: Callable[[SourceDocument | Module], str | None],
         build_payload: Callable[[UUID, str, str, int], PayloadT],
-        storage: ObjectStorageClient,
+        storage: ObjectStore,
         settings: Settings,
     ) -> tuple[list[PayloadT], list[UUID]]:
         urls: list[PayloadT] = []

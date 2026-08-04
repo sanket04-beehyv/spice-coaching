@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from mc_contracts.admin_modules import (
     CreateBindingRequest,
     TriggerBindingPayload,
     UpdateBindingRequest,
 )
+from mc_contracts.errors import ErrorCode
+from mc_foundation.problem import AppError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.models.module import Module
@@ -51,9 +53,10 @@ async def create_binding(
     family_repo = ModuleFamilyRepository(session)
     module = await session.get(Module, body.module_id)
     if module is None or not await family_repo.is_assignable(module.module_family_id):
-        raise HTTPException(
-            status_code=409,
-            detail="cannot bind trigger to a deactivated or unpublished module",
+        raise AppError(
+            ErrorCode.MODULE_FAMILY_NOT_ASSIGNABLE.value,
+            "cannot bind trigger to a deactivated or unpublished module",
+            status=409,
         )
     binding = await repo.bind_module_to_trigger(
         trigger_definition_id=body.trigger_definition_id,
@@ -74,12 +77,13 @@ async def update_binding(
 ) -> TriggerBindingPayload:
     binding = await session.get(ModuleTriggerBinding, binding_id)
     if binding is None:
-        raise HTTPException(status_code=404, detail="trigger binding not found")
+        raise AppError(ErrorCode.TRIGGER_BINDING_NOT_FOUND.value, "trigger binding not found", status=404)
     if body.relationship is not None:
         if body.relationship not in ("primary", "secondary"):
-            raise HTTPException(
-                status_code=400,
-                detail="relationship must be 'primary' or 'secondary'",
+            raise AppError(
+                ErrorCode.BAD_REQUEST.value,
+                "relationship must be 'primary' or 'secondary'",
+                status=400,
             )
         binding.relationship = body.relationship
     if body.priority_weight is not None:
@@ -98,7 +102,7 @@ async def delete_binding(
 ) -> dict[str, str | bool]:
     binding = await session.get(ModuleTriggerBinding, binding_id)
     if binding is None:
-        raise HTTPException(status_code=404, detail="trigger binding not found")
+        raise AppError(ErrorCode.TRIGGER_BINDING_NOT_FOUND.value, "trigger binding not found", status=404)
     await session.delete(binding)
     await session.commit()
     return {"id": str(binding_id), "deleted": True}

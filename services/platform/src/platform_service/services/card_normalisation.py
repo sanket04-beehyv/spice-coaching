@@ -37,6 +37,11 @@ _LOCALIZED_FIELD_MAP: tuple[tuple[str, str], ...] = (
 )
 
 
+def _strip_card_markdown(value: str) -> str:
+    """Normalize card copy to compact, renderable plain text."""
+    return "\n".join(line for line in strip_markdown_formatting(value).splitlines() if line)
+
+
 def _field_text(raw: dict[str, Any], field: str, *, primary_locale: str) -> str:
     value = raw.get(field)
     if isinstance(value, dict):
@@ -60,11 +65,11 @@ def normalise_draft_card(
         # Draft cards may contain localized strings; enforce plain text so
         # formatting-only values don't pass required-field checks.
         if isinstance(value, str):
-            return strip_markdown_formatting(value)
+            return _strip_card_markdown(value)
         if isinstance(value, dict):
             out: dict[str, Any] = {}
             for k, v in value.items():
-                out[k] = strip_markdown_formatting(v) if isinstance(v, str) else v
+                out[k] = _strip_card_markdown(v) if isinstance(v, str) else v
             return out
         return value
 
@@ -171,12 +176,12 @@ def card_dict_to_row_fields(card: dict[str, Any]) -> dict[str, Any]:
         # Localized fields are typically {locale: str|rich_text}; we only
         # strip markdown formatting from plain strings and leave rich-text JSON as-is.
         if isinstance(value, str):
-            return strip_markdown_formatting(value)
+            return _strip_card_markdown(value)
         if isinstance(value, dict):
             out: dict[str, Any] = {}
             for k, v in value.items():
                 if isinstance(v, str):
-                    out[k] = strip_markdown_formatting(v)
+                    out[k] = _strip_card_markdown(v)
                 else:
                     out[k] = v
             return out

@@ -86,7 +86,6 @@ async def _seed_av_source_doc(session: AsyncSession) -> UUID:
         source_type="audio",
         primary_language="en",
         content_domain="clinical",
-        assessment_mode="with_quiz",
         # Local-shaped path — `materialize_local_source_file` returns it as-is
         # when it doesn't match the configured MinIO bucket prefix, so the
         # orchestrator runs without needing real object storage. The mocked
@@ -258,20 +257,14 @@ class TestAvHappyPath:
         # source_block_ids on each card so /coaching/rag-query can join
         # through to source_page (timecodes) and source_document.
         modules = (
-            (await db_session.execute(select(Module).where(Module.source_document_ids.contains([sd_id]))))
+            (await db_session.execute(select(Module).where(Module.lifecycle_status == "draft")))
             .scalars()
             .all()
         )
         assert len(modules) >= 1
         m = modules[0]
         cards = (
-            (
-                await db_session.execute(
-                    select(ModuleCard).where(ModuleCard.module_id == m.id).order_by(ModuleCard.card_order)
-                )
-            )
-            .scalars()
-            .all()
+            (await db_session.execute(select(ModuleCard).where(ModuleCard.module_id == m.id))).scalars().all()
         )
         assert len(cards) >= 1
         assert all(card.source_block_ids for card in cards), (

@@ -9,6 +9,7 @@ Use this directory as the first stop when onboarding to the codebase.
 - `ARCHITECTURE_RESET.md`: corrected domain model and pipeline semantics (supersedes drifted v3.3 assumptions).
 - `SETUP_TROUBLESHOOTING.md`: setup issues seen in local/dev environments and verified fixes.
 - `PROJECT_NAVIGATION.md`: where to make changes for common engineering tasks.
+- `error-codes.json`: client-facing catalogue of stable Problem Details `code` values (keep in sync with `mc_contracts.errors.ErrorCode`).
 
 ## Suggested Reading Order For New Contributors
 
@@ -22,5 +23,6 @@ Use this directory as the first stop when onboarding to the codebase.
 - If a PR changes setup behavior, endpoint contracts, service ownership, or startup steps, update `../README.md` and the relevant file under `docs/` in the same PR.
 - New setup warnings or failures that block/confuse onboarding go in `SETUP_TROUBLESHOOTING.md` with symptom, root cause, fix, and a short verification checklist.
 - New major modules, services, queues, or route groups should be reflected in `PROJECT_NAVIGATION.md`.
+- When adding, removing, or renaming `mc_contracts.errors.ErrorCode`, update `error-codes.json` in the same PR (pre-commit enforces parity).
 - Prefer canonical route and service names from `../README.md`. Remove stale aliases when encountered.
 - Keep sections short, actionable, and copy-paste ready.

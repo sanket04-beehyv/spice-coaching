@@ -2,12 +2,17 @@
 -- services/platform/src/platform_service/db/models/
 --
 -- Target DB: PostgreSQL (uses UUID/JSONB/arrays/range + pgvector).
--- Safe to run on an empty database. Squashed snapshot of alembic head (0032).
+-- Safe to run on an empty database. Squashed snapshot of alembic head (0049).
 -- Locale-keyed JSONB maps (*_localized) replace legacy *_bn/*_en columns (0030).
 -- Includes chw_module_assignment (0022) and module_trigger_binding keyed by module_id.
--- Includes module lifecycle admin audit log (0031) and chw_training_request (0032).
+-- Includes module lifecycle admin audit log (0031) and chw_training_request (0032/0037).
+-- Includes module_card (0033), module_demand_summary (0041), chat_feedback_summary (0042),
+-- prompt_template (0043).
+-- Includes ingest_batch and ingestion_run.ingest_batch_id (0046).
+-- Ingest config (assessment_mode, instructions, cardinality) on ingest_batch (0049).
 -- Seed sections: config_threshold learning-points (0005), referral behavioural_gap
--- (0014), assessment-due trigger_definition (0026).
+-- (0014), assessment-due trigger_definition (0026), quiz_reattempt_validity_days
+-- (0036), module_demand_top_k (0040), prompt_template rows (0044).
 
 BEGIN;
 
@@ -28,7 +33,6 @@ CREATE TABLE IF NOT EXISTS source_document (
   source_type text NOT NULL,
   primary_language text NOT NULL,
   content_domain text NOT NULL DEFAULT 'clinical',
-  assessment_mode text NOT NULL DEFAULT 'with_quiz',
   version_label text NULL,
   publication_date date NULL,
   original_storage_path text NOT NULL,
@@ -39,7 +43,6 @@ CREATE TABLE IF NOT EXISTS source_document (
   outline_method text NULL,
   outline_jsonb jsonb NULL,
   extraction_calibration_jsonb jsonb NULL,
-  ingestion_instructions text NULL,
   sync_published_visible boolean NOT NULL,
   status text NOT NULL DEFAULT 'ingesting',
   ingested_at timestamptz NOT NULL DEFAULT now(),
@@ -79,9 +82,23 @@ CREATE TABLE IF NOT EXISTS content_block (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS ingest_batch (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  status text NOT NULL DEFAULT 'queued',
+  assessment_mode text NOT NULL DEFAULT 'with_quiz',
+  ingestion_instructions text NULL,
+  cards_per_module integer NULL,
+  quizzes_per_module integer NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz NULL,
+  error_jsonb jsonb NULL,
+  triggered_by uuid NULL
+);
+
 CREATE TABLE IF NOT EXISTS ingestion_run (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   source_document_id uuid NOT NULL REFERENCES source_document(id) ON DELETE CASCADE,
+  ingest_batch_id uuid NULL REFERENCES ingest_batch(id) ON DELETE CASCADE,
   started_at timestamptz NOT NULL DEFAULT now(),
   completed_at timestamptz NULL,
   status text NOT NULL DEFAULT 'running',
@@ -89,9 +106,12 @@ CREATE TABLE IF NOT EXISTS ingestion_run (
   triggered_by uuid NULL
 );
 
+CREATE INDEX IF NOT EXISTS ix_ingestion_run_ingest_batch_id
+  ON ingestion_run (ingest_batch_id);
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ingestion_run_active_per_source
   ON ingestion_run (source_document_id)
-  WHERE status = 'running'
+  WHERE status IN ('queued', 'running')
     AND COALESCE(error_jsonb->>'type', '') != 'cross_source_fusion';
 
 CREATE TABLE IF NOT EXISTS ingestion_run_step (
@@ -225,6 +245,9 @@ CREATE TABLE IF NOT EXISTS module (
   reactivated_by uuid NULL,
   deprecated_at timestamptz NULL,
   supersedes_module_id uuid NULL,
+  merge_secondary_module_id uuid NULL,
+  merge_primary_module_id uuid NULL,
+  merge_source_module_id uuid NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT uq_module_family_version UNIQUE (module_family_id, version)
@@ -487,6 +510,28 @@ CREATE TABLE IF NOT EXISTS chat_feedback_summary (
 CREATE UNIQUE INDEX IF NOT EXISTS ix_chat_feedback_summary_tenant
   ON chat_feedback_summary (tenant_id);
 
+CREATE TABLE IF NOT EXISTS module_demand_summary (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NULL,
+  top_k integer NOT NULL,
+  payload_json jsonb NOT NULL,
+  generated_at timestamptz NOT NULL,
+  computed_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_module_demand_summary_tenant
+  ON module_demand_summary (tenant_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_module_demand_summary_tenant
+  ON module_demand_summary (tenant_id)
+  WHERE tenant_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_module_demand_summary_global
+  ON module_demand_summary ((tenant_id IS NULL))
+  WHERE tenant_id IS NULL;
+
 -- ──────────────────────────────────────────────────────────────────────────────
 -- CHW training request
 -- ──────────────────────────────────────────────────────────────────────────────
@@ -529,7 +574,37 @@ CREATE TABLE IF NOT EXISTS config_threshold (
 );
 
 -- ──────────────────────────────────────────────────────────────────────────────
+-- Prompt templates (migration 0043)
+-- ──────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS prompt_template (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  template_id text NOT NULL,
+  version integer NOT NULL,
+  variant_key text NULL,
+  generation_type text NOT NULL,
+  system_prompt_template text NOT NULL,
+  human_message_template text NOT NULL,
+  required_variables jsonb NOT NULL,
+  title text NULL,
+  description text NULL,
+  change_notes text NULL,
+  status text NOT NULL DEFAULT 'active',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_prompt_template_id_variant_version
+    UNIQUE (template_id, variant_key, version)
+);
+
+CREATE INDEX IF NOT EXISTS ix_prompt_template_template_id
+  ON prompt_template (template_id);
+
+CREATE INDEX IF NOT EXISTS ix_prompt_template_active_lookup
+  ON prompt_template (template_id, variant_key, status);
+
+-- ──────────────────────────────────────────────────────────────────────────────
 -- Learning-points config_threshold seed (migration 0005)
+-- plus quiz_reattempt_validity_days (0036) and module_demand_top_k (0040)
 -- ──────────────────────────────────────────────────────────────────────────────
 
 INSERT INTO config_threshold (version, key, value_json, title, description) VALUES
@@ -550,7 +625,13 @@ INSERT INTO config_threshold (version, key, value_json, title, description) VALU
    'CHW learning points awarded per module_completed telemetry event'),
   (1, 'learning_points_spice_action_observed', '3'::jsonb,
    'Learning Points: Spice Action Observed',
-   'CHW learning points awarded per spice_action_observed telemetry event')
+   'CHW learning points awarded per spice_action_observed telemetry event'),
+  (1, 'quiz_reattempt_validity_days', '7'::jsonb,
+   'Quiz Reattempt Validity (Days)',
+   'Configure the number of days from the module assignment date during which users can reattempt a quiz. Users are always allowed their first quiz attempt, even if this period has expired. After the first attempt, reattempts are permitted only until the configured validity period ends.'),
+  (1, 'module_demand_top_k', '10'::jsonb,
+   'Module Demand Top K',
+   'Number of top requested modules shown in the admin module demand summary.')
 ON CONFLICT (key) DO NOTHING;
 
 -- ──────────────────────────────────────────────────────────────────────────────

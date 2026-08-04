@@ -98,16 +98,9 @@ class TestChatFaqRepository:
         )
         await db_session.commit()
 
-        rows = await repo.list_updated_since(
-            tenant_id=tenant_id,
-            since=datetime(1970, 1, 1, tzinfo=UTC),
-        )
-        assert len(rows) == 1
-        updated_at = rows[0].updated_at
-
-        before = updated_at - timedelta(seconds=1)
+        before = computed_at - timedelta(seconds=1)
         assert await repo.list_updated_since(tenant_id=tenant_id, since=before)
-        assert not await repo.list_updated_since(tenant_id=tenant_id, since=updated_at)
+        assert not await repo.list_updated_since(tenant_id=tenant_id, since=computed_at)
 
     async def test_list_updated_since_without_tenant_returns_all_tenants(
         self, db_session: AsyncSession

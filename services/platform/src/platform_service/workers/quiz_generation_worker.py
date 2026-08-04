@@ -29,6 +29,7 @@ from typing import Any
 from uuid import UUID
 
 from mc_contracts.enums import GenerationType
+from mc_contracts.errors import ErrorCode
 from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceRequest,
@@ -164,6 +165,8 @@ async def generate_quiz_for_module(
                 await finish_post_publish_step(
                     step_id=step_id,
                     success=False,
+                    error_code=ErrorCode.MODULE_NOT_FOUND.value,
+                    error_message=f"module {module_id} not found",
                     error={"type": "ModuleNotFound", "message": f"module {module_id} not found"},
                 )
                 return 0
@@ -259,6 +262,8 @@ async def generate_quiz_for_module(
         await finish_post_publish_step(
             step_id=step_id,
             success=False,
+            error_code=ErrorCode.QUIZ_GENERATION_FAILED.value,
+            error_message=str(exc)[:500],
             error={"type": type(exc).__name__, "message": str(exc)[:500]},
         )
         raise

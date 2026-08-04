@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from mc_contracts.admin_prompts import (
     PromptTemplateActivateRequest,
     PromptTemplateCatalogEntry,
@@ -12,6 +12,8 @@ from mc_contracts.admin_prompts import (
     PromptTemplateResponse,
     PromptTemplateVariablesResponse,
 )
+from mc_contracts.errors import ErrorCode
+from mc_foundation.problem import AppError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.models.prompt_template import PromptTemplate
@@ -62,7 +64,11 @@ async def list_prompt_versions(
     repo = PromptTemplateRepository(session)
     rows = await repo.list_versions(template_id, variant_key=variant_key)
     if not rows:
-        raise HTTPException(status_code=404, detail=f"Prompt template '{template_id}' not found.")
+        raise AppError(
+            ErrorCode.PROMPT_NOT_FOUND.value,
+            f"Prompt template '{template_id}' not found.",
+            status=404,
+        )
     return [_to_response(row) for row in rows]
 
 
@@ -76,9 +82,10 @@ async def get_prompt_version(
     repo = PromptTemplateRepository(session)
     row = await repo.get_version(template_id, version, variant_key=variant_key)
     if row is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Prompt template '{template_id}' version {version} not found.",
+        raise AppError(
+            ErrorCode.PROMPT_NOT_FOUND.value,
+            f"Prompt template '{template_id}' version {version} not found.",
+            status=404,
         )
     return _to_response(row)
 
@@ -92,7 +99,11 @@ async def get_prompt_variables(
     repo = PromptTemplateRepository(session)
     row = await repo.get_active(template_id, variant_key=variant_key)
     if row is None:
-        raise HTTPException(status_code=404, detail=f"Active prompt template '{template_id}' not found.")
+        raise AppError(
+            ErrorCode.PROMPT_NOT_FOUND.value,
+            f"Active prompt template '{template_id}' not found.",
+            status=404,
+        )
     return PromptTemplateVariablesResponse(
         template_id=row.template_id,
         variant_key=row.variant_key,
@@ -112,7 +123,11 @@ async def create_prompt_version(
         repo = PromptTemplateRepository(session)
         existing = await repo.list_versions(template_id, variant_key=body.variant_key)
         if not existing:
-            raise HTTPException(status_code=404, detail=f"Unknown prompt template '{template_id}'.")
+            raise AppError(
+                ErrorCode.PROMPT_NOT_FOUND.value,
+                f"Unknown prompt template '{template_id}'.",
+                status=404,
+            )
         generation_type_value = existing[0].generation_type
     else:
         generation_type_value = generation_type.value
@@ -124,7 +139,7 @@ async def create_prompt_version(
             required_variables=body.required_variables,
         )
     except PromptTemplateRenderError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise AppError(ErrorCode.BAD_REQUEST.value, str(exc), status=400) from exc
 
     repo = PromptTemplateRepository(session)
     next_version = await repo.get_next_version(template_id, variant_key=body.variant_key)
@@ -157,9 +172,10 @@ async def activate_prompt_version(
     repo = PromptTemplateRepository(session)
     row = await repo.get_version(template_id, version, variant_key=body.variant_key)
     if row is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Prompt template '{template_id}' version {version} not found.",
+        raise AppError(
+            ErrorCode.PROMPT_NOT_FOUND.value,
+            f"Prompt template '{template_id}' version {version} not found.",
+            status=404,
         )
     activated = await repo.activate_version(row)
     await session.commit()
@@ -184,7 +200,7 @@ async def preview_prompt(
             variables=body.variables,
         )
     except (PromptTemplateError, PromptTemplateRenderError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise AppError(ErrorCode.BAD_REQUEST.value, str(exc), status=400) from exc
     return PromptTemplatePreviewResponse(
         template_id=rendered.template_id,
         template_version=rendered.template_version,

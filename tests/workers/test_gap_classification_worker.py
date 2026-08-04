@@ -27,10 +27,7 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe(db_session: AsyncSession) -> AsyncIterator[None]:
-    await truncate_tables(
-        db_session,
-        "module_behavioural_gap, module, module_family, behavioural_gap",
-    )
+    await truncate_tables(db_session, "module_behavioural_gap, module, module_family, behavioural_gap")
     yield
 
 

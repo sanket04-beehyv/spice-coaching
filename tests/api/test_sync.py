@@ -18,16 +18,17 @@ from tests.api.conftest import (
     _mock_storage,
     _seed_module,
     _seed_source_document,
-    wipe_api_tables,
 )
-from tests.conftest import platform_path, requires_db
+from tests.conftest import platform_path, requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    await wipe_api_tables(db_session)
+    await truncate_tables(
+        db_session, "module_quiz_question, module, module_family, content_block, source_page, source_document"
+    )
     yield
 
 
@@ -90,12 +91,10 @@ class TestSyncRoutes:
 
 
 class TestPublishedSourceDocuments:
-    async def test_returns_documents_for_published_modules_only(
+    async def test_returns_visible_documents_without_module_link(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         doc = await _seed_source_document(db_session, sync_published_visible=True)
-        await _seed_module(db_session, source_document_ids=[doc.id])
-        await _seed_module(db_session, title_localized={"bn": "Draft module"}, lifecycle_status="draft")
 
         resp = await client.get(platform_path("/sync/source-documents/published"))
         assert resp.status_code == 200
@@ -115,7 +114,6 @@ class TestPublishedSourceDocuments:
         doc = await _seed_source_document(db_session, title="RMNCH Manual", sync_published_visible=True)
         doc.thumbnail_storage_path = "medtronics-storage/ingest/thumbnails/manual.png"
         await db_session.commit()
-        await _seed_module(db_session, source_document_ids=[doc.id])
 
         thumb_url = "https://minio.example/thumb.png"
         mock_storage = _mock_storage(presigned_url=thumb_url)
@@ -136,8 +134,8 @@ class TestPublishedSourceDocuments:
     async def test_excludes_documents_when_sync_published_visible_false(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        doc = await _seed_source_document(db_session, sync_published_visible=False)
-        await _seed_module(db_session, source_document_ids=[doc.id])
+        await _seed_source_document(db_session, sync_published_visible=False)
+        await _seed_module(db_session)
 
         resp = await client.get(platform_path("/sync/source-documents/published"))
         assert resp.status_code == 200

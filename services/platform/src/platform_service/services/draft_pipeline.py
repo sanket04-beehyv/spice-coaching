@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from mc_contracts.errors import ErrorCode
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,7 +35,7 @@ from platform_service.services.module_card_validator import (
     annotate_field_flags,
 )
 from platform_service.services.plain_text import block_content_to_plain_text
-from platform_service.services.post_publish import should_generate_quiz_for_sources
+from platform_service.services.post_publish import should_generate_quiz_for_run
 from platform_service.services.run_state_service import (
     STAGE_CARD_SEARCH_METADATA_GENERATION,
     STAGE_EMBEDDING_GENERATION,
@@ -217,6 +218,7 @@ class DraftPipeline:
         if candidate is not None:
             cardinality = await resolve_for_candidate(
                 {
+                    "ingestion_run_id": str(ingestion_run_id),
                     "source_provenance": candidate.source_provenance_jsonb,
                     "estimated_quiz_count": candidate.estimated_quiz_count,
                 },
@@ -225,7 +227,7 @@ class DraftPipeline:
             if cardinality.has_target_quizzes():
                 quiz_size = candidate.estimated_quiz_count
 
-        if await should_generate_quiz_for_sources(self._session, source_document_ids):
+        if await should_generate_quiz_for_run(self._session, ingestion_run_id):
             quiz_step = await run_state.start_step(
                 run_id=ingestion_run_id,
                 stage=STAGE_QUIZ_GENERATION,
@@ -241,7 +243,7 @@ class DraftPipeline:
             )
             logger.info(
                 "Draft pipeline: skipping quiz generation for module %s "
-                "(all source documents have assessment_mode=read_only)",
+                "(ingest_batch assessment_mode=read_only)",
                 module_id,
             )
 
@@ -295,11 +297,15 @@ class DraftPipeline:
             if quiz_step_id is not None:
                 await run_state.fail_step(
                     quiz_step_id,
+                    error_code=ErrorCode.ENQUEUE_FAILED.value,
+                    error_message="failed to enqueue quiz Celery task",
                     error={"type": "EnqueueError", "message": "failed to enqueue quiz Celery task"},
                 )
             if metadata_step_id is not None:
                 await run_state.fail_step(
                     metadata_step_id,
+                    error_code=ErrorCode.ENQUEUE_FAILED.value,
+                    error_message="failed to enqueue search metadata Celery task",
                     error={
                         "type": "EnqueueError",
                         "message": "failed to enqueue search metadata Celery task",
@@ -308,6 +314,8 @@ class DraftPipeline:
             if card_metadata_step_id is not None:
                 await run_state.fail_step(
                     card_metadata_step_id,
+                    error_code=ErrorCode.ENQUEUE_FAILED.value,
+                    error_message="failed to enqueue card search metadata Celery task",
                     error={
                         "type": "EnqueueError",
                         "message": "failed to enqueue card search metadata Celery task",
@@ -315,11 +323,15 @@ class DraftPipeline:
                 )
             await run_state.fail_step(
                 embedding_step.id,
+                error_code=ErrorCode.ENQUEUE_FAILED.value,
+                error_message="failed to enqueue embedding Celery task",
                 error={"type": "EnqueueError", "message": "failed to enqueue embedding Celery task"},
             )
             if gap_step_id is not None:
                 await run_state.fail_step(
                     gap_step_id,
+                    error_code=ErrorCode.ENQUEUE_FAILED.value,
+                    error_message="failed to enqueue gap classification Celery task",
                     error={
                         "type": "EnqueueError",
                         "message": "failed to enqueue gap classification Celery task",
@@ -328,6 +340,8 @@ class DraftPipeline:
             if trigger_binding_step_id is not None:
                 await run_state.fail_step(
                     trigger_binding_step_id,
+                    error_code=ErrorCode.ENQUEUE_FAILED.value,
+                    error_message="failed to enqueue trigger binding Celery task",
                     error={
                         "type": "EnqueueError",
                         "message": "failed to enqueue trigger binding Celery task",

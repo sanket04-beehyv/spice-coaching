@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+from mc_foundation.objectstore import ObjectStore
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,12 +13,12 @@ from platform_service.config import get_settings
 from platform_service.db.base import SessionLocal, dispose_all_engines
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 from platform_service.integrations.spice_auth_client import SpiceAuthClient
-from platform_service.services.object_storage import ObjectStorageClient
+from platform_service.objectstore import create_object_store
 
 # Shared client instances — closed on application shutdown via shutdown_clients().
 _ai_client: AIRuntimeClient | None = None
 _spice_auth_client: SpiceAuthClient | None = None
-_object_storage_client: ObjectStorageClient | None = None
+_object_storage_client: ObjectStore | None = None
 _clickhouse_client = None
 _redis_client: Redis | None = None
 
@@ -36,10 +37,10 @@ def get_spice_auth_client() -> SpiceAuthClient:
     return _spice_auth_client
 
 
-def get_object_storage_client() -> ObjectStorageClient:
+def get_object_storage_client() -> ObjectStore:
     global _object_storage_client
     if _object_storage_client is None:
-        _object_storage_client = ObjectStorageClient.from_settings()
+        _object_storage_client = create_object_store()
     return _object_storage_client
 
 

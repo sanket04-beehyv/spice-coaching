@@ -41,7 +41,6 @@ async def _seed_source_doc(session: AsyncSession, *, title: str = "doc") -> Sour
         source_type="pdf",
         primary_language="en",
         content_domain="clinical",
-        assessment_mode="with_quiz",
         original_storage_path="/tmp/x.pdf",
     )
     session.add(sd)
@@ -186,10 +185,11 @@ class TestCrossSourceFusionRunnerHappyPath:
         runner = CrossSourceFusionRunner(db_session, fuser=fuser, stage_d=stage_d)
         expected_sources = {str(fx.sd_a.id), str(fx.sd_b.id)}
         monkeypatch.setattr(
-            runner,
-            "_draft_fused_candidate_in_staged_session",
-            AsyncMock(return_value=(uuid.uuid4(), 2, None, True, {"source_ids": expected_sources})),
+            runner._draft_orchestrator,
+            "_cards_source_set",
+            AsyncMock(return_value=expected_sources),
         )
+        monkeypatch.setattr(runner._draft_orchestrator, "_enqueue_post_publish", AsyncMock())
 
         summary = await runner.run(fx.doc_ids)
 
@@ -205,6 +205,7 @@ class TestCrossSourceFusionRunnerHappyPath:
         assert summary.drafts[0]["cross_source_coverage_ok"] is True
 
         fuser.fuse.assert_awaited_once()
+        stage_d.run.assert_awaited()
 
         run_row = await db_session.get(IngestionRun, summary.fusion_run_id)
         assert run_row is not None
@@ -235,10 +236,11 @@ class TestCrossSourceFusionRunnerRetireHeuristic:
             stage_d=_mock_stage_d_success(),
         )
         monkeypatch.setattr(
-            runner,
-            "_draft_fused_candidate_in_staged_session",
-            AsyncMock(return_value=(uuid.uuid4(), 2, None, True, {})),
+            runner._draft_orchestrator,
+            "_cards_source_set",
+            AsyncMock(return_value={str(fx.sd_a.id), str(fx.sd_b.id)}),
         )
+        monkeypatch.setattr(runner._draft_orchestrator, "_enqueue_post_publish", AsyncMock())
 
         summary = await runner.run(fx.doc_ids)
 
@@ -266,10 +268,11 @@ class TestCrossSourceFusionRunnerRetireHeuristic:
             stage_d=_mock_stage_d_success(),
         )
         monkeypatch.setattr(
-            runner,
-            "_draft_fused_candidate_in_staged_session",
-            AsyncMock(return_value=(uuid.uuid4(), 2, None, True, {})),
+            runner._draft_orchestrator,
+            "_cards_source_set",
+            AsyncMock(return_value={str(fx.sd_a.id), str(fx.sd_b.id)}),
         )
+        monkeypatch.setattr(runner._draft_orchestrator, "_enqueue_post_publish", AsyncMock())
 
         summary = await runner.run(fx.doc_ids)
 
@@ -293,8 +296,8 @@ class TestCrossSourceFusionRunnerDraftFailure:
             fuser=_mock_fuser([group]),
             stage_d=stage_d,
         )
-        draft_mock = AsyncMock(return_value=(None, 0, "RuntimeError", False, {}))
-        monkeypatch.setattr(runner, "_draft_fused_candidate_in_staged_session", draft_mock)
+        enqueue_mock = AsyncMock()
+        monkeypatch.setattr(runner._draft_orchestrator, "_enqueue_post_publish", enqueue_mock)
 
         summary = await runner.run(fx.doc_ids)
 
@@ -302,7 +305,7 @@ class TestCrossSourceFusionRunnerDraftFailure:
         assert summary.fused_modules_failed == 1
         assert summary.drafts[0]["module_id"] is None
         assert summary.drafts[0]["insufficient_reason"] == "RuntimeError"
-        draft_mock.assert_awaited_once()
+        enqueue_mock.assert_not_awaited()
 
     async def test_coverage_warning_still_publishes_module(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
@@ -317,12 +320,18 @@ class TestCrossSourceFusionRunnerDraftFailure:
             fuser=_mock_fuser([group]),
             stage_d=stage_d,
         )
-        draft_mock = AsyncMock(return_value=(module_id, 2, None, False, {}))
-        monkeypatch.setattr(runner, "_draft_fused_candidate_in_staged_session", draft_mock)
+        # Both coverage attempts see only one source — accept best-effort on attempt 2.
+        monkeypatch.setattr(
+            runner._draft_orchestrator,
+            "_cards_source_set",
+            AsyncMock(return_value={str(fx.sd_a.id)}),
+        )
+        enqueue_mock = AsyncMock()
+        monkeypatch.setattr(runner._draft_orchestrator, "_enqueue_post_publish", enqueue_mock)
 
         summary = await runner.run(fx.doc_ids)
 
         assert summary.fused_modules_published == 1
         assert summary.fused_modules_with_coverage_warning == 1
         assert summary.drafts[0]["cross_source_coverage_ok"] is False
-        draft_mock.assert_awaited_once()
+        enqueue_mock.assert_awaited_once()

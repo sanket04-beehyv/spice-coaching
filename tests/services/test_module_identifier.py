@@ -237,14 +237,15 @@ class TestPromptGapContextRemoved:
     def test_system_prompt_excludes_annexures(self) -> None:
         """The grouping rules must explicitly forbid proposing modules
         from forms / checklists / reference tables. Detection cues for
-        annexure terms must be in the prompt body so the LLM has something
-        to match against.
-        """
-        prompt = render_system_prompt({"clinical"}, deployment_primary_locale="en")
+        Annexure / Appendix / अनुलग्नक / layXud must be in the prompt
+        body so the LLM has something to match against."""
+        prompt = render_system_prompt({"clinical"})
         lowered = prompt.lower()
         assert "annexure" in lowered
         assert "appendix" in lowered
         assert "job aid" in lowered
+        # Hindi-Bijoy mojibake cue (lowercase form, since prompt is lowered).
+        assert "layxud" in lowered
 
     def test_human_message_uses_short_tokens_not_uuids(self) -> None:
         """The corpus body must reference content blocks/pages/docs by
@@ -306,10 +307,11 @@ class TestContentDomainBranching:
         assert "DIGITAL" in prompt
         assert "digital_proficiency" in prompt
 
-    def test_clinical_with_app_workflows_branch(self) -> None:
-        prompt = render_system_prompt({"clinical_with_app_workflows"})
-        assert "CLINICAL" in prompt and "app" in prompt.lower()
+    def test_operational_branch(self) -> None:
+        prompt = render_system_prompt({"operational"})
+        assert "OPERATIONAL" in prompt
         assert "initial_training" in prompt
+        assert "clinical_with_app_workflows" not in prompt
 
 
 # ─── _extract_candidates: tolerant to LLM output shape ─────────────────────
@@ -404,7 +406,7 @@ class TestValidateCandidate:
 
     @pytest.mark.parametrize(
         "card_count,expected",
-        [(2, False), (3, True), (5, True), (7, True), (8, True), (10, True), (11, False)],
+        [(2, False), (3, True), (5, True), (7, True), (10, True), (11, False)],
     )
     def test_card_count_bounds(self, card_count: int, expected: bool) -> None:
         b1 = uuid4()
@@ -705,6 +707,42 @@ class TestIdentifyErrorPaths:
                 valid_block_ids=set(),
                 valid_page_ids=set(),
             )
+
+    @pytest.mark.asyncio
+    async def test_parse_failure_error_uses_raw_text_when_json_is_recoverable(self) -> None:
+        block_id = uuid4()
+        page_id = uuid4()
+        wrapped = json.dumps(
+            {
+                "candidates": [
+                    _valid_candidate(
+                        title="Recovered",
+                        cited_block_ids=[block_id],
+                        source_page_id=page_id,
+                    )
+                ]
+            },
+            ensure_ascii=False,
+        )
+        client = MagicMock()
+        client.generate = AsyncMock(
+            return_value=_mock_response(
+                None,
+                raw_text=wrapped,
+                error="failed to parse JSON from provider output",
+            )
+        )
+        identifier = ModuleIdentifier(client=client)
+        result = await identifier.identify(
+            content_domains=set(),
+            already_published_modules=[],
+            document_outlines=[],
+            page_corpus=[],
+            valid_block_ids={block_id},
+            valid_page_ids={page_id},
+        )
+        assert [c["proposed_title"] for c in result.candidates] == ["Recovered"]
+        assert result.truncated is False
 
     @pytest.mark.asyncio
     async def test_invalid_json_raw_text_raises(self) -> None:

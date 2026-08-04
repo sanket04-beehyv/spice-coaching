@@ -54,6 +54,7 @@ GENERATION_PROFILES: dict[GenerationType, GenerationProfile] = {
     GenerationType.CHAT_FAQ_SYNTHESIS: _profile(),
     GenerationType.MODULE_DEMAND_SUMMARY: _profile(),
     GenerationType.CHAT_FEEDBACK_SUMMARY: _profile(),
+    GenerationType.MODULE_CREATION_SUGGESTION: _profile(),
 }
 
 

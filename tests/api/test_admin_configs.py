@@ -6,15 +6,17 @@ from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient
+from mc_foundation.problem import register_problem_handlers
 from platform_service.api.admin_configs import router as admin_configs_router
 from platform_service.config import get_settings
 from platform_service.deps import get_db
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import platform_path, requires_db
+from tests.conftest import platform_path, requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
@@ -22,6 +24,11 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 @pytest_asyncio.fixture
 async def app(db_session: AsyncSession) -> AsyncIterator[FastAPI]:
     app_obj = FastAPI()
+    register_problem_handlers(
+        app_obj,
+        validation_error_type=RequestValidationError,
+        http_exception_type=HTTPException,
+    )
     api_router = APIRouter(prefix=get_settings().api_root_path_normalized)
     api_router.include_router(admin_configs_router)
     app_obj.include_router(api_router)
@@ -43,6 +50,7 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_and_seed_data(db_session: AsyncSession) -> AsyncIterator[None]:
+    await truncate_tables(db_session, "config_threshold")
     # Seed config before the test starts
     await db_session.execute(
         text(
@@ -56,11 +64,6 @@ async def _wipe_and_seed_data(db_session: AsyncSession) -> AsyncIterator[None]:
     await db_session.commit()
 
     yield
-
-    # Clean up after the test
-    await db_session.rollback()
-    await db_session.execute(text("TRUNCATE config_threshold RESTART IDENTITY CASCADE"))
-    await db_session.commit()
 
 
 class TestAdminConfigsRoutes:

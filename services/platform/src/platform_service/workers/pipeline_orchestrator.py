@@ -144,13 +144,20 @@ class PipelineOrchestrator:
         primary_language: str | None = None,
         triggered_by: UUID | None = None,
         resume: bool = True,
-        skip_merge: bool = False,
         staged_sessions: bool = False,
+        run_id: UUID | None = None,
+        identify_chunk_ids: list[str] | None = None,
     ) -> PipelineResult:
         """Execute the full A→B→C→D pipeline for one source document.
 
         If `resume=True` and a partially-failed run exists for this document,
         we attach to that run and skip already-succeeded stages.
+
+        When ``run_id`` is provided (admin batch ingest), that queued run is
+        activated instead of creating a new row.
+
+        When ``identify_chunk_ids`` is set, Stage C only re-identifies those
+        chunks (admin per-chunk retry).
 
         When ``staged_sessions=True``, each pipeline stage uses its own DB
         session so long-running LLM work does not hold a connection for hours.
@@ -165,9 +172,10 @@ class PipelineOrchestrator:
             primary_language=resolved_primary_language,
             triggered_by=triggered_by,
             resume=resume,
-            skip_merge=skip_merge,
             staged_sessions=staged_sessions,
             result_box=result_box,
+            run_id=run_id,
+            identify_chunk_ids=identify_chunk_ids,
         )
         return result_box[0]
 
@@ -204,9 +212,10 @@ class PipelineOrchestrator:
         result: PipelineResult,
         run_id: UUID,
         source_document_id: UUID,
+        identify_chunk_ids: list[str] | None = None,
     ) -> tuple[bool, int]:
-        if await self._run_state.is_stage_succeeded(run_id, stage=STAGE_MODULE_IDENTIFY):
-            logger.info("Resume: skipping Stage C (already succeeded)")
+        if not identify_chunk_ids and await self._run_state.is_module_identify_fully_succeeded(run_id):
+            logger.info("Resume: skipping Stage C (already fully succeeded)")
             existing = await self._candidate_repo.list_candidates_for_run(run_id)
             result.stages.append(
                 StageOutcome(
@@ -220,6 +229,7 @@ class PipelineOrchestrator:
             stage_c=self._stage_c,
             run_id=run_id,
             source_document_id=source_document_id,
+            identify_chunk_ids=identify_chunk_ids,
         )
         result.stages.append(outcome)
         return ok, candidates_emitted
@@ -229,12 +239,10 @@ class PipelineOrchestrator:
         *,
         result: PipelineResult,
         run_id: UUID,
-        skip_merge: bool = False,
     ) -> tuple[int, int]:
         """Run Stage D for each candidate. Returns (drafts_produced, failures)."""
         return await self._draft_runner.run(
             stage_d=self._stage_d,
             run_id=run_id,
-            skip_merge=skip_merge,
             stages=result.stages,
         )

@@ -71,6 +71,27 @@ def test_telemetry_batch_accepts_module_requested() -> None:
     assert batch.events[0].event_type.value == "module_requested"
 
 
+def test_telemetry_batch_accepts_document_viewed() -> None:
+    doc_id = uuid4()
+    batch = TelemetryBatch(
+        sdk_version="1.0",
+        chw_id=1,
+        tenant_id=uuid4(),
+        events=[
+            TelemetryEvent(
+                id="evt-doc-1",
+                event_family=EventFamily.COACHING,
+                event_type=CoachingEventType.DOCUMENT_VIEWED,
+                payload_json={"source_document_id": str(doc_id)},
+                event_date=date.today(),
+                timestamp_local=1,
+            )
+        ],
+    )
+    assert batch.events[0].event_type == CoachingEventType.DOCUMENT_VIEWED
+    assert batch.events[0].event_type.value == "document_viewed"
+
+
 def test_modules_sync_bundle_requires_lists() -> None:
     bundle = ModulesSyncBundle(
         modules=[],

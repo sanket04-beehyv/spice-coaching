@@ -7,10 +7,10 @@ from typing import Any
 from uuid import UUID
 
 from mc_contracts.admin_modules import CardSourcePageRef
+from mc_foundation.objectstore import ObjectStore
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.repositories.source_repository import SourceRepository
-from platform_service.services.object_storage import ObjectStorageClient
 from platform_service.services.sync.presign_service import SyncPresignService
 
 
@@ -127,7 +127,7 @@ async def resolve_card_provenance(
     session: AsyncSession,
     cards: list[dict[str, Any]],
     *,
-    storage: ObjectStorageClient | None = None,
+    storage: ObjectStore | None = None,
     presigned_by_doc: dict[UUID, str | None] | None = None,
     presigned_expires_by_doc: dict[UUID, int | None] | None = None,
 ) -> CardProvenanceContext:

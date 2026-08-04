@@ -20,15 +20,14 @@ from platform_service.deps import get_db
 from platform_service.services.chat_faq_aggregator import stable_faq_id
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.api.conftest import wipe_api_tables
-from tests.conftest import platform_path, requires_db
+from tests.conftest import platform_path, requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    await wipe_api_tables(db_session)
+    await truncate_tables(db_session, "chat_frequent_question, module_quiz_question, module, module_family")
     yield
 
 

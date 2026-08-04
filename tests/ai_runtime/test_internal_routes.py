@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -22,14 +22,6 @@ from mc_contracts.internal_ai import (
 
 def _internal_headers() -> dict[str, str]:
     return {"X-Internal-Token": get_settings().internal_token}
-
-
-@pytest.fixture(autouse=True)
-def _configure_internal_token(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.setenv("INTERNAL_TOKEN", "test-internal-token")
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
 
 
 def _sample_request(*, generation_type: GenerationType = GenerationType.QUIZ_DRAFTING) -> InferenceRequest:
@@ -70,7 +62,10 @@ class TestGenerateRoute:
             headers=_internal_headers(),
         )
         assert resp.status_code == 400
-        assert "Unknown generation_type" in resp.json()["detail"]
+        body = resp.json()
+        assert body["code"] == "bad_request"
+        assert "Unknown generation_type" in body["detail"]
+        assert resp.headers["content-type"].startswith("application/problem+json")
 
     @pytest.mark.asyncio
     async def test_path_body_mismatch_returns_400(self, client: AsyncClient) -> None:
@@ -81,7 +76,9 @@ class TestGenerateRoute:
             headers=_internal_headers(),
         )
         assert resp.status_code == 400
-        assert "does not match body" in resp.json()["detail"]
+        body = resp.json()
+        assert body["code"] == "bad_request"
+        assert "does not match body" in body["detail"]
 
     @pytest.mark.asyncio
     async def test_success_delegates_to_executor(self, client: AsyncClient) -> None:

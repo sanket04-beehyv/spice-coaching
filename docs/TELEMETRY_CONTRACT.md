@@ -134,6 +134,14 @@ batch arrives
        │    └─ enqueue process_training_request_event_task
        │         (creates chw_training_request + individual assignment; no learning points)
        │
+       ├─ if event_type == "video_progress_updated"
+       │      AND payload_json.source_document_id present
+       │    └─ enqueue process_video_progress_event_task
+       │         (monotonic upsert into chw_video_progress; no learning points)
+       │
+       ├─ if event_type == "document_viewed"
+       │    └─ (no Celery side-channel — ClickHouse + document_view_daily MV only)
+       │
        ├─ if gap mode AND event_type ∈ {module_delivered, module_card_viewed,
        │                           module_quiz_attempted} AND module_id present
        │    └─ enqueue process_module_event_task   (v3.3 module path)
@@ -147,7 +155,7 @@ ClickHouse inserts (best-effort):
   └─ on failure → push rows to Redis retry queue, return them in `buffered` ack
 ```
 
-**Celery jobs are NOT gated on the ClickHouse insert succeeding** — operational state (completion / training requests) shouldn't be held hostage to an analytics outage.
+**Celery jobs are NOT gated on the ClickHouse insert succeeding** — operational state (completion / training requests / video progress) shouldn't be held hostage to an analytics outage.
 
 Invalid modules and duplicate training requests are **no-ops** inside `process_training_request_event_task` (logged); the ingest ACK still lists the event as accepted.
 
@@ -177,8 +185,11 @@ Idempotency is enforced by the **`event_id` primary key** on `chw_learning_point
 | `sync_started` / `sync_completed` | Inbound sync worker boundaries | coaching_events |
 | **`module_delivered`** | v3.3 module surfaced in morning rotation | coaching_events + `process_module_event_task` (**learning points**) |
 | **`module_card_viewed`** | v3.3 card opened within a module | coaching_events + `process_module_event_task` (**learning points**) |
+| **`module_quiz_viewed`** | v3.3 module quiz surface opened | coaching_events |
 | **`module_quiz_attempted`** | v3.3 module quiz finished (carries `quiz_score_pct`) | coaching_events + `process_module_event_task` (completion + gap + **learning points**) |
 | **`module_requested`** | CHW requested access to a published module (`module_id`) and/or a free-text custom name (`payload_json.requested_module_name`); optional `payload_json.reason` | coaching_events + `process_training_request_event_task` (training request + assignment; **no** learning points / gap) |
+| **`video_progress_updated`** | CHW watch progress for an assigned video (`payload_json.source_document_id`, `last_position_ms`, `percent_watched` 0–100, optional `completed`) | coaching_events + `process_video_progress_event_task` (monotonic upsert of `chw_video_progress`; **no** learning points / gap). Appears on next `GET /sync/assigned-videos` |
+| **`document_viewed`** | User viewed a knowledge `source_document` (PDF / pptx / docx / audio / video / other). Required `payload_json.source_document_id`. Batch `chw_id` = viewer SPICE user id. Mint a **new** event `id` per view so repeats count. | coaching_events + `document_view_daily` MV. **No** Celery side-effects, **no** learning points / gap. |
 
 ### `digital` family — `DigitalEventType`
 
@@ -289,6 +300,61 @@ Free-text-only example (no `module_id`):
   "timestamp_local": 1714306100
 }
 ```
+
+### `video_progress_updated`
+
+Device reports watch progress for an assigned video (buffered offline and flushed with other telemetry). Required `payload_json` keys: `source_document_id` (UUID of the video `source_document`), `last_position_ms` (≥ 0), `percent_watched` (0–100). Optional `completed` (default false).
+
+Ingest writes ClickHouse and enqueues `process_video_progress_event_task`, which monotonically upserts `chw_video_progress` (`percent_watched` / `last_position_ms` never regress; `completed` sticks once true). Progress appears on the next `GET /sync/assigned-videos`.
+
+```json
+{
+  "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+  "event_schema_version": 1,
+  "session_id": "sess-550e8400-e29b",
+  "event_family": "coaching",
+  "event_type": "video_progress_updated",
+  "payload_json": {
+    "source_document_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    "last_position_ms": 125000,
+    "percent_watched": 42.5,
+    "completed": false
+  },
+  "event_date": "2026-04-28",
+  "timestamp_local": 1714306200,
+  "timestamp_utc": 1714284000
+}
+```
+
+### `document_viewed`
+
+Mobile and admin/web clients emit this when a user views a knowledge document from the Learning Library (or equivalent). Use a **fresh** event `id` for every view — the same user reopening the same document must increment view counts.
+
+Required `payload_json` keys: `source_document_id` (UUID of the `source_document` row). Optional denormalized `document_title` may be sent for offline triage but dashboards enrich title from PostgreSQL and **must not** trust the client value.
+
+Set `upazila_id` (SPICE `chiefdomId`) when known. Batch `chw_id` is the viewer’s SPICE user id (field workers and admin principals alike).
+
+Ingest writes ClickHouse only — **no** Celery worker, **no** learning points, **no** Postgres counter. Analytics rollups use the `document_view_daily` materialized view; drill-down reads raw `coaching_events`. Dashboard API: `GET /dashboard/document-usage` (KPIs + documents + events in one response).
+
+```json
+{
+  "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+  "event_schema_version": 1,
+  "session_id": "sess-550e8400-e29b",
+  "event_family": "coaching",
+  "event_type": "document_viewed",
+  "upazila_id": "upazila-gazipur-sadar",
+  "trigger_type": "user_action",
+  "payload_json": {
+    "source_document_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  },
+  "event_date": "2026-04-28",
+  "timestamp_local": 1714306300,
+  "timestamp_utc": 1714284100
+}
+```
+
+**Client handoff (follow-up tickets):** both the mobile SDK and the admin/web app must emit `document_viewed` on view. Until they do, dashboard metrics stay empty. Retain one event UUID per view across retries (Redis ingest dedup).
 
 ### `digital_help_used`
 

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Select, cast, exists, func, or_, select
+from sqlalchemy import Select, Text, cast, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -15,14 +16,65 @@ from platform_service.db.models.module_behavioural_gap import ModuleBehaviouralG
 from platform_service.db.models.module_card import ModuleCard
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
-from platform_service.db.module_availability import is_training_module_family
+from platform_service.db.module_availability import (
+    DEFAULT_EXCLUDED_LIFECYCLE_STATUSES,
+    is_training_module_family,
+)
 from platform_service.db.tenant_scope import tenant_scope_filter
 from platform_service.localized import deployment_locales, primary_text
+from platform_service.vectorstore import MODULES_COLLECTION, get_vector_store
 
 
 def _escape_ilike_pattern(value: str) -> str:
     """Escape SQL ``LIKE``/``ILIKE`` wildcards in user input."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+MODULE_SORT_KEYS = frozenset(
+    {
+        "created_at",
+        "published_at",
+        "activated_at",
+        "last_deactivated_at",
+        "title",
+        "domain",
+        "lifecycle_status",
+    }
+)
+MODULE_SORT_DIRS = frozenset({"asc", "desc"})
+DEFAULT_MODULE_SORT_BY = "published_at"
+DEFAULT_MODULE_SORT_DIR = "desc"
+
+
+def _nullable_datetime_order(column, *, descending: bool):
+    if descending:
+        return column.desc().nullslast()
+    return column.asc().nullsfirst()
+
+
+def _module_order_clauses(sort_by: str, sort_dir: str) -> list[Any]:
+    descending = sort_dir == "desc"
+    order_fn = (lambda col: col.desc()) if descending else (lambda col: col.asc())
+
+    if sort_by == "created_at":
+        primary = order_fn(Module.created_at)
+    elif sort_by == "published_at":
+        primary = _nullable_datetime_order(Module.published_at, descending=descending)
+    elif sort_by == "activated_at":
+        primary = _nullable_datetime_order(ModuleReadRepository._activated_at_expr(), descending=descending)
+    elif sort_by == "last_deactivated_at":
+        primary = _nullable_datetime_order(Module.last_deactivated_at, descending=descending)
+    elif sort_by == "title":
+        primary_locale = deployment_locales()
+        primary = order_fn(Module.title_localized[primary_locale].astext)
+    elif sort_by == "domain":
+        primary = order_fn(Module.domain)
+    elif sort_by == "lifecycle_status":
+        primary = order_fn(Module.lifecycle_status)
+    else:
+        raise ValueError(f"unsupported sort_by: {sort_by}")
+
+    return [primary, order_fn(Module.id)]
 
 
 class ModuleReadRepository:
@@ -81,7 +133,7 @@ class ModuleReadRepository:
         if status is not None:
             stmt = stmt.where(Module.lifecycle_status == status)
         else:
-            stmt = stmt.where(Module.lifecycle_status.notin_(["retired", "deactivated"]))
+            stmt = stmt.where(Module.lifecycle_status.notin_(sorted(DEFAULT_EXCLUDED_LIFECYCLE_STATUSES)))
         if clinically_reviewed is not None:
             stmt = stmt.where(Module.clinically_reviewed == clinically_reviewed)
         if has_visibility_window is True:
@@ -111,10 +163,9 @@ class ModuleReadRepository:
         if full_text_query:
             escaped = _escape_ilike_pattern(full_text_query)
             pattern = f"%{escaped}%"
-            primary = deployment_locales()
             search_exprs = [
-                Module.title_localized[primary].astext.ilike(pattern, escape="\\"),
-                Module.description_localized[primary].astext.ilike(pattern, escape="\\"),
+                cast(Module.title_localized, Text).ilike(pattern, escape="\\"),
+                cast(Module.description_localized, Text).ilike(pattern, escape="\\"),
             ]
             stmt = stmt.where(or_(*search_exprs))
         if latest_version_only:
@@ -150,6 +201,8 @@ class ModuleReadRepository:
         full_text_query: str | None = None,
         latest_version_only: bool = False,
         tenant_id: UUID | None = None,
+        sort_by: str = DEFAULT_MODULE_SORT_BY,
+        sort_dir: str = DEFAULT_MODULE_SORT_DIR,
         limit: int = 50,
         offset: int = 0,
     ) -> list[Module]:
@@ -172,11 +225,7 @@ class ModuleReadRepository:
             latest_version_only=latest_version_only,
             tenant_id=tenant_id,
         )
-        stmt = (
-            stmt.order_by(Module.published_at.desc().nullslast(), Module.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = stmt.order_by(*_module_order_clauses(sort_by, sort_dir)).limit(limit).offset(offset)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
@@ -242,7 +291,7 @@ class ModuleReadRepository:
         if status is not None:
             stmt = stmt.where(Module.lifecycle_status == status)
         else:
-            stmt = stmt.where(Module.lifecycle_status != "retired")
+            stmt = stmt.where(Module.lifecycle_status.notin_(sorted(DEFAULT_EXCLUDED_LIFECYCLE_STATUSES)))
         if latest_version_only:
             rank_sq = select(
                 Module.id,
@@ -341,23 +390,27 @@ class ModuleReadRepository:
         *,
         tenant_id: UUID | None = None,
     ) -> list[ModuleFamily]:
-        published = aliased(Module)
-        existence = [
-            published.module_family_id == ModuleFamily.id,
-            published.lifecycle_status == "published",
-            published.chatbot_faqs_only.is_(False),
-        ]
-        if tenant_id is not None:
-            existence.append(tenant_scope_filter(published.tenant_id, tenant_id))
-
+        published_module = aliased(Module)
         stmt = (
             select(ModuleFamily)
             .where(
                 ModuleFamily.created_at > since,
-                exists(select(published.id).where(*existence)),
+                exists(
+                    select(published_module.id).where(
+                        published_module.module_family_id == ModuleFamily.id,
+                        published_module.lifecycle_status == "published",
+                        is_training_module_family(published_module),
+                    )
+                ),
             )
             .order_by(ModuleFamily.created_at.asc(), ModuleFamily.id.asc())
         )
+        if tenant_id is not None:
+            stmt = (
+                stmt.join(Module, Module.module_family_id == ModuleFamily.id)
+                .where(tenant_scope_filter(Module.tenant_id, tenant_id))
+                .distinct()
+            )
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def list_published_modules_updated_since(
@@ -434,19 +487,32 @@ class ModuleReadRepository:
         assignable_only: bool = False,
         tenant_id: UUID | None = None,
     ) -> list[tuple[Module, float]]:
-        distance = Module.embedding.cosine_distance(list(query_vector)).label("distance")
-        stmt = (
-            select(Module, distance)
-            .where(Module.embedding.is_not(None), Module.lifecycle_status == "published")
-            .order_by(distance.asc())
-            .limit(limit)
-        )
+        """Semantic search via the configured ``VectorStore``, then hydrate modules."""
+        filters: dict[str, object] = {"lifecycle_status": "published"}
         if assignable_only:
-            stmt = stmt.where(is_training_module_family())
+            filters["assignable_only"] = True
         if tenant_id is not None:
-            stmt = stmt.where(tenant_scope_filter(Module.tenant_id, tenant_id))
-        rows = (await self._session.execute(stmt)).all()
-        return [(mod, float(dist)) for mod, dist in rows]
+            filters["tenant_id"] = tenant_id
+
+        store = get_vector_store(self._session)
+        matches = await store.search(
+            MODULES_COLLECTION,
+            query_vector,
+            top_k=limit,
+            filters=filters,
+        )
+        if not matches:
+            return []
+
+        ordered_ids = [UUID(match["id"]) for match in matches]
+        distance_by_id = {UUID(match["id"]): float(match["distance"]) for match in matches}
+        rows = (await self._session.execute(select(Module).where(Module.id.in_(ordered_ids)))).scalars().all()
+        modules_by_id = {module.id: module for module in rows}
+        return [
+            (modules_by_id[module_id], distance_by_id[module_id])
+            for module_id in ordered_ids
+            if module_id in modules_by_id
+        ]
 
     async def list_published_modules_for_gap_ids(
         self,

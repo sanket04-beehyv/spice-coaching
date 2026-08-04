@@ -4,11 +4,15 @@ import enum
 
 
 class ContentDomain(str, enum.Enum):
-    """Source document content domain (v3.3 ingest / Stage C branching)."""
+    """Source document content domain (v3.3 ingest / Stage C branching).
 
-    DIGITAL = "digital"
+    One value per ingest. Display labels for Learning Library / Practice Zone:
+    Clinical (default), Digital, Operational.
+    """
+
     CLINICAL = "clinical"
-    CLINICAL_WITH_APP_WORKFLOWS = "clinical_with_app_workflows"
+    DIGITAL = "digital"
+    OPERATIONAL = "operational"
 
 
 class AssessmentMode(str, enum.Enum):
@@ -113,6 +117,8 @@ class GenerationType(str, enum.Enum):
     MODULE_DEMAND_SUMMARY = "module_demand_summary"
     # Weekly: synthesize chat feedback digest from positive/negative telemetry.
     CHAT_FEEDBACK_SUMMARY = "chat_feedback_summary"
+    # Daily: map unattributed chat/request demand to draft modules or new topics.
+    MODULE_CREATION_SUGGESTION = "module_creation_suggestion"
 
 
 class SourceDocumentType(str, enum.Enum):
@@ -164,16 +170,28 @@ class CoachingEventType(str, enum.Enum):
     # scenario-level CARD_* / QUIZ_* events above which carry scenario_id.
     # MODULE_DELIVERED:   the module surfaced in the CHW's morning rotation.
     # MODULE_CARD_VIEWED: CHW opened a specific card within a module.
+    # MODULE_QUIZ_VIEWED: CHW opened the module quiz surface (distinct from
+    #                       MODULE_QUIZ_ATTEMPTED, which means finished).
     # MODULE_QUIZ_ATTEMPTED: CHW finished the module quiz; payload carries
     #                       quiz_score_pct (0.0–1.0) and per-question answers.
     # MODULE_REQUESTED:   CHW requested access to a module (or a free-text
     #                       custom module name); payload may carry
     #                       requested_module_name / reason. Routes to
     #                       process_training_request_event_task (not completion).
+    # VIDEO_PROGRESS_UPDATED: CHW watch progress for an assigned video; payload
+    #                       carries source_document_id / last_position_ms /
+    #                       percent_watched / completed. Routes to
+    #                       process_video_progress_event_task (Postgres upsert).
+    # DOCUMENT_VIEWED:      User viewed a knowledge source_document (PDF/pptx/…);
+    #                       payload carries source_document_id. ClickHouse only
+    #                       (document_view_daily MV); no learning points / Celery.
     MODULE_DELIVERED = "module_delivered"
     MODULE_CARD_VIEWED = "module_card_viewed"
+    MODULE_QUIZ_VIEWED = "module_quiz_viewed"
     MODULE_QUIZ_ATTEMPTED = "module_quiz_attempted"
     MODULE_REQUESTED = "module_requested"
+    VIDEO_PROGRESS_UPDATED = "video_progress_updated"
+    DOCUMENT_VIEWED = "document_viewed"
 
 
 class DigitalEventType(str, enum.Enum):

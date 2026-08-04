@@ -11,6 +11,7 @@ from mc_contracts.admin_modules import (
     ModuleSummary,
     QuizQuestionPayload,
 )
+from mc_foundation.objectstore import ObjectStore
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +31,6 @@ from platform_service.services.card_provenance import (
     resolve_card_provenance,
     resolve_source_pages_for_blocks,
 )
-from platform_service.services.object_storage import ObjectStorageClient
 from platform_service.services.source_thumbnail_service import presign_thumbnail
 from platform_service.services.sync_service import SyncService
 
@@ -59,7 +59,7 @@ async def summary_from_module(
     *,
     card_count: int,
     quiz_count: int,
-    storage: ObjectStorageClient | None = None,
+    storage: ObjectStore | None = None,
     family: ModuleFamily | None = None,
 ) -> ModuleSummary:
     thumb_path = module.thumbnail_storage_path
@@ -95,6 +95,9 @@ async def summary_from_module(
         thumbnail_presigned_url=thumb_url,
         thumbnail_presigned_expires_seconds=thumb_expires,
         source_document_ids=([str(doc_id) for doc_id in (module.source_document_ids or [])] or None),
+        merge_secondary_module_id=module.merge_secondary_module_id,
+        merge_primary_module_id=module.merge_primary_module_id,
+        merge_source_module_id=module.merge_source_module_id,
     )
 
 
@@ -106,7 +109,7 @@ async def cards_with_source_pages(
     session: AsyncSession,
     cards: list[dict[str, Any]],
     *,
-    storage: ObjectStorageClient | None = None,
+    storage: ObjectStore | None = None,
     presigned_by_doc: dict[UUID, str | None] | None = None,
     presigned_expires_by_doc: dict[UUID, int | None] | None = None,
 ) -> list[dict[str, Any]]:
@@ -154,7 +157,7 @@ def quiz_payload(rows: list[ModuleQuizQuestion]) -> list[QuizQuestionPayload]:
 async def source_documents_for_module(
     session: AsyncSession,
     module: Module,
-    storage: ObjectStorageClient,
+    storage: ObjectStore,
 ) -> list[ModuleSourceDocumentRef]:
     doc_ids = list(module.source_document_ids or [])
     if not doc_ids:

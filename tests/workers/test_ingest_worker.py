@@ -12,7 +12,7 @@ from platform_service.workers.ingest_worker import IngestJob, run_ingest_batch_j
 _BUCKET = "medtronics-storage"
 
 
-def _job_payload(job: IngestJob) -> dict:
+def _job_payload(*jobs: IngestJob) -> dict:
     return {
         "jobs": [
             {
@@ -20,10 +20,9 @@ def _job_payload(job: IngestJob) -> dict:
                 "source_path": job.source_path,
                 "source_type": job.source_type,
                 "primary_language": job.primary_language,
-                "skip_merge": False,
             }
+            for job in jobs
         ],
-        "fuse_sources": False,
     }
 
 
@@ -198,3 +197,75 @@ async def test_batch_skips_thumbnail_wait_for_unsupported_source_type() -> None:
     get_source_document.assert_not_called()
     mock_thumb_task.apply_async.assert_not_called()
     mock_pipeline.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_batch_fuses_when_two_or_more_jobs() -> None:
+    jobs = [
+        IngestJob(
+            source_document_id=uuid4(),
+            source_path=f"{_BUCKET}/ingest/a.pdf",
+            source_type="pdf",
+            primary_language="bn",
+        ),
+        IngestJob(
+            source_document_id=uuid4(),
+            source_path=f"{_BUCKET}/ingest/b.pdf",
+            source_type="pdf",
+            primary_language="bn",
+        ),
+    ]
+    settings = MagicMock()
+    settings.ingest_thumbnail_wait_seconds = 0
+    doc = MagicMock()
+    doc.thumbnail_storage_path = None
+
+    with (
+        patch("platform_service.celery_tasks.generate_source_thumbnail_task"),
+        _mock_thumbnail_polling(get_source_document=AsyncMock(return_value=doc)),
+        patch("platform_service.workers.ingest_worker.get_settings", return_value=settings),
+        patch(
+            "platform_service.workers.ingest_worker.run_pipeline_for_source_job",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "platform_service.workers.ingest_worker.run_cross_source_fusion_job",
+            new_callable=AsyncMock,
+        ) as mock_fusion,
+    ):
+        await run_ingest_batch_job(_job_payload(*jobs))
+
+    mock_fusion.assert_awaited_once()
+    fusion_payload = mock_fusion.await_args[0][0]
+    assert fusion_payload["source_document_ids"] == [str(j.source_document_id) for j in jobs]
+
+
+@pytest.mark.asyncio
+async def test_batch_skips_fusion_for_single_job() -> None:
+    job = IngestJob(
+        source_document_id=uuid4(),
+        source_path=f"{_BUCKET}/ingest/x.pdf",
+        source_type="pdf",
+        primary_language="bn",
+    )
+    settings = MagicMock()
+    settings.ingest_thumbnail_wait_seconds = 0
+    doc = MagicMock()
+    doc.thumbnail_storage_path = None
+
+    with (
+        patch("platform_service.celery_tasks.generate_source_thumbnail_task"),
+        _mock_thumbnail_polling(get_source_document=AsyncMock(return_value=doc)),
+        patch("platform_service.workers.ingest_worker.get_settings", return_value=settings),
+        patch(
+            "platform_service.workers.ingest_worker.run_pipeline_for_source_job",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "platform_service.workers.ingest_worker.run_cross_source_fusion_job",
+            new_callable=AsyncMock,
+        ) as mock_fusion,
+    ):
+        await run_ingest_batch_job(_job_payload(job))
+
+    mock_fusion.assert_not_awaited()

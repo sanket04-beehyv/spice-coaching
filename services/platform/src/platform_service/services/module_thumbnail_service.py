@@ -5,17 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import UUID
 
+from mc_foundation.objectstore import (
+    ObjectNotFoundError,
+    ObjectStorageError,
+    ObjectStore,
+    looks_like_object_storage_storage_path,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.config import Settings, get_settings
 from platform_service.db.repositories.source_repository import SourceRepository
 from platform_service.db.validators import ValidationError
-from platform_service.services.object_storage import (
-    ObjectNotFoundError,
-    ObjectStorageClient,
-    ObjectStorageError,
-    looks_like_object_storage_storage_path,
-)
 
 _ALLOWED_THUMBNAIL_SUFFIXES: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 
@@ -50,7 +50,7 @@ async def validate_module_thumbnail_storage_path(
     storage_path: str | None,
     *,
     settings: Settings | None = None,
-    storage: ObjectStorageClient | None = None,
+    storage: ObjectStore | None = None,
 ) -> str | None:
     """Validate a module thumbnail MinIO path (``None`` clears the thumbnail)."""
     if storage_path is None:
@@ -61,7 +61,7 @@ async def validate_module_thumbnail_storage_path(
     if not path:
         raise ValidationError("invalid_thumbnail_storage_path", "storage_path must not be empty")
 
-    bucket_name = settings.minio_bucket_name
+    bucket_name = settings.object_storage_bucket_name
     if not looks_like_object_storage_storage_path(path, bucket_name=bucket_name):
         raise ValidationError(
             "invalid_thumbnail_storage_path",

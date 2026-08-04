@@ -8,11 +8,11 @@ from uuid import UUID
 
 from mc_contracts.coaching_rag import CoachingRagRequest, CoachingRagResponse
 from mc_contracts.internal_ai import InferenceRequest, InferenceResponse
+from mc_foundation.objectstore import ObjectNotFoundError
 from platform_service.db.base import SessionLocal
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 from platform_service.services.coaching_rag_errors import CoachingRagError
 from platform_service.services.coaching_rag_service import CoachingRagService
-from platform_service.services.object_storage import ObjectNotFoundError
 
 from eval.rag.answer_metrics import (
     artifact_category_slug,

@@ -76,10 +76,7 @@ requires_db = pytest.mark.skipif(
 
 def platform_path(path: str) -> str:
     """Full HTTP path including the platform API root prefix."""
-    root = get_settings().api_root_path_normalized
-    if not path.startswith("/"):
-        path = f"/{path}"
-    return f"{root}{path}"
+    return get_settings().api_path(path)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -105,9 +102,8 @@ def _align_database_url_with_test_url() -> Iterator[None]:
     if test_url:
         # Take precedence over any inherited DATABASE_URL.
         os.environ["DATABASE_URL"] = test_url
-        # Default test DB password matches the docker container we
-        # document above. Honour an explicit override if set.
-        os.environ.setdefault("DATABASE_PASSWORD", "postgres")
+        # Do not set DATABASE_PASSWORD here — CI unsets it and embeds credentials
+        # in DATABASE_URL_TEST; forcing a default reintroduces secret-env races.
         # Clear any previously-cached settings.
         try:
             get_settings.cache_clear()

@@ -254,7 +254,7 @@ class ModuleCardValidator:
             if _out_of_script_alpha_ratio(value, script_range) > _PRIMARY_SCRIPT_BLEED_RATIO:
                 soft.append(
                     f"{fld} contains >{int(_PRIMARY_SCRIPT_BLEED_RATIO * 100)}% "
-                    f"out-of-script characters (likely language bleed-through)"
+                    f"Latin/out-of-script characters (likely language bleed-through)"
                 )
 
         # Length caps (soft — these are layout hints, not safety issues).
@@ -267,18 +267,22 @@ class ModuleCardValidator:
             soft.append(f"next_action too long ({len(next_action)} > {_MAX_NEXT_ACTION_CHARS})")
 
         # Forbidden patterns across all narrative fields (hard — safety).
-        narrative = " ".join(
-            v
-            for v in (
-                title,
-                body,
-                next_action,
-                _primary_field_plain_text(card, "previous_practice", self._settings),
-                _primary_field_plain_text(card, "current_practice", self._settings),
-                _primary_field_plain_text(card, "rationale_for_change", self._settings),
-            )
-            if v
+        narrative_fields = (
+            "title",
+            "body",
+            "next_action",
+            "previous_practice",
+            "current_practice",
+            "rationale_for_change",
         )
+        narrative_values: list[str] = []
+        for fld in narrative_fields:
+            raw = card.get(fld)
+            if isinstance(raw, dict) and not is_rich_text_body(raw):
+                narrative_values.extend(value for value in raw.values() if isinstance(value, str))
+            else:
+                narrative_values.append(_primary_field_plain_text(card, fld, self._settings))
+        narrative = " ".join(value for value in narrative_values if value)
         if m := _DOSAGE_RE.search(narrative):
             hard.append(f"forbidden dosage expression: '{m.group()}'")
         if m := _DRUG_RE.search(narrative):

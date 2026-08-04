@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 
+from mc_contracts.errors import ErrorCode
+from mc_foundation.problem import problem_json_response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 
 from platform_service.config import get_settings
 from platform_service.deps import get_spice_auth_client
@@ -44,7 +46,19 @@ class SpiceAuthMiddleware(BaseHTTPMiddleware):
                 auth_cookie=request.headers.get("auth-cookie"),
             )
         except SpiceAuthError as exc:
-            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+            code = (
+                ErrorCode.NOT_AUTHENTICATED.value
+                if exc.status_code == 401
+                else ErrorCode.FORBIDDEN.value
+                if exc.status_code == 403
+                else ErrorCode.BAD_REQUEST.value
+            )
+            return problem_json_response(
+                code=code,
+                detail=str(exc.detail),
+                status=exc.status_code,
+                instance=str(request.url.path),
+            )
 
         request.state.spice_contexts = contexts
         request.state.spice_user = contexts.user_detail

@@ -48,6 +48,8 @@ def candidate_description_localized(
     s = settings or get_settings()
     primary = deployment_locales(s)
     data = dict(candidate)
+    if "description" not in data and isinstance(data.get("description_localized"), dict):
+        data["description"] = data["description_localized"]
     if "description" not in data:
         migrate_legacy_suffix_field(data, "description", primary=primary)
     desc = data.get("description")

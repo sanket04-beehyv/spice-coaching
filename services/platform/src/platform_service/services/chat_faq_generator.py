@@ -22,12 +22,13 @@ from platform_service.config import Settings, get_settings
 from platform_service.deps import get_ai_client
 from platform_service.integrations.ai_runtime_client import AIRuntimeClient
 from platform_service.localized import migrate_legacy_suffix_field, primary_text, to_localized_string
-from platform_service.services.chat_faq_aggregator import normalize_question, stable_faq_id
+from platform_service.services.chat_faq_aggregator import stable_faq_id
 from platform_service.services.chat_faq_clusterer import QuestionCluster
 from platform_service.services.llm_response_resolver import resolve_parsed_dict
 from platform_service.services.prompt_registry import CHAT_FAQ_TEMPLATE_ID
 from platform_service.services.prompt_template_service import PromptTemplateService, prompt_spec_from_rendered
 from platform_service.services.prompt_variables.chat_faq_variables import build_chat_faq_variables
+from platform_service.services.question_text import normalize_question
 
 logger = logging.getLogger(__name__)
 

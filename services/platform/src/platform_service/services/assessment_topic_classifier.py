@@ -106,6 +106,8 @@ class AssessmentTopicClassifier:
         self._allowed = sorted(canonical_assessment_topic_keys())
 
     async def classify_module(self, module: Module) -> AssessmentTopicClassificationResult:
+        if module.id is None:
+            return classify_topics_from_metadata(module)
         card_rows = await ModuleReadRepository(self._session).list_cards(module.id)
         module_payload = module_payload_for_classification(
             module,

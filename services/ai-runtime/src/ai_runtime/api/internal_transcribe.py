@@ -11,12 +11,14 @@ import base64
 import binascii
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
+from mc_contracts.errors import ErrorCode
 from mc_contracts.internal_ai import (
     GEMINI_INLINE_TRANSCRIPTION_MAX_BYTES,
     TranscribeRequest,
     TranscribeResponse,
 )
+from mc_foundation.problem import AppError
 
 from ai_runtime.config import get_settings
 from ai_runtime.security import require_internal_token
@@ -65,16 +67,24 @@ async def transcribe(
     """Return transcript text extracted from audio/video bytes."""
     mime_type = body.mime_type.lower()
     if mime_type not in _SUPPORTED_TRANSCRIPTION_MIME_TYPES:
-        raise HTTPException(status_code=400, detail=f"unsupported transcription mime_type {body.mime_type!r}")
+        raise AppError(
+            ErrorCode.UNSUPPORTED_MIME_TYPE.value,
+            f"unsupported transcription mime_type {body.mime_type!r}",
+            status=400,
+        )
     try:
         media_bytes = base64.b64decode(body.data_base64, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"invalid data_base64: {exc}") from exc
+        raise AppError(ErrorCode.INVALID_BASE64.value, f"invalid data_base64: {exc}", status=400) from exc
     if not media_bytes:
-        raise HTTPException(status_code=400, detail="empty media payload")
+        raise AppError(ErrorCode.EMPTY_MEDIA_PAYLOAD.value, "empty media payload", status=400)
     max_bytes = _provider_media_limit_bytes(get_settings().ai_provider)
     if len(media_bytes) > max_bytes:
-        raise HTTPException(status_code=413, detail=f"media payload exceeds {max_bytes} bytes")
+        raise AppError(
+            ErrorCode.PAYLOAD_TOO_LARGE.value,
+            f"media payload exceeds {max_bytes} bytes",
+            status=413,
+        )
     try:
         text = await _executor.transcribe_media(media_bytes=media_bytes, mime_type=mime_type)
     except Exception as exc:
@@ -85,7 +95,8 @@ async def transcribe(
             if status_code == 429
             else "transcription provider failed"
         )
-        raise HTTPException(status_code=status_code, detail=detail) from exc
+        code = ErrorCode.RATE_LIMIT_EXCEEDED.value if status_code == 429 else ErrorCode.AI_RUNTIME_ERROR.value
+        raise AppError(code, detail, status=status_code) from exc
     if not text.strip():
-        raise HTTPException(status_code=422, detail="provider returned empty transcript")
+        raise AppError(ErrorCode.EMPTY_TRANSCRIPT.value, "provider returned empty transcript", status=422)
     return TranscribeResponse(text=text)

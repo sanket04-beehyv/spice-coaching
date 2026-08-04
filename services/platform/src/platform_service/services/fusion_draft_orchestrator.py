@@ -109,6 +109,7 @@ class FusionDraftOrchestrator:
                 d_result = await self._stage_d.run(
                     candidate_id=candidate_id,
                     enqueue_post_publish=False,
+                    skip_merge=True,
                     step_id=step_id,
                 )
                 await self._session.commit()

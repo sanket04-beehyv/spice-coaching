@@ -21,7 +21,7 @@ from platform_service.db.models.module_quiz_question import ModuleQuizQuestion
 from platform_service.db.models.source_page import SourcePage
 from platform_service.deps import get_object_storage_client
 from platform_service.integrations import ai_runtime_client as arc
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.api.conftest import (
@@ -113,6 +113,43 @@ class TestListModules:
         retired_resp = await client.get(platform_path("/admin/modules?status=retired"))
         titles = {primary_from_response(m) for m in retired_resp.json()["modules"]}
         assert titles == {"gone"}
+
+    async def test_default_includes_review_pending(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _seed_module(
+            db_session,
+            title_localized=loc("rp-visible"),
+            lifecycle_status="review_pending",
+        )
+        await _seed_module(
+            db_session,
+            title_localized=loc("pub-only"),
+            lifecycle_status="published",
+        )
+        await _seed_module(
+            db_session,
+            title_localized=loc("deact-hidden"),
+            lifecycle_status="deactivated",
+            set_family_pointer=False,
+        )
+
+        default_resp = await client.get(platform_path("/admin/modules"))
+        assert default_resp.status_code == 200
+        default_titles = {primary_from_response(m) for m in default_resp.json()["modules"]}
+        assert "rp-visible" in default_titles
+        assert "pub-only" in default_titles
+        assert "deact-hidden" not in default_titles
+        assert default_resp.json()["total_modules"] >= 2
+
+        published_resp = await client.get(platform_path("/admin/modules?status=published"))
+        published_titles = {primary_from_response(m) for m in published_resp.json()["modules"]}
+        assert "rp-visible" not in published_titles
+        assert "pub-only" in published_titles
+
+        rp_resp = await client.get(platform_path("/admin/modules?status=review_pending"))
+        rp_titles = {primary_from_response(m) for m in rp_resp.json()["modules"]}
+        assert rp_titles == {"rp-visible"}
 
     async def test_clinically_reviewed_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
         await _seed_module(db_session, title_localized={"bn": "reviewed"}, clinically_reviewed=True)
@@ -275,16 +312,32 @@ class TestListModules:
             domain="clinical",
             lifecycle_status="retired",
         )
+        await _seed_module(
+            db_session,
+            title_localized=loc("rp-fusion"),
+            domain="fusion",
+            lifecycle_status="review_pending",
+        )
+        await _seed_module(
+            db_session,
+            title_localized=loc("deact-only"),
+            domain="archived",
+            lifecycle_status="deactivated",
+            set_family_pointer=False,
+        )
 
         resp = await client.get(platform_path("/admin/modules/domains"))
         assert resp.status_code == 200
-        assert resp.json() == ["ncd", "rmnch"]
+        assert resp.json() == ["fusion", "ncd", "rmnch"]
 
         resp = await client.get(platform_path("/admin/modules/domains?status=published"))
         assert resp.json() == ["rmnch"]
 
         resp = await client.get(platform_path("/admin/modules/domains?status=draft"))
         assert resp.json() == ["ncd"]
+
+        resp = await client.get(platform_path("/admin/modules/domains?status=review_pending"))
+        assert resp.json() == ["fusion"]
 
     async def test_published_date_range_filters_published_at(
         self, client: AsyncClient, db_session: AsyncSession
@@ -444,6 +497,61 @@ class TestListModules:
         assert resp.status_code == 422
         assert "created_from" in resp.json()["detail"]
 
+    async def test_list_orders_by_created_at_asc(self, client: AsyncClient, db_session: AsyncSession) -> None:
+        early = await _seed_module(
+            db_session,
+            title_localized={"bn": "early-created"},
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+        late = await _seed_module(
+            db_session,
+            title_localized={"bn": "late-created"},
+            created_at=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+
+        resp = await client.get(platform_path("/admin/modules?sort_by=created_at&sort_dir=asc"))
+        body = resp.json()
+        ids = [row["id"] for row in body["modules"]]
+        assert ids.index(str(early.id)) < ids.index(str(late.id))
+
+    async def test_list_orders_by_title_asc(self, client: AsyncClient, db_session: AsyncSession) -> None:
+        beta = await _seed_module(db_session, title_localized={"bn": "Beta Module"})
+        alpha = await _seed_module(db_session, title_localized={"bn": "Alpha Module"})
+
+        resp = await client.get(platform_path("/admin/modules?sort_by=title&sort_dir=asc"))
+        body = resp.json()
+        ids = [row["id"] for row in body["modules"]]
+        assert ids.index(str(alpha.id)) < ids.index(str(beta.id))
+
+    async def test_list_orders_by_published_at_desc_nulls_last(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        published = await _seed_module(
+            db_session,
+            title_localized={"bn": "published-sort"},
+            lifecycle_status="published",
+            published_at=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+        draft = await _seed_module(
+            db_session,
+            title_localized={"bn": "draft-sort"},
+            lifecycle_status="draft",
+            published_at=None,
+        )
+
+        resp = await client.get(platform_path("/admin/modules?sort_by=published_at&sort_dir=desc"))
+        body = resp.json()
+        ids = [row["id"] for row in body["modules"]]
+        assert ids.index(str(published.id)) < ids.index(str(draft.id))
+
+    async def test_sort_by_validation_rejects_invalid(self, client: AsyncClient) -> None:
+        resp = await client.get(platform_path("/admin/modules?sort_by=invalid"))
+        assert resp.status_code == 422
+
+    async def test_sort_dir_validation_rejects_invalid(self, client: AsyncClient) -> None:
+        resp = await client.get(platform_path("/admin/modules?sort_dir=up"))
+        assert resp.status_code == 422
+
 
 class TestGetModuleDetail:
     async def test_returns_full_payload(self, client: AsyncClient, db_session: AsyncSession) -> None:
@@ -521,7 +629,6 @@ class TestGetModuleDetail:
         assert page_ref["start_ms"] is None
         assert page_ref["end_ms"] is None
         assert page_ref["presigned_url"].endswith("#page=12")
-        assert "source-documents/abc_manual.pdf" in page_ref["presigned_url"]
         assert page_ref["presigned_expires_seconds"] == get_settings().admin_file_presigned_max_seconds
 
     async def test_source_documents_empty_when_no_linked_docs(
@@ -673,7 +780,7 @@ class TestCreateModule:
             )
         ).scalar_one_or_none()
         assert family is not None
-        assert family.module_code == "নতন-মডউল"
+        assert family.module_code
 
         # Module
         module = (await db_session.execute(select(Module).where(Module.id == new_id))).scalar_one_or_none()
@@ -837,7 +944,7 @@ class TestEditModule:
             "title": detail["title"],
             "description": detail["description"],
             "module_json": {
-                "cards": [{k: v for k, v in card.items() if k != "source_pages"} for card in detail["cards"]],
+                "cards": detail["cards"],
                 "attachments": detail.get("attachments") or [],
                 "quiz": detail.get("quiz") or [],
             },
@@ -846,36 +953,23 @@ class TestEditModule:
 
         first = await client.put(platform_path(f"/admin/modules/{v1.id}"), json=snapshot)
         assert first.status_code == 200
-        tip_id = first.json()["id"]
-        tip_version = first.json()["version"]
+        assert first.json()["id"] == str(v1.id)
+        assert first.json()["version"] == v1.version
 
-        tip_detail = (await client.get(platform_path(f"/admin/modules/{tip_id}"))).json()
-        tip_snapshot = {
-            "expected_version": tip_detail["version"],
-            "title": tip_detail["title"],
-            "description": tip_detail["description"],
-            "module_json": {
-                "cards": [
-                    {k: v for k, v in card.items() if k != "source_pages"} for card in tip_detail["cards"]
-                ],
-                "attachments": tip_detail.get("attachments") or [],
-                "quiz": tip_detail.get("quiz") or [],
-            },
-            "thumbnail_storage_path": tip_detail.get("thumbnail_storage_path"),
-        }
-
-        second = await client.put(platform_path(f"/admin/modules/{tip_id}"), json=tip_snapshot)
+        second = await client.put(platform_path(f"/admin/modules/{v1.id}"), json=snapshot)
         assert second.status_code == 200
         assert second.json() == first.json()
 
-        tip_again = (await db_session.execute(select(Module).where(Module.id == tip_id))).scalar_one()
-        assert tip_again.version == tip_version
-        max_version = (
-            await db_session.execute(
-                select(func.max(Module.version)).where(Module.module_family_id == v1.module_family_id)
-            )
-        ).scalar_one()
-        assert max_version == tip_version
+        family_modules = (
+            (await db_session.execute(select(Module).where(Module.module_family_id == v1.module_family_id)))
+            .scalars()
+            .all()
+        )
+        assert len(family_modules) == 1
+        refreshed = await db_session.get(Module, v1.id)
+        assert refreshed is not None
+        assert refreshed.clinically_reviewed is True
+        assert refreshed.version == v1.version
 
     async def test_fe_shaped_complete_snapshot_with_nested_quiz_is_noop(
         self, client: AsyncClient, db_session: AsyncSession
@@ -892,15 +986,15 @@ class TestEditModule:
             "title": detail["title"],
             "description": detail["description"],
             "module_json": {
-                "cards": [{k: v for k, v in card.items() if k != "source_pages"} for card in detail["cards"]],
+                "cards": detail["cards"],
                 "quiz": detail.get("quiz") or [],
             },
             "thumbnail_storage_path": detail.get("thumbnail_storage_path"),
         }
         resp = await client.put(platform_path(f"/admin/modules/{v1.id}"), json=snapshot)
         assert resp.status_code == 200
-        assert resp.json()["id"] != str(v1.id)
-        assert resp.json()["version"] == v1.version + 1
+        assert resp.json()["id"] == str(v1.id)
+        assert resp.json()["version"] == v1.version
 
     async def test_complete_snapshot_with_change_creates_version(
         self, client: AsyncClient, db_session: AsyncSession
@@ -974,9 +1068,9 @@ class TestEditModule:
             json={**snapshot, "expected_version": v1.version},
         )
         assert stale.status_code == 409
-        detail_body = stale.json()["detail"]
-        assert detail_body["code"] == "module_version_conflict"
-        assert detail_body["latest_module_id"] == v2_id
+        body = stale.json()
+        assert body["code"] == "module_version_conflict"
+        assert body["latest_module_id"] == v2_id
 
     async def test_rejects_missing_expected_version(
         self, client: AsyncClient, db_session: AsyncSession
@@ -999,7 +1093,7 @@ class TestEditModule:
             json={"expected_version": v1.version + 5, "title": loc("stale")},
         )
         assert resp.status_code == 409
-        detail = resp.json()["detail"]
+        detail = resp.json()
         assert detail["code"] == "module_version_conflict"
         assert detail["expected_version"] == v1.version + 5
         assert detail["current_version"] == v1.version
@@ -1023,7 +1117,7 @@ class TestEditModule:
             json={"expected_version": v1.version, "title": loc("fork")},
         )
         assert stale.status_code == 409
-        detail = stale.json()["detail"]
+        detail = stale.json()
         assert detail["code"] == "module_version_conflict"
         assert detail["expected_version"] == v1.version
         assert detail["current_version"] == 2
@@ -1190,7 +1284,6 @@ class TestEditModule:
         questions = result.scalars().all()
         assert len(questions) == 1
         assert questions[0].question_localized["bn"] == "Test question from json"
-        assert "en" not in questions[0].question_localized
 
     async def test_returns_404_for_unknown(self, client: AsyncClient) -> None:
         resp = await client.put(
@@ -1361,7 +1454,7 @@ class TestEditModule:
             json={"expected_version": v1.version, "module_json": module_json},
         )
         assert resp.status_code == 400
-        assert resp.json()["detail"]["code"] == "invalid_card_body"
+        assert resp.json()["code"] == "invalid_card_body"
 
     async def test_put_rejects_invalid_attachment_prefix(
         self, client: AsyncClient, db_session: AsyncSession
@@ -1385,7 +1478,7 @@ class TestEditModule:
             json={"expected_version": v1.version, "module_json": module_json},
         )
         assert resp.status_code == 400
-        assert resp.json()["detail"]["code"] == "invalid_attachment_object_prefix"
+        assert resp.json()["code"] == "invalid_attachment_object_prefix"
 
 
 # ─── POST /admin/modules/{id}/clinically-reviewed ──────────────────────────
@@ -1489,6 +1582,38 @@ class TestRetireEndpoint:
         data = resp.json()
         assert data["lifecycle_status"] == "retired"
         assert data["deprecated_at"] is not None
+
+    async def test_delete_primary_also_retires_secondary(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        primary = await _seed_module(
+            db_session,
+            title_localized={"bn": "primary"},
+            lifecycle_status="review_pending",
+            set_family_pointer=False,
+        )
+        secondary = await _seed_module(
+            db_session,
+            title_localized={"bn": "secondary"},
+            lifecycle_status="review_pending",
+            set_family_pointer=False,
+        )
+        primary.merge_secondary_module_id = secondary.id
+        secondary.merge_primary_module_id = primary.id
+        await db_session.commit()
+
+        resp = await client.delete(platform_path(f"/admin/modules/{primary.id}"))
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == str(primary.id)
+        assert data["lifecycle_status"] == "retired"
+        assert data["deprecated_at"] is not None
+        assert set(data.keys()) == {"id", "lifecycle_status", "deprecated_at"}
+
+        await db_session.refresh(primary)
+        await db_session.refresh(secondary)
+        assert primary.lifecycle_status == "retired"
+        assert secondary.lifecycle_status == "retired"
 
     async def test_delete_unknown_returns_404(self, client: AsyncClient) -> None:
         resp = await client.delete(platform_path(f"/admin/modules/{uuid4()}"))

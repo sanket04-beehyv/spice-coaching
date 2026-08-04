@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 
+from mc_contracts.errors import ErrorCode
+from mc_foundation.problem import problem_json_response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 
 from platform_service.auth.spice_context import SpiceUserContext
 from platform_service.auth.spice_principal import is_admin_principal, is_device_principal
@@ -79,7 +81,12 @@ class SpiceAuthorizationMiddleware(BaseHTTPMiddleware):
                 request.url.path,
                 user.id,
             )
-            return JSONResponse(status_code=403, content={"detail": FORBIDDEN_DETAIL})
+            return problem_json_response(
+                code=ErrorCode.FORBIDDEN.value,
+                detail=FORBIDDEN_DETAIL,
+                status=403,
+                instance=str(request.url.path),
+            )
 
         if plane == "device" and not is_device_principal(user):
             logger.info(
@@ -87,6 +94,11 @@ class SpiceAuthorizationMiddleware(BaseHTTPMiddleware):
                 request.url.path,
                 user.id,
             )
-            return JSONResponse(status_code=403, content={"detail": FORBIDDEN_DETAIL})
+            return problem_json_response(
+                code=ErrorCode.FORBIDDEN.value,
+                detail=FORBIDDEN_DETAIL,
+                status=403,
+                instance=str(request.url.path),
+            )
 
         return await call_next(request)

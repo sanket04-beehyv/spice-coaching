@@ -10,8 +10,11 @@ from uuid import UUID, uuid4
 import pytest
 import pytest_asyncio
 from asyncpg import Range
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient
+from mc_foundation.objectstore import ObjectNotFoundError, PresignedObjectUrl
+from mc_foundation.problem import register_problem_handlers
 from platform_service.api.admin_ingestion_runs import router as admin_ingestion_runs_router
 from platform_service.api.admin_module_analytics import router as admin_module_analytics_router
 from platform_service.api.admin_modules import router as admin_modules_router
@@ -27,7 +30,6 @@ from platform_service.services.module_card_service import (
     extract_cards_from_module_json,
     module_json_shell,
 )
-from platform_service.services.object_storage import ObjectNotFoundError, PresignedObjectUrl
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import requires_db, truncate_tables
@@ -42,11 +44,12 @@ _PRESIGNED_URL = "https://minio.example/presigned"
 _API_WIPE_TABLES = (
     "module_lifecycle_event, module_behavioural_gap, module_card, module_quiz_question, "
     "chw_module_assignment, chw_module_completion, chw_training_request, "
-    "chw_behavioural_gap_state, attribution_event, module_demand_summary, "
+    "chw_behavioural_gap_state, chw_video_assignment, chw_video_progress, "
+    "attribution_event, module_demand_summary, module_creation_suggestion, "
     "module_trigger_binding, trigger_definition, chat_frequent_question, "
-    "module, module_family, behavioural_gap, "
-    "ingestion_run_step, ingestion_run, content_block, source_page, source_document, "
-    "llm_call_cache, file_upload"
+    "module, module_family, behavioural_gap, module_candidate_draft, "
+    "ingestion_run_step, ingestion_run, ingest_batch, content_block, source_page, "
+    "source_document, llm_call_cache, file_upload"
 )
 
 
@@ -81,10 +84,28 @@ class _FakeAttachmentStorage:
 
     def __init__(self, *, object_exists: bool = True) -> None:
         self.object_exists = object_exists
+        self.put_calls: list[dict[str, object]] = []
 
     async def stat_object(self, object_name: str) -> None:
         if not self.object_exists:
             raise ObjectNotFoundError(f"object {object_name!r} missing")
+
+    async def put_object_from_local_file(
+        self,
+        *,
+        object_name: str,
+        local_path: object,
+        content_type: str,
+        metadata: dict[str, str] | None = None,
+    ) -> None:
+        self.put_calls.append(
+            {
+                "object_name": object_name,
+                "local_path": str(local_path),
+                "content_type": content_type,
+                "metadata": metadata,
+            }
+        )
 
     async def presigned_get_url(
         self,
@@ -106,6 +127,11 @@ class _FakeAttachmentStorage:
 async def app(db_session: AsyncSession) -> AsyncIterator[FastAPI]:
     """Build a minimal FastAPI app with admin dashboard routers."""
     app_obj = FastAPI()
+    register_problem_handlers(
+        app_obj,
+        validation_error_type=RequestValidationError,
+        http_exception_type=HTTPException,
+    )
     api_router = APIRouter(prefix=get_settings().api_root_path_normalized)
     api_router.include_router(admin_modules_router)
     api_router.include_router(admin_module_analytics_router)
@@ -160,7 +186,6 @@ async def _seed_source_document(
         source_type="pdf",
         primary_language="bn",
         content_domain="clinical",
-        assessment_mode="with_quiz",
         original_storage_path=storage_path,
         original_filename=original_filename,
         sync_published_visible=sync_published_visible,

@@ -10,10 +10,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from mc_foundation.objectstore import ObjectNotFoundError, StoredObject
 from platform_service.db.repositories.file_upload_repository import FileUploadRepository
 from platform_service.deps import get_db, get_object_storage_client
 from platform_service.main import create_app
-from platform_service.services.object_storage import ObjectNotFoundError, StoredObject
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import platform_path, requires_db

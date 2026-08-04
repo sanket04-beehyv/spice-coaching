@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from platform_service.services.llm_text_utils import strip_inline_markdown
+from platform_service.services.llm_text_utils import strip_inline_markdown, strip_markdown_formatting
 
 _IMAGE_LINE_RE = re.compile(r"^\s*!\[(.*?)\]\(.+?\)\s*$")
 _LIST_ITEM_PREFIX_RE = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
@@ -41,7 +41,7 @@ def block_content_to_plain_text(*, block_type: str, content_text: str) -> str:
     if block_type == "figure":
         return _plain_figure(normalized)
 
-    return strip_inline_markdown(normalized)
+    return strip_markdown_formatting(normalized)
 
 
 def _plain_list(content_text: str) -> str:

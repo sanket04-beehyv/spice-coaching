@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
+from mc_contracts.errors import ErrorCode
 from mc_contracts.internal_ai import EmbedRequest, EmbedResponse
+from mc_foundation.problem import AppError
 
 from ai_runtime.security import require_internal_token
 from ai_runtime.services.prompt_executor import PromptExecutor
@@ -27,6 +29,6 @@ async def embed(body: EmbedRequest, _: None = Depends(require_internal_token)) -
     if not body.texts:
         return EmbedResponse(embeddings=[])
     if len(body.texts) > 100:
-        raise HTTPException(status_code=400, detail="Maximum 100 texts per request")
+        raise AppError(ErrorCode.BAD_REQUEST.value, "Maximum 100 texts per request", status=400)
     embeddings = await _executor.embed(body.texts)
     return EmbedResponse(embeddings=embeddings)

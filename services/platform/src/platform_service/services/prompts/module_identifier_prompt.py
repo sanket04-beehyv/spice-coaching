@@ -6,7 +6,7 @@ source_document.content_domain:
 
 - clinical → emit initial_training candidates for comprehensive training manuals
 - digital → emit digital_proficiency candidates
-- clinical_with_app_workflows → clinical content tied to in-app workflows
+- operational → emit initial_training candidates for field/ops workflows
 
 The architecture-reset removed the gap-driven prompting from this stage:
 gaps are runtime telemetry, not source-document structure. The pipeline
@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from mc_contracts.enums import ContentDomain
 from mc_foundation.locale import get_locale_metadata, locale_display_name
 
 from platform_service.config import get_settings
@@ -106,8 +107,8 @@ GROUPING RULES — do NOT over-fragment, do NOT under-emit:
    reference tables (e.g. "Healthcare Services by Facility Level") are
    JOB AIDS — the CHW fills them out or looks at them on the job, not
    topics they internalise through training. Detection cues:
-   - Page or section heading begins with {annexure_terms}
-     or similar.
+   - Page or section heading begins with "Annexure", "Appendix", "Job Aid",
+     "layXud", {annexure_terms}, or similar.
    - Content is dominated by blank fields, tick-box rows, signature
      lines, or columnar reference data the user fills in or looks up.
    The training-content equivalent (e.g. "How to fill the NCD reporting
@@ -189,18 +190,25 @@ proposed_module_type = "digital_proficiency". Card body will be procedural
 (workflow steps), not clinical. Cite content_blocks of type 'figure' for
 screenshots or workflow diagrams when present."""
 
-_BRANCH_CLINICAL_WITH_APP_WORKFLOWS = """\
-This corpus contains CLINICAL content tied to in-app actions (e.g. UHIS/SPICE
-workflows embedded in clinical training). Emit modules with
-proposed_module_type = "initial_training". Emphasise the clinical decision or
-procedure AND the corresponding app steps the CHW performs. Card body should
-pair clinical rationale with actionable workflow steps. Cite content_blocks of
-type 'figure' for app screenshots or workflow diagrams when present."""
+_BRANCH_OPERATIONAL = """\
+This corpus contains OPERATIONAL content (field activities, reporting,
+safeguarding, organisational / programme workflows — not clinical protocols
+and not app-UI digital proficiency). Emit modules with
+proposed_module_type = "initial_training". Card body should teach the
+operational procedure the CHW follows on the job. The
+previous_practice_summary, current_practice_summary, rationale_summary
+fields should be empty/null for these candidates."""
 
 _CONTENT_UPDATE_FIELDS = """\
 "previous_practice_summary": "string or null — what was done before (content_update only)",
   "current_practice_summary": "string or null — what is done now (content_update only)",
   "rationale_summary": "string or null — why it changed (content_update only)\""""
+
+_BRANCH_BY_DOMAIN: dict[str, str] = {
+    ContentDomain.CLINICAL.value: _BRANCH_CLINICAL,
+    ContentDomain.DIGITAL.value: _BRANCH_DIGITAL,
+    ContentDomain.OPERATIONAL.value: _BRANCH_OPERATIONAL,
+}
 
 
 def _annexure_terms_phrase(primary_locale: str) -> str:
@@ -214,14 +222,17 @@ def _annexure_terms_phrase(primary_locale: str) -> str:
     return f"{quoted}, or similar"
 
 
-def _branch_instructions_for(content_domains: set[str]) -> str:
-    """Pick the correct branch text for the workspace's content-domain mix."""
-    if not content_domains:
-        return _BRANCH_CLINICAL
-    if content_domains == {"digital"}:
-        return _BRANCH_DIGITAL
-    if content_domains == {"clinical_with_app_workflows"}:
-        return _BRANCH_CLINICAL_WITH_APP_WORKFLOWS
+def branch_instructions_for(content_domains: set[str]) -> str:
+    """Pick the correct branch text for the workspace's content-domain mix.
+
+    Ingest sets one content_domain at a time; when the set is empty or mixed,
+    fall back to the clinical (default) branch.
+    """
+    if len(content_domains) == 1:
+        sole = next(iter(content_domains))
+        branch = _BRANCH_BY_DOMAIN.get(sole)
+        if branch is not None:
+            return branch
     return _BRANCH_CLINICAL
 
 
@@ -296,7 +307,7 @@ def render_system_prompt(
             target_cards=target_cards,
             target_quizzes=target_quizzes,
         ),
-        content_domain_branch_instructions=_branch_instructions_for(content_domains),
+        content_domain_branch_instructions=branch_instructions_for(content_domains),
         ingestion_rationale_field=ingestion_rationale_field,
         content_update_fields=_CONTENT_UPDATE_FIELDS,
         description_field_schema=description_field_schema,

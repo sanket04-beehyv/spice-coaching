@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from mc_contracts.enums import ContentDomain
 from mc_contracts.sync import (
     AssignedModulePayload,
     ModuleFamilySyncPayload,
@@ -47,7 +48,6 @@ def build_source_document_sync_payloads(
                 source_type=doc.source_type,
                 primary_language=doc.primary_language,
                 content_domain=doc.content_domain,
-                assessment_mode=doc.assessment_mode,
                 version_label=doc.version_label,
                 publication_date=doc.publication_date,
                 original_filename=doc.original_filename,
@@ -55,6 +55,24 @@ def build_source_document_sync_payloads(
             )
         )
     return payloads
+
+
+def resolve_module_content_domain(
+    doc_ids: list[UUID],
+    doc_by_id: dict[UUID, SourceDocument],
+) -> ContentDomain:
+    """Single content-domain tag for a module (one type per ingest).
+
+    Uses the first linked source document; defaults to clinical when none resolve.
+    """
+    for doc_id in doc_ids:
+        doc = doc_by_id.get(doc_id)
+        if doc is not None:
+            try:
+                return ContentDomain(doc.content_domain)
+            except ValueError:
+                return ContentDomain.CLINICAL
+    return ContentDomain.CLINICAL
 
 
 class ModulesBundleBuilder:
@@ -129,6 +147,7 @@ class ModulesBundleBuilder:
                 )
                 enriched_cards.append(payload)
             doc_ids = list(module.source_document_ids or [])
+            source_documents = build_source_document_sync_payloads(doc_ids, doc_by_id)
             payloads.append(
                 ModuleSyncPayload(
                     id=module.id,
@@ -139,6 +158,7 @@ class ModulesBundleBuilder:
                     domain=module.domain,
                     sub_domain=module.sub_domain,
                     module_type=module.module_type,
+                    content_domain=resolve_module_content_domain(doc_ids, doc_by_id),
                     tenant_id=module.tenant_id,
                     estimated_minutes=module.estimated_minutes,
                     difficulty_level=module.difficulty_level,
@@ -146,7 +166,7 @@ class ModulesBundleBuilder:
                     clinically_reviewed=module.clinically_reviewed,
                     published_at=module.published_at,
                     updated_at=module.updated_at,
-                    source_documents=build_source_document_sync_payloads(doc_ids, doc_by_id),
+                    source_documents=source_documents,
                     has_thumbnail=bool(module.thumbnail_storage_path),
                     search_metadata=module.search_metadata_jsonb,
                     primary_gap_id=module.primary_gap_id,

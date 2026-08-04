@@ -10,8 +10,9 @@ globs: ["docker-compose.yml", "services/*/Dockerfile", "docs/SETUP_TROUBLESHOOTI
 - Both service Dockerfiles use `python:3.12-slim`. This image has **no** `curl`, `wget`, or `psql`. Do not add a healthcheck that depends on them unless you also install them via `apt-get`.
 - Preferred healthcheck pattern (no extra deps, no shell quoting):
   ```yaml
-  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/medtronics-api/health')"]
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/medtronics-api/ready')"]
   ```
+  Platform probes `/ready` (under `API_ROOT_PATH`); ai-runtime probes `/health` at its root.
 
 ## docker-compose
 
@@ -30,6 +31,6 @@ If any of these steps fail, add the failure + fix to `docs/SETUP_TROUBLESHOOTING
 
 ## When adding a new service
 
-- Must have a liveness endpoint under the platform API root (default `/medtronics-api/health`) that returns 200 with no dependencies.
+- Must have a probe endpoint that returns 200: platform default is `/medtronics-api/ready`; ai-runtime default is `/health`.
 - Must have a healthcheck in `docker-compose.yml` using the Python probe pattern above.
 - Must register its env-var prefix in the relevant `Settings` class, not read `os.environ` directly.

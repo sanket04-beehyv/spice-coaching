@@ -80,7 +80,6 @@ async def _seed_run_with_card_step(session: AsyncSession, module_id) -> Ingestio
         source_type="pdf",
         primary_language="en",
         content_domain="clinical",
-        assessment_mode="with_quiz",
         original_storage_path="/tmp/x.pdf",
     )
     session.add(sd)
@@ -234,6 +233,7 @@ class TestCardSearchMetadataWorker:
         assert count == 2
         mock_module_metadata.delay.assert_called_once()
         await db_session.refresh(step)
+
         refreshed_step = await db_session.get(IngestionRunStep, step.id)
         assert refreshed_step is not None
         assert refreshed_step.status == "succeeded"
@@ -267,6 +267,7 @@ class TestCardSearchMetadataWorker:
         assert rows[1].search_metadata_jsonb is None
         mock_module_metadata.delay.assert_called_once()
         await db_session.refresh(step)
+
         refreshed_step = await db_session.get(IngestionRunStep, step.id)
         assert refreshed_step is not None
         assert refreshed_step.status == "succeeded"

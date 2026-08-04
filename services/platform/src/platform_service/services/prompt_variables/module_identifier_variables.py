@@ -11,15 +11,13 @@ from platform_service.config import get_settings
 from platform_service.module_domains import module_domain_catalog_for_prompt
 from platform_service.services.prompt_id_codec import PromptIdCodec
 from platform_service.services.prompts.module_identifier_prompt import (
-    _BRANCH_CLINICAL,
-    _BRANCH_CLINICAL_WITH_APP_WORKFLOWS,
-    _BRANCH_DIGITAL,
     _CARDINALITY_CARDS_ONLY_SECTION,
     _CARDINALITY_GUIDANCE_SYSTEM_SECTION,
     _CARDINALITY_QUIZZES_ONLY_SECTION,
     _CONTENT_UPDATE_FIELDS,
     _INGESTION_GUIDANCE_SYSTEM_SECTION,
     _INGESTION_RATIONALE_JSON_FIELD,
+    branch_instructions_for,
 )
 from platform_service.services.prompts.symbol_verbalization import render_locale_map_field_schema
 
@@ -33,16 +31,6 @@ def _annexure_terms_phrase(primary_locale: str) -> str:
         return '"Annexure", "Appendix", or similar'
     quoted = ", ".join(f'"{term}"' for term in terms)
     return f"{quoted}, or similar"
-
-
-def _branch_instructions_for(content_domains: set[str]) -> str:
-    if not content_domains:
-        return _BRANCH_CLINICAL
-    if content_domains == {"digital"}:
-        return _BRANCH_DIGITAL
-    if content_domains == {"clinical_with_app_workflows"}:
-        return _BRANCH_CLINICAL_WITH_APP_WORKFLOWS
-    return _BRANCH_CLINICAL
 
 
 def _cardinality_guidance_section(
@@ -107,7 +95,7 @@ def build_module_identifier_system_variables(
             target_cards=target_cards,
             target_quizzes=target_quizzes,
         ),
-        "content_domain_branch_instructions": _branch_instructions_for(content_domains),
+        "content_domain_branch_instructions": branch_instructions_for(content_domains),
         "ingestion_rationale_field": ingestion_rationale_field,
         "content_update_fields": _CONTENT_UPDATE_FIELDS,
         "description_field_schema": render_locale_map_field_schema(

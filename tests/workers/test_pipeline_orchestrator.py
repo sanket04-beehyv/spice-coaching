@@ -8,9 +8,10 @@ Critical regressions covered:
   `step.id` outside greenlet context. We assert no MissingGreenlet by
   forcing each stage's failure path.
 - **Typed Stage1ExtractionError**: when Stage A raises
-  `Stage1ExtractionError`, the orchestrator records
-  `error_jsonb={'type': 'Stage1ExtractionError', 'reason': 'outline_empty', ...}`.
-  Generic Stage A exceptions get type=<class name> only.
+  `Stage1DocumentEmptyError` / `Stage1RecoveryFailedError`, the
+  orchestrator records `error_jsonb` with the exception's `reason`
+  (`document_empty` / `vision_recovery_failed`). Generic Stage A
+  exceptions get type=<class name> only.
 - **Stage A failure → run.status=failed** (not partially_succeeded — Stage 1
   is the precondition for everything else).
 - **Stage 2 failure → run.status=partially_succeeded** (downstream skipped).
@@ -19,8 +20,8 @@ Critical regressions covered:
   reflects partial success.
 - **Resume**: re-running picks up the existing run and skips
   already-succeeded stages.
-- **Empty Stage C result**: zero candidates → Stage D skipped, run
-  succeeded.
+- **Empty Stage C result**: zero candidates → Stage 2 fails and the run is
+  partially_succeeded.
 
 Tests use mock stage instances (StageAExtractor / StageCOrchestrator /
 StageDOrchestrator) so the orchestrator's logic is exercised without
@@ -36,6 +37,7 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
+from mc_contracts.errors import ErrorCode
 from platform_service.db.models.ingestion_run import IngestionRun, IngestionRunStep
 from platform_service.db.models.module_candidate_draft import ModuleCandidateDraft
 from platform_service.db.models.source_document import SourceDocument
@@ -54,7 +56,9 @@ from platform_service.workers.pipeline_orchestrator import (
     PipelineOrchestrator,
 )
 from platform_service.workers.stage_a_extract import (
+    Stage1DocumentEmptyError,
     Stage1ExtractionError,
+    Stage1RecoveryFailedError,
     StageAExtractor,
     StageAResult,
 )
@@ -75,14 +79,9 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
     await truncate_tables(
         db_session,
-        "module_quiz_question, module, module_family, "
-        "module_candidate_draft, content_block, source_page, "
-        "source_document, ingestion_run_step, ingestion_run",
+        "module_quiz_question, module, module_family, module_candidate_draft, content_block, source_page, source_document, ingestion_run_step, ingestion_run",
     )
     yield
-
-
-# ─── Helpers ──────────────────────────────────────────────────────────────
 
 
 async def _seed_source_document(session: AsyncSession) -> UUID:
@@ -91,7 +90,6 @@ async def _seed_source_document(session: AsyncSession) -> UUID:
         source_type="pdf",
         primary_language="en",
         content_domain="clinical",
-        assessment_mode="with_quiz",
         original_storage_path="/tmp/x.pdf",
     )
     session.add(sd)
@@ -185,31 +183,25 @@ async def _seed_candidates(session: AsyncSession, ingestion_run_id: UUID, count:
 class TestHappyPath:
     async def test_all_stages_succeed_run_status_succeeded(self, db_session: AsyncSession) -> None:
         sd_id = await _seed_source_document(db_session)
+        # Start the run first so we have an ingestion_run_id to seed
+        # candidates against. Stage C mock returns a count, but the
+        # orchestrator looks up actual candidates via the repo — the seeded
+        # count must MATCH the mock's emitted count for Stage D to iterate.
+        run_state = RunStateService(db_session)
+        run = await run_state.start_run(source_document_id=sd_id)
+        await db_session.commit()
+        await _seed_candidates(db_session, run.id, count=2)
+
         stage_a = _stage_a_mock()
         stage_c = _stage_c_mock(candidates_emitted=2)
         stage_d = _stage_d_mock()
 
         orch = PipelineOrchestrator(db_session, stage_a=stage_a, stage_c=stage_c, stage_d=stage_d)
-
-        # We need to fake the candidate rows that Stage C "would have created"
-        # so Stage D's per-candidate loop has something to iterate. Approach:
-        # call Stage C first to set up the run, then seed candidates manually.
-        # Easier: monkey-patch the candidate_repo to return our seeded ones.
-        # But the orchestrator constructs the repo in __init__ from session.
-        # Instead: start the run via run() — Stage C mock returns a count,
-        # but the orchestrator looks up actual candidates via the repo. So
-        # the seeded count must MATCH the mock's emitted count for Stage D
-        # to iterate.
-        # We seed 0 here, set Stage C emitted=0, and assert run succeeds with
-        # Stage D skipped (the alternate happy path).
-        stage_c = _stage_c_mock(candidates_emitted=0)
-        orch._stage_c = stage_c
-        orch._stage_d = stage_d
-
         result = await orch.run(
             source_document_id=sd_id,
             source_path="/tmp/x.pdf",
             source_type="pdf",
+            resume=True,
         )
 
         assert result.final_status == RUN_SUCCEEDED
@@ -217,22 +209,68 @@ class TestHappyPath:
         stage_a.run.assert_awaited_once()
         # Stage C run.
         stage_c.run.assert_awaited_once()
-        # Stage D was skipped (no candidates) — never called.
-        stage_d.run.assert_not_awaited()
+        # Stage D ran for the seeded candidates.
+        assert stage_d.run.await_count == 2
 
 
 # ─── Stage A failure paths ────────────────────────────────────────────────
 
 
 class TestStage1ExtractionFailures:
-    async def test_outline_empty_records_typed_reason(self, db_session: AsyncSession) -> None:
-        """The architecture-reset P4 fix: orchestrator catches
-        Stage1ExtractionError specifically and writes
-        error_jsonb={'type': 'Stage1ExtractionError', 'reason': 'outline_empty', ...}
-        — a typed signal the dashboard can branch on without parsing the
-        message string."""
+    async def test_document_empty_records_typed_reason(self, db_session: AsyncSession) -> None:
+        """Orchestrator catches Stage1DocumentEmptyError and writes
+        error_jsonb with reason=document_empty on the step and run."""
         sd_id = await _seed_source_document(db_session)
-        stage_a = _stage_a_mock(raise_exc=Stage1ExtractionError("outline empty after extraction (pages=10)"))
+        stage_a = _stage_a_mock(raise_exc=Stage1DocumentEmptyError())
+        stage_c = _stage_c_mock()
+
+        orch = PipelineOrchestrator(db_session, stage_a=stage_a, stage_c=stage_c, stage_d=_stage_d_mock())
+        result = await orch.run(
+            source_document_id=sd_id,
+            source_path="/tmp/x.pdf",
+            source_type="pdf",
+        )
+
+        assert result.final_status == RUN_FAILED
+        run_row = (
+            await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
+        ).scalar_one()
+        assert run_row.status == RUN_FAILED
+        assert run_row.error_jsonb["failed_stage"] == STAGE_EXTRACT
+        assert run_row.error_jsonb["reason"] == "document_empty"
+        assert run_row.error_jsonb["message"] == "The document is empty."
+
+        step = (
+            await db_session.execute(
+                select(IngestionRunStep)
+                .where(IngestionRunStep.ingestion_run_id == result.run_id)
+                .where(IngestionRunStep.stage == STAGE_EXTRACT)
+            )
+        ).scalar_one()
+        assert step.status == STEP_FAILED
+        err = step.error_jsonb
+        assert err["type"] == "Stage1DocumentEmptyError"
+        assert err["reason"] == "document_empty"
+        assert err["message"] == "The document is empty."
+        assert step.error_message == "The document is empty."
+
+        identify_steps = (
+            (
+                await db_session.execute(
+                    select(IngestionRunStep)
+                    .where(IngestionRunStep.ingestion_run_id == result.run_id)
+                    .where(IngestionRunStep.stage == STAGE_MODULE_IDENTIFY)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert identify_steps == []
+        stage_c.run.assert_not_awaited()
+
+    async def test_vision_recovery_failed_records_typed_reason(self, db_session: AsyncSession) -> None:
+        sd_id = await _seed_source_document(db_session)
+        stage_a = _stage_a_mock(raise_exc=Stage1RecoveryFailedError(failed_page_numbers=[1, 2], tolerance=0))
 
         orch = PipelineOrchestrator(
             db_session, stage_a=stage_a, stage_c=_stage_c_mock(), stage_d=_stage_d_mock()
@@ -244,14 +282,6 @@ class TestStage1ExtractionFailures:
         )
 
         assert result.final_status == RUN_FAILED
-        # The run row carries failed_stage in error_jsonb.
-        run_row = (
-            await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
-        ).scalar_one()
-        assert run_row.status == RUN_FAILED
-        assert run_row.error_jsonb["failed_stage"] == STAGE_EXTRACT
-
-        # The Stage A step row carries the typed reason.
         step = (
             await db_session.execute(
                 select(IngestionRunStep)
@@ -259,11 +289,34 @@ class TestStage1ExtractionFailures:
                 .where(IngestionRunStep.stage == STAGE_EXTRACT)
             )
         ).scalar_one()
-        assert step.status == STEP_FAILED
+        err = step.error_jsonb
+        assert err["type"] == "Stage1RecoveryFailedError"
+        assert err["reason"] == "vision_recovery_failed"
+
+    async def test_base_stage1_extraction_error_uses_default_reason(self, db_session: AsyncSession) -> None:
+        sd_id = await _seed_source_document(db_session)
+        stage_a = _stage_a_mock(raise_exc=Stage1ExtractionError("generic stage 1 failure"))
+
+        orch = PipelineOrchestrator(
+            db_session, stage_a=stage_a, stage_c=_stage_c_mock(), stage_d=_stage_d_mock()
+        )
+        result = await orch.run(
+            source_document_id=sd_id,
+            source_path="/tmp/x.pdf",
+            source_type="pdf",
+        )
+
+        assert result.final_status == RUN_FAILED
+        step = (
+            await db_session.execute(
+                select(IngestionRunStep)
+                .where(IngestionRunStep.ingestion_run_id == result.run_id)
+                .where(IngestionRunStep.stage == STAGE_EXTRACT)
+            )
+        ).scalar_one()
         err = step.error_jsonb
         assert err["type"] == "Stage1ExtractionError"
-        assert err["reason"] == "outline_empty"
-        assert "outline empty" in err["message"]
+        assert err["reason"] == "extract_failed"
 
     async def test_generic_stage_a_exception_has_no_typed_reason(self, db_session: AsyncSession) -> None:
         """Non-Stage1ExtractionError exceptions go through the broad
@@ -339,6 +392,63 @@ class TestStageCFailures:
         assert run_row.status == RUN_PARTIALLY_SUCCEEDED
         assert run_row.error_jsonb["failed_stage"] == STAGE_MODULE_IDENTIFY
 
+    async def test_zero_candidates_marks_identify_failed(self, db_session: AsyncSession) -> None:
+        sd_id = await _seed_source_document(db_session)
+        stage_d = _stage_d_mock()
+
+        orch = PipelineOrchestrator(
+            db_session,
+            stage_a=_stage_a_mock(),
+            stage_c=_stage_c_mock(candidates_emitted=0),
+            stage_d=stage_d,
+        )
+        result = await orch.run(
+            source_document_id=sd_id,
+            source_path="/tmp/x.pdf",
+            source_type="pdf",
+        )
+
+        assert result.final_status == RUN_PARTIALLY_SUCCEEDED
+        stage_d.run.assert_not_awaited()
+
+        run_row = (
+            await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
+        ).scalar_one()
+        assert run_row.status == RUN_PARTIALLY_SUCCEEDED
+        assert run_row.error_jsonb == {
+            "code": ErrorCode.IDENTIFY_NO_CANDIDATES.value,
+            "failed_stage": STAGE_MODULE_IDENTIFY,
+            "message": "zero candidates were identified",
+        }
+
+        identify_step = (
+            await db_session.execute(
+                select(IngestionRunStep)
+                .where(IngestionRunStep.ingestion_run_id == result.run_id)
+                .where(IngestionRunStep.stage == STAGE_MODULE_IDENTIFY)
+            )
+        ).scalar_one()
+        assert identify_step.status == STEP_FAILED
+        assert identify_step.error_message == "zero candidates were identified"
+        assert identify_step.error_jsonb == {
+            "type": "NoCandidatesIdentified",
+            "message": "zero candidates were identified",
+            "code": ErrorCode.IDENTIFY_NO_CANDIDATES.value,
+        }
+
+        draft_steps = (
+            (
+                await db_session.execute(
+                    select(IngestionRunStep)
+                    .where(IngestionRunStep.ingestion_run_id == result.run_id)
+                    .where(IngestionRunStep.stage == STAGE_CARD_DRAFT)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert draft_steps == []
+
 
 # ─── Stage D per-candidate failure ────────────────────────────────────────
 
@@ -400,11 +510,11 @@ class TestStageDPerCandidateFailures:
         assert result.drafts_produced == 2
 
 
-# ─── Empty Stage C → Stage D skipped ──────────────────────────────────────
+# ─── Empty Stage C → identify fails ───────────────────────────────────────
 
 
 class TestEmptyStageC:
-    async def test_zero_candidates_skips_stage_d_run_succeeds(self, db_session: AsyncSession) -> None:
+    async def test_zero_candidates_fails_identify_and_skips_stage_d(self, db_session: AsyncSession) -> None:
         sd_id = await _seed_source_document(db_session)
         stage_d = _stage_d_mock()
 
@@ -420,19 +530,26 @@ class TestEmptyStageC:
             source_type="pdf",
         )
 
-        assert result.final_status == RUN_SUCCEEDED
-        # Stage D never invoked.
+        assert result.final_status == RUN_PARTIALLY_SUCCEEDED
         stage_d.run.assert_not_awaited()
-        # And the card_draft step row exists with status='skipped'.
-        step = (
-            await db_session.execute(
-                select(IngestionRunStep)
-                .where(IngestionRunStep.ingestion_run_id == result.run_id)
-                .where(IngestionRunStep.stage == STAGE_CARD_DRAFT)
-            )
+        run_row = (
+            await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
         ).scalar_one()
-        assert step.status == "skipped"
-        assert step.output_summary_jsonb["skipped_reason"] == "no_candidates_from_stage_c"
+        assert run_row.error_jsonb["code"] == ErrorCode.IDENTIFY_NO_CANDIDATES.value
+
+        steps = (
+            (
+                await db_session.execute(
+                    select(IngestionRunStep).where(IngestionRunStep.ingestion_run_id == result.run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert {step.stage: step.status for step in steps} == {
+            STAGE_EXTRACT: "succeeded",
+            STAGE_MODULE_IDENTIFY: STEP_FAILED,
+        }
 
 
 # ─── Resume behaviour ─────────────────────────────────────────────────────
@@ -470,7 +587,7 @@ class TestResume:
         assert result.run_id == run.id
         # Stage A's run() was NOT called — it was skipped via resume logic.
         stage_a.run.assert_not_awaited()
-        assert result.final_status == RUN_SUCCEEDED
+        assert result.final_status == RUN_PARTIALLY_SUCCEEDED
 
 
 # ─── Failure-path step-id capture (greenlet regression) ──────────────────
@@ -562,5 +679,4 @@ class TestStageOutcomeReporting:
 
         stages = {s.stage: s.status for s in result.stages}
         assert stages[STAGE_EXTRACT] == "succeeded"
-        assert stages[STAGE_MODULE_IDENTIFY] == "succeeded"
-        assert stages[STAGE_CARD_DRAFT] == "skipped"
+        assert stages[STAGE_MODULE_IDENTIFY] == "failed"

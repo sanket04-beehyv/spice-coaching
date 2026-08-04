@@ -11,7 +11,7 @@ from typing import Any
 from uuid import UUID
 
 from asyncpg import Range  # type: ignore[import-untyped]
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from mc_contracts.admin_modules import (
     ClinicalFlagRequest,
     ModuleCreateRequest,
@@ -22,6 +22,9 @@ from mc_contracts.admin_modules import (
     SemanticSearchRequest,
     VisibilityWindowRequest,
 )
+from mc_contracts.errors import ErrorCode
+from mc_foundation.objectstore import ObjectStore
+from mc_foundation.problem import AppError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.auth.spice_identity import resolve_tenant_id_for_admin
@@ -37,6 +40,12 @@ from platform_service.db.module_availability import VALID_LIFECYCLE_STATUSES
 from platform_service.db.repositories.module_gap_repository import (
     ModuleGapLinkError,
     ModuleGapRepository,
+)
+from platform_service.db.repositories.module_read_repository import (
+    DEFAULT_MODULE_SORT_BY,
+    DEFAULT_MODULE_SORT_DIR,
+    MODULE_SORT_DIRS,
+    MODULE_SORT_KEYS,
 )
 from platform_service.db.repositories.module_repository import (
     ModuleNotFoundError,
@@ -69,8 +78,8 @@ from platform_service.services.module_presenter import (
     visibility_window_bounds,
 )
 from platform_service.services.module_quiz_service import ModuleQuizService
+from platform_service.services.module_retire_service import ModuleRetireService
 from platform_service.services.module_thumbnail_service import validate_module_thumbnail_storage_path
-from platform_service.services.object_storage import ObjectStorageClient
 
 router = APIRouter(prefix="/admin", tags=["admin-dashboard"])
 
@@ -79,7 +88,7 @@ router = APIRouter(prefix="/admin", tags=["admin-dashboard"])
 async def create_new_module(
     body: ModuleCreateRequest,
     session: AsyncSession = Depends(get_db),
-    storage: ObjectStorageClient = Depends(get_object_storage_client),
+    storage: ObjectStore = Depends(get_object_storage_client),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     """Manually create a new module family and initial draft module version."""
@@ -96,7 +105,7 @@ async def create_new_module(
             cards_data = extract_cards_from_module_json(module_json)
             module_json = module_json_shell(module_json)
         except ValidationError as exc:
-            raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+            raise AppError(exc.code, exc.message, status=400) from exc
 
     repo = ModuleRepository(session)
     try:
@@ -115,9 +124,9 @@ async def create_new_module(
             chatbot_faqs_only=body.chatbot_faqs_only,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise AppError(ErrorCode.BAD_REQUEST.value, str(exc), status=400) from exc
     except ModuleGapLinkError as exc:
-        raise HTTPException(status_code=400, detail=exc.message) from exc
+        raise AppError(ErrorCode.GAP_LINK_ERROR.value, exc.message, status=400) from exc
 
     if cards_data:
         await ModuleCardService(session).append_cards(new_module.id, cards_data)
@@ -140,7 +149,13 @@ async def create_new_module(
 @router.get("/modules", response_model=ModuleListResponse)
 async def list_modules(
     request: Request,
-    status: str | None = Query(None, description="draft | published | retired | deactivated"),
+    status: str | None = Query(
+        None,
+        description=(
+            "draft | published | retired | deactivated | review_pending — "
+            "omit for All (retired + deactivated excluded; review_pending included)"
+        ),
+    ),
     clinically_reviewed: bool | None = Query(None),
     has_visibility_window: bool | None = Query(None),
     has_quality_flags: bool | None = Query(
@@ -193,10 +208,21 @@ async def list_modules(
         True,
         description="When true (default), collapse to one row per module_family showing the highest-version row that matches filters. Set false to see every version.",
     ),
+    sort_by: str = Query(
+        DEFAULT_MODULE_SORT_BY,
+        description=(
+            "created_at | published_at | activated_at | last_deactivated_at | "
+            "title | domain | lifecycle_status"
+        ),
+    ),
+    sort_dir: str = Query(
+        DEFAULT_MODULE_SORT_DIR,
+        description="asc | desc",
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
-    storage: ObjectStorageClient = Depends(get_object_storage_client),
+    storage: ObjectStore = Depends(get_object_storage_client),
 ) -> ModuleListResponse:
     for date_from, date_to, from_name, to_name in (
         (created_from, created_to, "created_from", "created_to"),
@@ -205,14 +231,28 @@ async def list_modules(
         (deactivated_from, deactivated_to, "deactivated_from", "deactivated_to"),
     ):
         if date_from is not None and date_to is not None and date_from > date_to:
-            raise HTTPException(
-                status_code=422,
-                detail=f"{from_name} must be on or before {to_name}",
+            raise AppError(
+                ErrorCode.INVALID_QUERY.value,
+                f"{from_name} must be on or before {to_name}",
+                status=422,
             )
     if status is not None and status not in VALID_LIFECYCLE_STATUSES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"status must be one of: {', '.join(sorted(VALID_LIFECYCLE_STATUSES))}",
+        raise AppError(
+            ErrorCode.INVALID_QUERY.value,
+            f"status must be one of: {', '.join(sorted(VALID_LIFECYCLE_STATUSES))}",
+            status=422,
+        )
+    if sort_by not in MODULE_SORT_KEYS:
+        raise AppError(
+            ErrorCode.INVALID_QUERY.value,
+            f"sort_by must be one of: {', '.join(sorted(MODULE_SORT_KEYS))}",
+            status=422,
+        )
+    if sort_dir not in MODULE_SORT_DIRS:
+        raise AppError(
+            ErrorCode.INVALID_QUERY.value,
+            f"sort_dir must be one of: {', '.join(sorted(MODULE_SORT_DIRS))}",
+            status=422,
         )
     effective_tenant = resolve_tenant_id_for_admin(request, tenant_id)
     repo = ModuleRepository(session)
@@ -236,7 +276,13 @@ async def list_modules(
         "tenant_id": effective_tenant,
     }
     total_modules = await repo.count_modules(**list_filters)
-    modules = await repo.list_modules(**list_filters, limit=limit, offset=offset)
+    modules = await repo.list_modules(
+        **list_filters,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        limit=limit,
+        offset=offset,
+    )
     quiz_counts = await get_quiz_counts(session, [m.id for m in modules])
     card_counts = await get_card_counts(session, [m.id for m in modules])
     summaries = [
@@ -264,7 +310,8 @@ async def list_module_domains(
     status: str | None = Query(
         None,
         description=(
-            "draft | published | retired | deactivated — omit for All (retired + deactivated excluded)"
+            "draft | published | retired | deactivated | review_pending — "
+            "omit for All (retired + deactivated excluded; review_pending included)"
         ),
     ),
     tenant_id: UUID | None = Query(
@@ -279,9 +326,10 @@ async def list_module_domains(
 ) -> list[str]:
     """Distinct ``module.domain`` values for admin filter dropdowns."""
     if status is not None and status not in VALID_LIFECYCLE_STATUSES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"status must be one of: {', '.join(sorted(VALID_LIFECYCLE_STATUSES))}",
+        raise AppError(
+            ErrorCode.INVALID_QUERY.value,
+            f"status must be one of: {', '.join(sorted(VALID_LIFECYCLE_STATUSES))}",
+            status=422,
         )
     effective_tenant = resolve_tenant_id_for_admin(request, tenant_id)
     repo = ModuleRepository(session)
@@ -296,12 +344,12 @@ async def list_module_domains(
 async def get_module(
     module_id: UUID,
     session: AsyncSession = Depends(get_db),
-    storage: ObjectStorageClient = Depends(get_object_storage_client),
+    storage: ObjectStore = Depends(get_object_storage_client),
 ) -> ModuleDetail:
     repo = ModuleRepository(session)
     module = await repo.get_module(module_id)
     if module is None:
-        raise HTTPException(status_code=404, detail="module not found")
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, "module not found", status=404)
     quiz = await repo.list_quiz_questions(module_id)
     card_rows = await repo.list_cards(module_id)
     module_payload = module.module_json or {}
@@ -348,7 +396,7 @@ async def edit_module(
     module_id: UUID,
     body: ModuleEditRequest,
     session: AsyncSession = Depends(get_db),
-    storage: ObjectStorageClient = Depends(get_object_storage_client),
+    storage: ObjectStore = Depends(get_object_storage_client),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     repo = ModuleRepository(session)
@@ -365,7 +413,7 @@ async def edit_module(
             cards_data = extract_cards_from_module_json(module_json)
             module_json = module_json_shell(module_json)
         except ValidationError as exc:
-            raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+            raise AppError(exc.code, exc.message, status=400) from exc
 
     thumbnail_kw: dict[str, str | None] = {}
     if "thumbnail_storage_path" in body.model_fields_set:
@@ -376,7 +424,7 @@ async def edit_module(
                 storage=storage,
             )
         except ValidationError as exc:
-            raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+            raise AppError(exc.code, exc.message, status=400) from exc
 
     def _edit_response(module: Module) -> dict[str, Any]:
         return {
@@ -425,9 +473,10 @@ async def edit_module(
 
         if body.behavioural_gap_ids is not None:
             if new_module.chatbot_faqs_only and body.behavioural_gap_ids:
-                raise HTTPException(
-                    status_code=400,
-                    detail="chatbot_faqs_only modules cannot be linked to behavioural gaps",
+                raise AppError(
+                    ErrorCode.BAD_REQUEST.value,
+                    "chatbot_faqs_only modules cannot be linked to behavioural gaps",
+                    status=400,
                 )
             gap_repo = ModuleGapRepository(session)
             primary = body.primary_gap_id
@@ -443,7 +492,7 @@ async def edit_module(
                     primary_gap_id=primary if body.behavioural_gap_ids else None,
                 )
             except ModuleGapLinkError as exc:
-                raise HTTPException(status_code=400, detail=exc.message) from exc
+                raise AppError(ErrorCode.GAP_LINK_ERROR.value, exc.message, status=400) from exc
 
         quiz_data = resolve_edit_request_quiz(body)
         if quiz_data is not None:
@@ -457,13 +506,13 @@ async def edit_module(
                 await ModuleCardService(session).append_cards(new_module.id, prior_cards)
 
     except ModuleNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, str(exc), status=404) from exc
     except ModuleVersionConflictError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "module_version_conflict",
-                "message": "module has been modified; refetch and retry",
+        raise AppError(
+            ErrorCode.MODULE_VERSION_CONFLICT.value,
+            "module has been modified; refetch and retry",
+            status=409,
+            extensions={
                 "expected_version": exc.expected_version,
                 "current_version": exc.current_version,
                 "latest_module_id": str(exc.latest_module_id),
@@ -485,7 +534,7 @@ async def set_clinically_reviewed(
             module_id, flag=body.clinically_reviewed, reviewer_id=body.reviewer_id
         )
     except ModuleNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, str(exc), status=404) from exc
     await session.commit()
     return {
         "id": str(module.id),
@@ -512,7 +561,7 @@ async def set_visibility_window(
     try:
         module = await repo.set_visibility_window(module_id, window=window)
     except ModuleNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, str(exc), status=404) from exc
     await session.commit()
     return {
         "id": str(module.id),
@@ -532,11 +581,11 @@ async def retire_module(
     module_id: UUID,
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    repo = ModuleRepository(session)
+    service = ModuleRetireService(session)
     try:
-        module = await repo.retire_module(module_id)
+        module = await service.retire(module_id)
     except ModuleNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, str(exc), status=404) from exc
     await session.commit()
     return {
         "id": str(module.id),
@@ -554,17 +603,17 @@ async def semantic_search(
         description="Optional tenant UUID override (admin principals only when auth is enabled).",
     ),
     session: AsyncSession = Depends(get_db),
-    storage: ObjectStorageClient = Depends(get_object_storage_client),
+    storage: ObjectStore = Depends(get_object_storage_client),
     ai_client: AIRuntimeClient = Depends(get_ai_client),
 ) -> list[ModuleSummary]:
     if body.query is None and body.query_vector is None:
-        raise HTTPException(status_code=400, detail="provide either `query` or `query_vector`")
+        raise AppError(ErrorCode.BAD_REQUEST.value, "provide either `query` or `query_vector`", status=400)
     if body.query_vector is not None:
         vec = body.query_vector
     else:
         vectors = await ai_client.embed([body.query or ""])
         if not vectors:
-            raise HTTPException(status_code=502, detail="ai-runtime returned no embedding")
+            raise AppError(ErrorCode.EMPTY_EMBEDDING.value, "ai-runtime returned no embedding", status=502)
         vec = vectors[0]
     effective_tenant = resolve_tenant_id_for_admin(request, tenant_id)
     repo = ModuleRepository(session)
@@ -593,7 +642,7 @@ async def regenerate_quiz(
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     if await session.get(Module, module_id) is None:
-        raise HTTPException(status_code=404, detail="module not found")
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, "module not found", status=404)
     generate_module_quiz_task.delay(str(module_id))
     return {"id": str(module_id), "enqueued": "platform.generate_module_quiz"}
 
@@ -604,7 +653,7 @@ async def regenerate_embedding(
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     if await session.get(Module, module_id) is None:
-        raise HTTPException(status_code=404, detail="module not found")
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, "module not found", status=404)
     generate_module_embedding_task.delay(str(module_id))
     return {"id": str(module_id), "enqueued": "platform.generate_module_embedding"}
 
@@ -615,7 +664,7 @@ async def regenerate_gap_classification(
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     if await session.get(Module, module_id) is None:
-        raise HTTPException(status_code=404, detail="module not found")
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, "module not found", status=404)
     classify_module_gaps_task.delay(str(module_id))
     return {"id": str(module_id), "enqueued": "platform.classify_module_gaps"}
 
@@ -626,6 +675,6 @@ async def bind_assessment_triggers(
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     if await session.get(Module, module_id) is None:
-        raise HTTPException(status_code=404, detail="module not found")
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, "module not found", status=404)
     bind_assessment_triggers_task.delay(str(module_id))
     return {"id": str(module_id), "enqueued": "platform.bind_assessment_triggers"}

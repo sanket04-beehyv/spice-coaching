@@ -54,13 +54,16 @@ def _isolate_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "STAGE_C_INSUFFICIENT_SOURCE_MIN_TOKENS",
         "QUIZ_PASS_THRESHOLD_DEFAULT",
         "APP_ENV",
-        "MINIO_ENDPOINT",
-        "MINIO_PRESIGNED_ENDPOINT",
-        "MINIO_ACCESS_KEY",
-        "MINIO_SECRET_KEY",
-        "MINIO_BUCKET_NAME",
-        "MINIO_SECURE",
-        "MINIO_REGION",
+        "OBJECT_STORAGE_BACKEND",
+        "OBJECT_STORAGE_ENDPOINT",
+        "OBJECT_STORAGE_PRESIGNED_ENDPOINT",
+        "OBJECT_STORAGE_PRESIGN_MODE",
+        "OBJECT_STORAGE_ACCESS_KEY",
+        "OBJECT_STORAGE_SECRET_KEY",
+        "OBJECT_STORAGE_BUCKET_NAME",
+        "OBJECT_STORAGE_SECURE",
+        "OBJECT_STORAGE_REGION",
+        "OBJECT_STORAGE_AUTO_CREATE_BUCKET",
         "ADMIN_FILE_ALLOWED_PREFIXES",
         "ADMIN_FILE_UPLOAD_PREFIX",
         "ADMIN_FILE_PRESIGNED_MAX_SECONDS",
@@ -93,6 +96,21 @@ def test_api_root_path_normalized_strips_slashes() -> None:
     assert Settings(api_root_path="/medtronics-api/").api_root_path_normalized == "/medtronics-api"
 
 
+def test_api_path_with_default_root() -> None:
+    settings = Settings()
+    assert settings.api_path("/admin/ingest/batches/abc") == "/medtronics-api/admin/ingest/batches/abc"
+
+
+def test_api_path_without_leading_slash() -> None:
+    settings = Settings(api_root_path="/medtronics-api/")
+    assert settings.api_path("admin/ingest") == "/medtronics-api/admin/ingest"
+
+
+def test_api_path_with_empty_root() -> None:
+    settings = Settings(api_root_path="")
+    assert settings.api_path("/admin/ingest/batches/abc") == "/admin/ingest/batches/abc"
+
+
 def test_spice_auth_exempt_path_set_with_empty_root() -> None:
     s = Settings(api_root_path="")
     assert "/ready" in s.spice_auth_exempt_path_set
@@ -102,6 +120,10 @@ def test_spice_auth_exempt_path_set_with_empty_root() -> None:
 def test_embedding_dimension_default() -> None:
     """pgvector column types depend on this; changing it requires a migration."""
     assert Settings().embedding_dimension == 768
+
+
+def test_vector_store_backend_default() -> None:
+    assert Settings().vector_store_backend == "pgvector"
 
 
 def test_top_k_default() -> None:
@@ -202,20 +224,41 @@ def test_staging_retention_default() -> None:
     assert Settings().staging_retention_days == 30
 
 
-def test_minio_defaults() -> None:
+def test_object_storage_defaults() -> None:
     s = Settings()
-    assert s.minio_endpoint == "localhost:9100"
-    assert s.minio_presigned_endpoint is None
-    assert s.minio_access_key.get_secret_value() == "minioadmin"
-    assert s.minio_secret_key.get_secret_value() == "minioadmin"
-    assert s.minio_bucket_name == "medtronics-storage"
-    assert s.minio_secure is False
-    assert s.minio_region == "us-east-1"
+    assert s.object_storage_backend == "minio"
+    assert s.object_storage_endpoint == "localhost:9100"
+    assert s.object_storage_presigned_endpoint is None
+    assert s.object_storage_presign_mode == "proxy"
+    assert s.object_storage_access_key.get_secret_value() == "minioadmin"
+    assert s.object_storage_secret_key.get_secret_value() == "minioadmin"
+    assert s.object_storage_bucket_name == "medtronics-storage"
+    assert s.object_storage_secure is False
+    assert s.object_storage_region == "us-east-1"
+    assert s.object_storage_auto_create_bucket is True
     assert s.admin_file_allowed_prefix_set == frozenset(
         {"uploads", "source-documents", "media", "ingest", "module-thumbnails"}
     )
     assert s.admin_file_upload_prefix == "uploads"
     assert s.admin_file_presigned_max_seconds == 24 * 60 * 60
+
+
+def test_object_storage_s3_forces_auto_create_off() -> None:
+    s = Settings(
+        object_storage_backend="s3",
+        object_storage_endpoint=None,
+        object_storage_access_key="",
+        object_storage_secret_key="",
+        object_storage_auto_create_bucket=True,
+        object_storage_presign_mode="direct",
+    )
+    assert s.object_storage_backend == "s3"
+    assert s.object_storage_auto_create_bucket is False
+
+
+def test_object_storage_rejects_unknown_backend() -> None:
+    with pytest.raises(ValidationError, match="OBJECT_STORAGE_BACKEND"):
+        Settings(object_storage_backend="gcs")  # type: ignore[call-arg]
 
 
 def test_admin_file_upload_prefix_must_be_allowlisted() -> None:
@@ -354,8 +397,8 @@ def test_deployed_env_requires_spice_tenant_id_map(
         Settings(
             database_password="secure-password",
             ai_runtime_token="prod-token",
-            minio_access_key="prod-access",
-            minio_secret_key="prod-secret",
+            object_storage_access_key="prod-access",
+            object_storage_secret_key="prod-secret",
             spice_tenant_id_map="",
         )
 

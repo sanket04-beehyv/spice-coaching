@@ -16,11 +16,18 @@ from mc_contracts.coaching_rag import (
     SourcePageRef,
 )
 from mc_contracts.enums import GenerationType, SourceDocumentType
+from mc_contracts.errors import ErrorCode
 from mc_contracts.internal_ai import (
     GenerationConstraints,
     InferenceRequest,
     InferenceResponse,
     TraceContext,
+)
+from mc_foundation.objectstore import (
+    ObjectNotFoundError,
+    ObjectStorageError,
+    ObjectStore,
+    looks_like_object_storage_storage_path,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,12 +47,6 @@ from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.coaching_rag_errors import CoachingRagError
 from platform_service.services.embedding_vector import assert_embedding_dimension
 from platform_service.services.llm_text_utils import strip_json_fence
-from platform_service.services.object_storage import (
-    ObjectNotFoundError,
-    ObjectStorageClient,
-    ObjectStorageError,
-    looks_like_object_storage_storage_path,
-)
 from platform_service.services.prompt_registry import COACHING_RAG_TEMPLATE_ID
 from platform_service.services.prompt_template_service import PromptTemplateService, prompt_spec_from_rendered
 from platform_service.services.prompt_variables.coaching_rag_variables import build_coaching_rag_variables
@@ -69,7 +70,7 @@ class CoachingRagService:
         self,
         session: AsyncSession,
         ai: AIRuntimeClient,
-        storage: ObjectStorageClient,
+        storage: ObjectStore,
         *,
         settings: Settings | None = None,
     ) -> None:
@@ -96,7 +97,10 @@ class CoachingRagService:
             logger.exception("ai-runtime embed failed for rag-query")
             raise CoachingRagError("ai-runtime embed failed") from None
         if not vectors:
-            raise CoachingRagError("ai-runtime returned no embedding for query")
+            raise CoachingRagError(
+                "ai-runtime returned no embedding for query",
+                code=ErrorCode.EMPTY_EMBEDDING.value,
+            )
 
         query_vec = self._assert_query_embedding(vectors[0], expected_dim=settings.embedding_dimension)
         pairs = await ModuleRepository(self._session).search_by_embedding(
@@ -173,7 +177,10 @@ class CoachingRagService:
         try:
             return assert_embedding_dimension(vec, expected_dim=expected_dim)
         except EmbeddingDimensionError as exc:
-            raise CoachingRagError(str(exc)) from exc
+            raise CoachingRagError(
+                str(exc),
+                code=ErrorCode.EMBEDDING_DIMENSION_MISMATCH.value,
+            ) from exc
 
     def _cards_text_for_module(
         self,
@@ -336,7 +343,7 @@ class CoachingRagService:
         docs = await source_repo.list_source_documents_by_ids(list(doc_id_set))
         docs.sort(key=lambda d: (d.title.lower(), str(d.id)))
 
-        bucket_name = settings.minio_bucket_name
+        bucket_name = settings.object_storage_bucket_name
         attributions: list[SourceAttribution] = []
         for doc in docs:
             if doc.source_type not in _KNOWN_SOURCE_TYPES:

@@ -7,8 +7,8 @@ import pytest
 from ai_runtime.api import internal_transcribe
 from ai_runtime.api.internal_transcribe import transcribe
 from ai_runtime.services.prompt_executor import PromptExecutor
-from fastapi import HTTPException
 from mc_contracts.internal_ai import TranscribeRequest
+from mc_foundation.problem import AppError
 
 
 @pytest.mark.asyncio
@@ -44,10 +44,10 @@ async def test_transcribe_media_uses_provider_and_model(monkeypatch: pytest.Monk
 async def test_transcribe_endpoint_rejects_unsupported_mime_type() -> None:
     body = TranscribeRequest(data_base64="ZmFrZQ==", mime_type="application/octet-stream")
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AppError) as exc_info:
         await transcribe(body, None)
 
-    assert exc_info.value.status_code == 400
+    assert exc_info.value.status == 400
 
 
 @pytest.mark.asyncio
@@ -57,10 +57,10 @@ async def test_transcribe_endpoint_rejects_payload_above_provider_limit(
     body = TranscribeRequest(data_base64="ZmFrZQ==", mime_type="audio/mpeg")
     monkeypatch.setattr(internal_transcribe, "_provider_media_limit_bytes", lambda _provider: 3)
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AppError) as exc_info:
         await transcribe(body, None)
 
-    assert exc_info.value.status_code == 413
+    assert exc_info.value.status == 413
 
 
 @pytest.mark.asyncio
@@ -70,10 +70,10 @@ async def test_transcribe_endpoint_rejects_empty_provider_transcript(
     body = TranscribeRequest(data_base64="ZmFrZQ==", mime_type="audio/mpeg")
     monkeypatch.setattr(internal_transcribe._executor, "transcribe_media", AsyncMock(return_value=" "))
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AppError) as exc_info:
         await transcribe(body, None)
 
-    assert exc_info.value.status_code == 422
+    assert exc_info.value.status == 422
 
 
 @pytest.mark.asyncio
@@ -87,10 +87,10 @@ async def test_transcribe_endpoint_maps_provider_quota_error_to_429(
         AsyncMock(side_effect=RuntimeError("429 insufficient_quota")),
     )
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AppError) as exc_info:
         await transcribe(body, None)
 
-    assert exc_info.value.status_code == 429
+    assert exc_info.value.status == 429
 
 
 @pytest.mark.asyncio
@@ -104,7 +104,7 @@ async def test_transcribe_endpoint_maps_generic_provider_error_to_502(
         AsyncMock(side_effect=RuntimeError("upstream connection reset")),
     )
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AppError) as exc_info:
         await transcribe(body, None)
 
-    assert exc_info.value.status_code == 502
+    assert exc_info.value.status == 502

@@ -8,9 +8,9 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
+from mc_foundation.objectstore import ObjectNotFoundError, PresignedObjectUrl
 from platform_service.config import Settings
 from platform_service.db.models.source_document import SourceDocument
-from platform_service.services.object_storage import ObjectNotFoundError, PresignedObjectUrl
 from platform_service.services.sync_service import SyncService
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,7 +40,6 @@ async def _seed_doc(
         source_type="pdf",
         primary_language="bn",
         content_domain="clinical",
-        assessment_mode="with_quiz",
         original_storage_path=storage_path,
         original_filename=original_filename,
     )

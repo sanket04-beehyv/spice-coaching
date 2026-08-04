@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from mc_contracts.admin_module_demand import (
     ModuleDemandRequestorsResponse,
     ModuleDemandSummaryResponse,
 )
+from mc_contracts.errors import ErrorCode
+from mc_foundation.problem import AppError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.auth.spice_identity import resolve_tenant_id_for_admin
@@ -59,4 +61,4 @@ async def list_module_demand_requestors(
     try:
         return await service.get_requestors(module_id, tenant_id=tenant_id)
     except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, str(exc), status=404) from exc

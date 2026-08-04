@@ -7,6 +7,7 @@ Canonical paths:
   POST /sync/source-documents/presigned-thumbnails → SourceDocumentThumbnailsPresignResponse
   POST /sync/modules/presigned-thumbnails → ModuleThumbnailsPresignResponse
   GET  /sync/source-documents/published   → PublishedSourceDocumentsBundle
+  GET  /sync/assigned-videos?user_id=<int> → AssignedVideosBundle
   GET  /sync/chat-faqs?since=<ISO-8601> → ChatFaqsSyncBundle
 """
 
@@ -17,6 +18,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 from mc_contracts.sync import (
+    AssignedVideosBundle,
     ChatFaqsSyncBundle,
     ConfigSyncBundle,
     GapsSyncBundle,
@@ -30,6 +32,7 @@ from mc_contracts.sync import (
     SourceDocumentThumbnailsPresignResponse,
     TriggersSyncBundle,
 )
+from mc_foundation.objectstore import ObjectStore
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.auth.spice_identity import (
@@ -39,7 +42,6 @@ from platform_service.auth.spice_identity import (
 )
 from platform_service.config import Settings, get_settings
 from platform_service.deps import get_db, get_object_storage_client
-from platform_service.services.object_storage import ObjectStorageClient
 from platform_service.services.sync_service import SyncService
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -63,7 +65,7 @@ async def sync_source_document_presigned_urls(
         description="Optional tenant UUID override (admin principals only when auth is enabled).",
     ),
     db: AsyncSession = Depends(get_db),
-    storage: ObjectStorageClient = Depends(get_object_storage_client),
+    storage: ObjectStore = Depends(get_object_storage_client),
 ) -> SourceDocumentsPresignResponse:
     """Return presigned GET URLs for a batch of source documents (partial success)."""
     effective_tenant = _effective_tenant_id(request, tenant_id)
@@ -86,7 +88,7 @@ async def sync_source_document_thumbnail_presigned_urls(
         description="Optional tenant UUID override (admin principals only when auth is enabled).",
     ),
     db: AsyncSession = Depends(get_db),
-    storage: ObjectStorageClient = Depends(get_object_storage_client),
+    storage: ObjectStore = Depends(get_object_storage_client),
 ) -> SourceDocumentThumbnailsPresignResponse:
     """Return presigned GET URLs for a batch of source document thumbnails (partial success)."""
     effective_tenant = _effective_tenant_id(request, tenant_id)
@@ -106,7 +108,7 @@ async def sync_module_thumbnail_presigned_urls(
         description="Optional tenant UUID override (admin principals only when auth is enabled).",
     ),
     db: AsyncSession = Depends(get_db),
-    storage: ObjectStorageClient = Depends(get_object_storage_client),
+    storage: ObjectStore = Depends(get_object_storage_client),
 ) -> ModuleThumbnailsPresignResponse:
     """Return presigned GET URLs for a batch of module thumbnails (partial success)."""
     effective_tenant = _effective_tenant_id(request, tenant_id)
@@ -123,17 +125,43 @@ async def sync_published_source_documents(
     limit: int = Query(200, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    storage: ObjectStorageClient = Depends(get_object_storage_client),
+    storage: ObjectStore = Depends(get_object_storage_client),
     settings: Settings = Depends(get_settings),
 ) -> PublishedSourceDocumentsBundle:
-    """Return presigned URLs for source documents linked to published modules.
-
-    Fetches documents cited by published modules (not module payloads themselves).
-    Module content comes from ``GET /sync/modules``.
-    """
+    """Return presigned URLs for source documents with ``sync_published_visible=true``."""
     return await SyncService(db).get_published_source_documents_bundle(
         storage=storage,
         domain=domain,
+        limit=limit,
+        offset=offset,
+        settings=settings,
+    )
+
+
+@router.get("/assigned-videos", response_model=AssignedVideosBundle)
+async def sync_assigned_videos(
+    request: Request,
+    user_id: int = Query(..., description="User id whose assigned videos to return."),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    tenant_id: UUID | None = Query(
+        default=None,
+        description="Optional tenant UUID override (admin principals only when auth is enabled).",
+    ),
+    db: AsyncSession = Depends(get_db),
+    storage: ObjectStore = Depends(get_object_storage_client),
+    settings: Settings = Depends(get_settings),
+) -> AssignedVideosBundle:
+    """Return videos assigned to ``user_id`` (individual / po_sk / geo / group)."""
+    _ = _effective_tenant_id(request, tenant_id)
+    effective_user_id = require_chw_id_for_device_route(request, user_id)
+    spice_user = getattr(request.state, "spice_user", None)
+    organization_ids = getattr(spice_user, "organization_ids", None) if spice_user else None
+
+    return await SyncService(db).get_assigned_videos_bundle(
+        user_id=effective_user_id,
+        storage=storage,
+        organization_ids=organization_ids,
         limit=limit,
         offset=offset,
         settings=settings,

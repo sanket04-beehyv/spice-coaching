@@ -11,6 +11,7 @@ This file is the entry point for Claude Code, Cursor, and similar AI assistants 
 5. `.cursor/rules/local-setup.mdc` — docker/compose/Dockerfile rules.
 6. `.cursor/rules/no-inline-imports.mdc` — strict rule for no inline imports
 6. `docs/SETUP_TROUBLESHOOTING.md` — known setup issues and verified fixes.
+7. `docs/error-codes.json` — client-facing error code catalogue. When adding, removing, or renaming `mc_contracts.errors.ErrorCode`, update this file in the same change; pre-commit (`check-error-codes-catalog`) enforces parity. Problem Details `type` is `docs/error-codes.json#{code}`.
 
 ## Before you commit
 

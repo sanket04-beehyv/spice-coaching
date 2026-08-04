@@ -115,16 +115,8 @@ class TestResolveTimestampUtc:
 
 class TestTelemetryIngest:
     async def test_accepts_valid_batch(self, app: FastAPI, client: AsyncClient) -> None:
-        redis_mock = MagicMock()
-        redis_mock.pipeline.return_value = MagicMock(
-            rpush=MagicMock(),
-            ltrim=MagicMock(),
-            llen=MagicMock(),
-            execute=AsyncMock(return_value=(None, None, 0)),
-        )
+        redis_mock = AsyncMock()
         redis_mock.aclose = AsyncMock()
-        redis_mock.rpush = AsyncMock()
-        redis_mock.llen = AsyncMock(return_value=0)
         body = _sample_batch_payload()
         ch_mock = app.dependency_overrides[get_clickhouse_client]()
 
@@ -154,17 +146,57 @@ class TestTelemetryIngest:
         rows = ch_mock.insert_coaching_events.await_args.args[0]
         assert rows[0][_TIMESTAMP_UTC_COLUMN_INDEX] == body["events"][0]["timestamp_local"]
 
-    async def test_quiz_mode_only_enqueues_module_quiz_attempted(self, client: AsyncClient) -> None:
-        redis_mock = MagicMock()
-        redis_mock.pipeline.return_value = MagicMock(
-            rpush=MagicMock(),
-            ltrim=MagicMock(),
-            llen=MagicMock(),
-            execute=AsyncMock(return_value=(None, None, 0)),
-        )
+    async def test_document_viewed_accepts_without_celery_side_effects(
+        self, app: FastAPI, client: AsyncClient
+    ) -> None:
+        redis_mock = AsyncMock()
         redis_mock.aclose = AsyncMock()
-        redis_mock.rpush = AsyncMock()
-        redis_mock.llen = AsyncMock(return_value=0)
+        event_id = str(uuid4())
+        doc_id = str(uuid4())
+        body = {
+            "events": [
+                {
+                    "id": event_id,
+                    "event_family": EventFamily.COACHING.value,
+                    "event_type": CoachingEventType.DOCUMENT_VIEWED.value,
+                    "upazila_id": "Lalmonirhat Sadar",
+                    "trigger_type": "user_action",
+                    "payload_json": {"source_document_id": doc_id},
+                    "event_date": date.today().isoformat(),
+                    "timestamp_local": 1_700_000_000,
+                    "timestamp_utc": 1_700_000_000,
+                }
+            ],
+            "sdk_version": "test-sdk",
+            "chw_id": 42,
+        }
+        ch_mock = app.dependency_overrides[get_clickhouse_client]()
+
+        async def _pass_through_dedup(_redis, events):  # type: ignore[no-untyped-def]
+            return events, []
+
+        with (
+            patch("platform_service.api.telemetry.get_redis_client", return_value=redis_mock),
+            patch(
+                "platform_service.api.telemetry.partition_for_dedup",
+                side_effect=_pass_through_dedup,
+            ),
+            patch("platform_service.api.telemetry.process_module_event_task") as module_celery,
+            patch("platform_service.api.telemetry.process_video_progress_event_task") as video_celery,
+            patch("platform_service.api.telemetry.process_training_request_event_task") as train_celery,
+        ):
+            resp = await client.post(platform_path("/telemetry/events"), json=body)
+
+        assert resp.status_code == 200
+        assert resp.json()["accepted"] == [event_id]
+        module_celery.delay.assert_not_called()
+        video_celery.delay.assert_not_called()
+        train_celery.delay.assert_not_called()
+        ch_mock.insert_coaching_events.assert_awaited_once()
+
+    async def test_quiz_mode_only_enqueues_module_quiz_attempted(self, client: AsyncClient) -> None:
+        redis_mock = AsyncMock()
+        redis_mock.aclose = AsyncMock()
         module_id = str(uuid4())
         quiz_id = str(uuid4())
         delivered_id = str(uuid4())
@@ -219,16 +251,8 @@ class TestTelemetryIngest:
         assert job["event_type"] == CoachingEventType.MODULE_QUIZ_ATTEMPTED.value
 
     async def test_reports_duplicates(self, client: AsyncClient) -> None:
-        redis_mock = MagicMock()
-        redis_mock.pipeline.return_value = MagicMock(
-            rpush=MagicMock(),
-            ltrim=MagicMock(),
-            llen=MagicMock(),
-            execute=AsyncMock(return_value=(None, None, 0)),
-        )
+        redis_mock = AsyncMock()
         redis_mock.aclose = AsyncMock()
-        redis_mock.rpush = AsyncMock()
-        redis_mock.llen = AsyncMock(return_value=0)
         dup_id = str(uuid4())
         with (
             patch("platform_service.api.telemetry.get_redis_client", return_value=redis_mock),
@@ -253,16 +277,8 @@ class TestTelemetryIngest:
 
 class TestModuleRequestedIngest:
     async def test_enqueues_when_module_id_present(self, app: FastAPI, client: AsyncClient) -> None:
-        redis_mock = MagicMock()
-        redis_mock.pipeline.return_value = MagicMock(
-            rpush=MagicMock(),
-            ltrim=MagicMock(),
-            llen=MagicMock(),
-            execute=AsyncMock(return_value=(None, None, 0)),
-        )
+        redis_mock = AsyncMock()
         redis_mock.aclose = AsyncMock()
-        redis_mock.rpush = AsyncMock()
-        redis_mock.llen = AsyncMock(return_value=0)
         module_id = str(uuid4())
         event_id = str(uuid4())
         body = {
@@ -314,16 +330,8 @@ class TestModuleRequestedIngest:
         ch_mock.insert_coaching_events.assert_awaited_once()
 
     async def test_enqueues_when_only_requested_module_name(self, client: AsyncClient) -> None:
-        redis_mock = MagicMock()
-        redis_mock.pipeline.return_value = MagicMock(
-            rpush=MagicMock(),
-            ltrim=MagicMock(),
-            llen=MagicMock(),
-            execute=AsyncMock(return_value=(None, None, 0)),
-        )
+        redis_mock = AsyncMock()
         redis_mock.aclose = AsyncMock()
-        redis_mock.rpush = AsyncMock()
-        redis_mock.llen = AsyncMock(return_value=0)
         event_id = str(uuid4())
         body = {
             "events": [
@@ -362,16 +370,8 @@ class TestModuleRequestedIngest:
         assert job["requested_module_name"] == "Custom Module"
 
     async def test_skips_enqueue_when_neither_identity(self, client: AsyncClient) -> None:
-        redis_mock = MagicMock()
-        redis_mock.pipeline.return_value = MagicMock(
-            rpush=MagicMock(),
-            ltrim=MagicMock(),
-            llen=MagicMock(),
-            execute=AsyncMock(return_value=(None, None, 0)),
-        )
+        redis_mock = AsyncMock()
         redis_mock.aclose = AsyncMock()
-        redis_mock.rpush = AsyncMock()
-        redis_mock.llen = AsyncMock(return_value=0)
         event_id = str(uuid4())
         body = {
             "events": [
@@ -406,3 +406,102 @@ class TestModuleRequestedIngest:
         assert resp.json()["accepted"] == [event_id]
         module_celery.delay.assert_not_called()
         training_celery.delay.assert_not_called()
+
+
+class TestVideoProgressUpdatedIngest:
+    async def test_enqueues_when_source_document_id_present(self, client: AsyncClient) -> None:
+        redis_mock = AsyncMock()
+        redis_mock.aclose = AsyncMock()
+        ch_mock = MagicMock()
+        ch_mock.insert_coaching_events = AsyncMock()
+        video_id = str(uuid4())
+        event_id = str(uuid4())
+        body = {
+            "events": [
+                {
+                    "id": event_id,
+                    "event_family": EventFamily.COACHING.value,
+                    "event_type": CoachingEventType.VIDEO_PROGRESS_UPDATED.value,
+                    "payload_json": {
+                        "source_document_id": video_id,
+                        "last_position_ms": 12_345,
+                        "percent_watched": 42.5,
+                        "completed": False,
+                    },
+                    "event_date": date.today().isoformat(),
+                    "timestamp_local": 1_700_000_000,
+                }
+            ],
+            "sdk_version": "test-sdk",
+            "chw_id": 42,
+        }
+
+        async def _pass_through_dedup(_redis, events):  # type: ignore[no-untyped-def]
+            return events, []
+
+        with (
+            patch("platform_service.api.telemetry.get_redis_client", return_value=redis_mock),
+            patch("platform_service.api.telemetry.get_clickhouse_client", return_value=ch_mock),
+            patch(
+                "platform_service.api.telemetry.partition_for_dedup",
+                side_effect=_pass_through_dedup,
+            ),
+            patch("platform_service.api.telemetry.process_module_event_task") as module_celery,
+            patch("platform_service.api.telemetry.process_training_request_event_task") as training_celery,
+            patch("platform_service.api.telemetry.process_video_progress_event_task") as video_celery,
+        ):
+            resp = await client.post(platform_path("/telemetry/events"), json=body)
+
+        assert resp.status_code == 200
+        assert resp.json()["accepted"] == [event_id]
+        module_celery.delay.assert_not_called()
+        training_celery.delay.assert_not_called()
+        video_celery.delay.assert_called_once()
+        job = video_celery.delay.call_args.args[0]
+        assert job["event_id"] == event_id
+        assert job["event_type"] == CoachingEventType.VIDEO_PROGRESS_UPDATED.value
+        assert job["chw_id"] == 42
+        assert job["payload_json"]["source_document_id"] == video_id
+        ch_mock.insert_coaching_events.assert_awaited_once()
+
+    async def test_skips_enqueue_when_source_document_id_missing(self, client: AsyncClient) -> None:
+        redis_mock = AsyncMock()
+        redis_mock.aclose = AsyncMock()
+        ch_mock = MagicMock()
+        ch_mock.insert_coaching_events = AsyncMock()
+        event_id = str(uuid4())
+        body = {
+            "events": [
+                {
+                    "id": event_id,
+                    "event_family": EventFamily.COACHING.value,
+                    "event_type": CoachingEventType.VIDEO_PROGRESS_UPDATED.value,
+                    "payload_json": {
+                        "last_position_ms": 100,
+                        "percent_watched": 1.0,
+                    },
+                    "event_date": date.today().isoformat(),
+                    "timestamp_local": 1_700_000_000,
+                }
+            ],
+            "sdk_version": "test-sdk",
+            "chw_id": 42,
+        }
+
+        async def _pass_through_dedup(_redis, events):  # type: ignore[no-untyped-def]
+            return events, []
+
+        with (
+            patch("platform_service.api.telemetry.get_redis_client", return_value=redis_mock),
+            patch("platform_service.api.telemetry.get_clickhouse_client", return_value=ch_mock),
+            patch(
+                "platform_service.api.telemetry.partition_for_dedup",
+                side_effect=_pass_through_dedup,
+            ),
+            patch("platform_service.api.telemetry.process_video_progress_event_task") as video_celery,
+        ):
+            resp = await client.post(platform_path("/telemetry/events"), json=body)
+
+        assert resp.status_code == 200
+        assert resp.json()["accepted"] == [event_id]
+        video_celery.delay.assert_not_called()

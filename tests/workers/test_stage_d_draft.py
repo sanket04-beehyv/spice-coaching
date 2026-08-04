@@ -32,9 +32,9 @@ from uuid import UUID, uuid4
 import pytest
 import pytest_asyncio
 from platform_service import celery_tasks
-from platform_service.config import get_settings
 from platform_service.db.models.behavioural_gap import BehaviouralGap
 from platform_service.db.models.content_block import ContentBlock
+from platform_service.db.models.ingest_batch import IngestBatch
 from platform_service.db.models.ingestion_run import IngestionRun
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_behavioural_gap import ModuleBehaviouralGap
@@ -43,6 +43,7 @@ from platform_service.db.models.module_card import ModuleCard
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.source_document import SourceDocument
 from platform_service.db.models.source_page import SourcePage
+from platform_service.db.module_availability import LIFECYCLE_REVIEW_PENDING
 from platform_service.db.repositories.module_drafter_repository import _slugify
 from platform_service.db.repositories.module_gap_repository import ModuleGapRepository
 from platform_service.services.card_drafter import (
@@ -51,7 +52,11 @@ from platform_service.services.card_drafter import (
 )
 from platform_service.services.module_card_service import ModuleCardService
 from platform_service.services.published_module_merger import PublishedModuleMergerResult
-from platform_service.workers.stage_d_draft import StageDOrchestrator
+from platform_service.services.run_state_service import (
+    STAGE_CARD_DRAFT,
+    RunStateService,
+)
+from platform_service.workers.stage_d_draft import StageDOrchestrator, StageDResult
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,7 +65,6 @@ from tests.localized_helpers import refresher_card
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
-
 # ─── Per-test cleanup ─────────────────────────────────────────────────────
 
 
@@ -68,14 +72,34 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
     await truncate_tables(
         db_session,
-        "module_card, module_quiz_question, module, module_family, "
-        "behavioural_gap, module_candidate_draft, content_block, source_page, "
-        "source_document, ingestion_run_step, ingestion_run",
+        "module_card, module_quiz_question, module, module_family, behavioural_gap, module_candidate_draft, content_block, source_page, source_document, ingestion_run_step, ingestion_run, ingest_batch",
     )
     yield
 
 
-# ─── Seed helpers ─────────────────────────────────────────────────────────
+async def _start_card_draft_step(session: AsyncSession, candidate: ModuleCandidateDraft):
+    """Create a running card_draft step for Stage D activity patches."""
+    run_state = RunStateService(session)
+    step = await run_state.start_step(
+        run_id=candidate.ingestion_run_id,
+        stage=STAGE_CARD_DRAFT,
+        input_summary={"candidate_id": str(candidate.id)},
+    )
+    await session.commit()
+    return step
+
+
+async def _run_dual_path_merge(
+    session: AsyncSession,
+    *,
+    orch: StageDOrchestrator,
+    candidate: ModuleCandidateDraft,
+) -> StageDResult:
+    """Run Stage D merge path (persists primary + secondary immediately)."""
+    step = await _start_card_draft_step(session, candidate)
+    result = await orch.run(candidate_id=candidate.id, step_id=step.id)
+    await session.commit()
+    return result
 
 
 async def _seed_candidate(
@@ -98,7 +122,6 @@ async def _seed_candidate(
         source_type="pdf",
         primary_language="en",
         content_domain=content_domain,
-        assessment_mode=assessment_mode,
         original_storage_path="/tmp/x.pdf",
     )
     session.add(sd)
@@ -128,8 +151,12 @@ async def _seed_candidate(
     # but Stage D itself only needs the candidate row to exist with valid
     # FK + provenance. We skip the run row by giving the FK a value that
     # won't be referenced (CASCADE on insert: must point at a real run).
+    batch = IngestBatch(status="running", assessment_mode=assessment_mode)
+    session.add(batch)
+    await session.flush()
     run = IngestionRun(
         source_document_id=sd.id,
+        ingest_batch_id=batch.id,
         status="running",
     )
     session.add(run)
@@ -217,7 +244,7 @@ class TestHappyPath:
         module = (await db_session.execute(select(Module).where(Module.id == result.module_id))).scalar_one()
         assert module.lifecycle_status == "draft"
         assert module.clinically_reviewed is False
-        assert module.description_localized is None
+        assert module.description_localized.get("bn") == "A scope summary explaining the topic."
         assert module.module_json is not None
         assert "cards" not in (module.module_json or {})
         card_rows = (
@@ -634,7 +661,7 @@ _seed_published_module = _seed_active_module
 
 
 class TestPublishedModuleMerge:
-    async def test_merge_retires_published_and_creates_family_draft(self, db_session: AsyncSession) -> None:
+    async def test_merge_creates_dual_path_review_pending_pair(self, db_session: AsyncSession) -> None:
         candidate = await _seed_candidate(
             db_session,
             proposed_title="Sample Topic",
@@ -646,8 +673,11 @@ class TestPublishedModuleMerge:
         block_id = UUID(candidate.source_provenance_jsonb[0]["content_block_ids"][0])
         published = await _seed_published_module(db_session, block_ids=[block_id])
 
-        new_cards = [_make_card(title=f"Merged {i}") for i in range(5)]
-        for card in new_cards:
+        drafted_cards = [_make_card(title=f"Drafted {i}") for i in range(5)]
+        for card in drafted_cards:
+            card["source_block_ids"] = [str(block_id)]
+        merged_cards = [_make_card(title=f"Merged {i}") for i in range(5)]
+        for card in merged_cards:
             card["source_block_ids"] = [str(block_id)]
 
         merger = MagicMock()
@@ -655,6 +685,61 @@ class TestPublishedModuleMerge:
             return_value=PublishedModuleMergerResult(
                 matched_module_id=published.id,
                 match_rationale="same behavioural unit",
+                merged_cards=merged_cards,
+            )
+        )
+        drafter = _make_card_drafter_mock(drafted_cards)
+        orch = StageDOrchestrator(
+            db_session,
+            card_drafter=drafter,
+            published_module_merger=merger,
+        )
+        result = await _run_dual_path_merge(db_session, orch=orch, candidate=candidate)
+        await db_session.commit()
+
+        assert result.was_published_merge is True
+        assert result.merged_from_module_id == published.id
+        assert result.module_id is not None
+        assert result.secondary_module_id is not None
+
+        source = (await db_session.execute(select(Module).where(Module.id == published.id))).scalar_one()
+        assert source.lifecycle_status == "published"
+
+        primary = (await db_session.execute(select(Module).where(Module.id == result.module_id))).scalar_one()
+        secondary = (
+            await db_session.execute(select(Module).where(Module.id == result.secondary_module_id))
+        ).scalar_one()
+        assert primary.lifecycle_status == LIFECYCLE_REVIEW_PENDING
+        assert secondary.lifecycle_status == LIFECYCLE_REVIEW_PENDING
+        assert primary.module_family_id == published.module_family_id
+        assert secondary.module_family_id == published.module_family_id
+        assert secondary.version == 2
+        assert primary.version == 3
+        assert primary.supersedes_module_id is None
+        assert secondary.supersedes_module_id is None
+        assert primary.merge_secondary_module_id == secondary.id
+        assert secondary.merge_primary_module_id == primary.id
+        assert primary.merge_source_module_id == published.id
+        assert secondary.merge_source_module_id == published.id
+        assert primary.primary_gap_id == published.primary_gap_id
+        assert secondary.quality_flags_jsonb is not None
+        assert "published_module_merged" in (secondary.quality_flags_jsonb.get("flags") or [])
+        assert primary.description_localized.get("bn") == "নতুন বাংলা বর্ণনা।"
+
+    async def test_dual_path_leaves_matched_module_untouched(self, db_session: AsyncSession) -> None:
+        candidate = await _seed_candidate(db_session, proposed_title="Sample Topic")
+        block_id = UUID(candidate.source_provenance_jsonb[0]["content_block_ids"][0])
+        published = await _seed_published_module(db_session, block_ids=[block_id])
+
+        new_cards = [_make_card(title=f"New {i}") for i in range(5)]
+        for card in new_cards:
+            card["source_block_ids"] = [str(block_id)]
+
+        merger = MagicMock()
+        merger.merge = AsyncMock(
+            return_value=PublishedModuleMergerResult(
+                matched_module_id=published.id,
+                match_rationale="same topic",
                 merged_cards=new_cards,
             )
         )
@@ -664,53 +749,17 @@ class TestPublishedModuleMerge:
             card_drafter=drafter,
             published_module_merger=merger,
         )
-        result = await orch.run(candidate_id=candidate.id)
+        result = await _run_dual_path_merge(db_session, orch=orch, candidate=candidate)
         await db_session.commit()
 
         assert result.was_published_merge is True
-        assert result.merged_from_module_id == published.id
+        still = (await db_session.execute(select(Module).where(Module.id == published.id))).scalar_one()
+        assert still.lifecycle_status == "published"
+        primary = (await db_session.execute(select(Module).where(Module.id == result.module_id))).scalar_one()
+        assert primary.module_family_id == published.module_family_id
 
-        retired = (await db_session.execute(select(Module).where(Module.id == published.id))).scalar_one()
-        assert retired.lifecycle_status == "retired"
-
-        draft = (await db_session.execute(select(Module).where(Module.id == result.module_id))).scalar_one()
-        assert draft.lifecycle_status == "draft"
-        assert draft.module_family_id == published.module_family_id
-        assert draft.version == 2
-        assert draft.supersedes_module_id == published.id
-        assert draft.primary_gap_id == published.primary_gap_id
-        draft_links = (
-            (
-                await db_session.execute(
-                    select(ModuleBehaviouralGap).where(ModuleBehaviouralGap.module_id == draft.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        published_links = (
-            (
-                await db_session.execute(
-                    select(ModuleBehaviouralGap).where(ModuleBehaviouralGap.module_id == published.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert {link.behavioural_gap_id for link in draft_links} == {
-            link.behavioural_gap_id for link in published_links
-        }
-        assert draft.quality_flags_jsonb is not None
-        assert "published_module_merged" in (draft.quality_flags_jsonb.get("flags") or [])
-        # Merge path resolves description via candidate_description_localized, which
-        # falls back to scope_summary when the candidate dict has no `description` key.
-        assert draft.description_localized.get("bn") == "A scope summary explaining the topic."
-
-    async def test_skip_merge_skips_merge_when_globally_enabled(
-        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(get_settings(), "stage_d_published_merge_enabled", True)
-
+    async def test_skip_merge_internal_opt_out_skips_published_merge(self, db_session: AsyncSession) -> None:
+        """Fusion-style internal skip_merge=True must not call the merger."""
         candidate = await _seed_candidate(db_session, proposed_title="Sample Topic")
         block_id = UUID(candidate.source_provenance_jsonb[0]["content_block_ids"][0])
         published = await _seed_published_module(db_session, block_ids=[block_id])
@@ -750,7 +799,7 @@ class TestPublishedModuleMerge:
         ).scalar_one()
         assert new_module.module_family_id != published.module_family_id
 
-    async def test_merge_retires_draft_and_creates_family_draft(self, db_session: AsyncSession) -> None:
+    async def test_merge_against_draft_creates_dual_path(self, db_session: AsyncSession) -> None:
         candidate = await _seed_candidate(db_session, proposed_title="Sample Topic")
         block_id = UUID(candidate.source_provenance_jsonb[0]["content_block_ids"][0])
         existing_draft = await _seed_active_module(
@@ -778,17 +827,20 @@ class TestPublishedModuleMerge:
             card_drafter=drafter,
             published_module_merger=merger,
         )
-        result = await orch.run(candidate_id=candidate.id)
+        result = await _run_dual_path_merge(db_session, orch=orch, candidate=candidate)
         await db_session.commit()
 
         assert result.was_published_merge is True
-        retired = (
-            await db_session.execute(select(Module).where(Module.id == existing_draft.id))
+        source = (await db_session.execute(select(Module).where(Module.id == existing_draft.id))).scalar_one()
+        assert source.lifecycle_status == "draft"
+        primary = (await db_session.execute(select(Module).where(Module.id == result.module_id))).scalar_one()
+        secondary = (
+            await db_session.execute(select(Module).where(Module.id == result.secondary_module_id))
         ).scalar_one()
-        assert retired.lifecycle_status == "retired"
-        draft = (await db_session.execute(select(Module).where(Module.id == result.module_id))).scalar_one()
-        assert draft.version == 2
-        assert draft.lifecycle_status == "draft"
+        assert secondary.version == 2
+        assert primary.version == 3
+        assert primary.lifecycle_status == LIFECYCLE_REVIEW_PENDING
+        assert secondary.lifecycle_status == LIFECYCLE_REVIEW_PENDING
 
     async def test_merge_fallback_when_validator_strips_too_many(self, db_session: AsyncSession) -> None:
         candidate = await _seed_candidate(db_session)
@@ -851,14 +903,16 @@ class TestPublishedModuleMerge:
             card_drafter=drafter,
             published_module_merger=merger,
         )
-        result = await orch.run(candidate_id=candidate.id)
+        result = await _run_dual_path_merge(db_session, orch=orch, candidate=candidate)
         await db_session.commit()
 
         assert result.was_published_merge is True
-        draft = (await db_session.execute(select(Module).where(Module.id == result.module_id))).scalar_one()
-        assert draft.search_metadata_jsonb is None
+        secondary = (
+            await db_session.execute(select(Module).where(Module.id == result.secondary_module_id))
+        ).scalar_one()
+        assert secondary.search_metadata_jsonb is None
         card_rows = (
-            (await db_session.execute(select(ModuleCard).where(ModuleCard.module_id == draft.id)))
+            (await db_session.execute(select(ModuleCard).where(ModuleCard.module_id == secondary.id)))
             .scalars()
             .all()
         )
@@ -894,8 +948,9 @@ class TestPublishedModuleMerge:
                 card_drafter=drafter,
                 published_module_merger=merger,
             )
-            await orch.run(candidate_id=candidate.id)
+            await _run_dual_path_merge(db_session, orch=orch, candidate=candidate)
             await db_session.commit()
 
-        mock_card_batch.delay.assert_called_once()
+        # Dual-path enqueues post-publish for primary and secondary.
+        assert mock_card_batch.delay.call_count == 2
         assert mock_card_batch.delay.call_args.kwargs.get("force") is True

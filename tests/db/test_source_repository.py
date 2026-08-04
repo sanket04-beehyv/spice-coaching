@@ -31,14 +31,8 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    await truncate_tables(
-        db_session,
-        "content_block, source_page, source_document",
-    )
+    await truncate_tables(db_session, "content_block, source_page, source_document")
     yield
-
-
-# ─── Helpers ───────────────────────────────────────────────────────────────
 
 
 async def _seed_doc(session: AsyncSession) -> UUID:
@@ -47,7 +41,6 @@ async def _seed_doc(session: AsyncSession) -> UUID:
         source_type="pdf",
         primary_language="bn",
         content_domain="clinical",
-        assessment_mode="with_quiz",
         original_storage_path="/tmp/x.pdf",
     )
     session.add(sd)
@@ -267,3 +260,26 @@ class TestUpdatePageExtraction:
         result = await db_session.execute(select(SourceDocument).where(SourceDocument.id == doc_id))
         doc = result.scalar_one()
         assert doc.thumbnail_storage_path == path
+
+
+class TestListDuplicateCandidatesByContentSha256:
+    async def test_matches_uploaded_and_ingested_only(self, db_session: AsyncSession) -> None:
+        repo = SourceRepository(db_session)
+        digest = "abc123digest"
+        for status in ("uploaded", "ingested", "failed", "ingesting"):
+            db_session.add(
+                SourceDocument(
+                    title=f"{status}-doc",
+                    source_type="pdf",
+                    primary_language="bn",
+                    content_domain="clinical",
+                    original_storage_path=f"/tmp/{status}.pdf",
+                    content_sha256=digest,
+                    status=status,
+                )
+            )
+        await db_session.flush()
+
+        matches = await repo.list_duplicate_candidates_by_content_sha256(digest)
+        assert {m.status for m in matches} == {"uploaded", "ingested"}
+        assert all(m.content_sha256 == digest for m in matches)

@@ -16,6 +16,8 @@ ADMIN_ROLE_NAMES = frozenset(
     }
 )
 
+ORGANIZER_ROLE_NAMES = frozenset({"po"})
+
 
 def _normalize_role_name(name: str | None) -> str:
     return (name or "").strip().lower()
@@ -40,6 +42,11 @@ def is_admin_principal(user: SpiceUserContext) -> bool:
     if any(_normalize_role_name(role.name) in ADMIN_ROLE_NAMES for role in user.roles):
         return True
     return ADMIN_SUITE in _role_suite_names(user)
+
+
+def is_organizer_principal(user: SpiceUserContext) -> bool:
+    """Return True when the user holds a Program Organizer (PO) role."""
+    return any(_normalize_role_name(role.name) in ORGANIZER_ROLE_NAMES for role in user.roles)
 
 
 def is_device_principal(user: SpiceUserContext) -> bool:

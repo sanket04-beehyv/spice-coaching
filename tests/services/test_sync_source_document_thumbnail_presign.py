@@ -39,7 +39,6 @@ async def _seed_source_document(
         source_type="pdf",
         primary_language="bn",
         content_domain="clinical",
-        assessment_mode="with_quiz",
         version_label="2026-Q1",
         publication_date=date(2026, 1, 15),
         original_storage_path=_STORAGE_PATH,

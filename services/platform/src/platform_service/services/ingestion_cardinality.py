@@ -1,19 +1,16 @@
-"""Resolve per-ingest card/quiz cardinality targets from source_document rows."""
+"""Resolve per-ingest card/quiz cardinality targets from ingest_batch."""
 
 from __future__ import annotations
 
-import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.config import Settings, get_settings
-from platform_service.db.models.source_document import SourceDocument
-
-logger = logging.getLogger(__name__)
+from platform_service.db.models.ingest_batch import IngestBatch
+from platform_service.db.models.ingestion_run import IngestionRun
 
 
 @dataclass(frozen=True)
@@ -42,33 +39,13 @@ class IngestionCardinality:
         return self.target_quizzes is not None
 
 
-def _resolve_single_target(values: list[int | None], *, field_name: str) -> int | None:
-    """Pick one target when multiple source documents are in scope."""
-    non_null = [v for v in values if v is not None]
-    if not non_null:
-        return None
-    distinct = set(non_null)
-    if len(distinct) > 1:
-        logger.warning(
-            "Conflicting %s across source documents %s; falling back to deployment default",
-            field_name,
-            sorted(distinct),
-        )
-        return None
-    return non_null[0]
-
-
-def resolve_from_source_documents(documents: list[SourceDocument]) -> IngestionCardinality:
-    """Resolve cardinality from one or more loaded source_document rows."""
+def resolve_from_batch(batch: IngestBatch | None) -> IngestionCardinality:
+    """Resolve cardinality from an ingest_batch row."""
+    if batch is None:
+        return IngestionCardinality(target_cards=None, target_quizzes=None)
     return IngestionCardinality(
-        target_cards=_resolve_single_target(
-            [doc.target_cards_per_module for doc in documents],
-            field_name="target_cards_per_module",
-        ),
-        target_quizzes=_resolve_single_target(
-            [doc.target_quizzes_per_module for doc in documents],
-            field_name="target_quizzes_per_module",
-        ),
+        target_cards=batch.cards_per_module,
+        target_quizzes=batch.quizzes_per_module,
     )
 
 
@@ -92,23 +69,48 @@ def source_document_ids_from_provenance(source_provenance: list[dict[str, Any]])
     return ordered
 
 
+async def load_batch_for_run(
+    session: AsyncSession,
+    run_id: uuid.UUID | None,
+) -> IngestBatch | None:
+    """Load the ingest_batch linked to an ingestion_run, if any."""
+    if run_id is None:
+        return None
+    run = await session.get(IngestionRun, run_id)
+    if run is None or run.ingest_batch_id is None:
+        return None
+    return await session.get(IngestBatch, run.ingest_batch_id)
+
+
+async def resolve_for_run(
+    session: AsyncSession,
+    run_id: uuid.UUID | None,
+) -> IngestionCardinality:
+    """Resolve cardinality from the batch linked to an ingestion run."""
+    batch = await load_batch_for_run(session, run_id)
+    return resolve_from_batch(batch)
+
+
 async def resolve_for_candidate(
     candidate_dict: dict[str, Any],
     session: AsyncSession,
 ) -> IngestionCardinality:
-    """Load source documents cited by a candidate and resolve ingest targets."""
-    provenance = candidate_dict.get("source_provenance") or []
-    doc_ids = source_document_ids_from_provenance(provenance)
-    if not doc_ids:
+    """Resolve ingest targets from the candidate's ingestion_run batch."""
+    raw_run_id = candidate_dict.get("ingestion_run_id")
+    if raw_run_id is None:
         return IngestionCardinality(target_cards=None, target_quizzes=None)
-    result = await session.execute(select(SourceDocument).where(SourceDocument.id.in_(doc_ids)))
-    documents = list(result.scalars().all())
-    return resolve_from_source_documents(documents)
+    try:
+        run_id = uuid.UUID(str(raw_run_id))
+    except ValueError:
+        return IngestionCardinality(target_cards=None, target_quizzes=None)
+    return await resolve_for_run(session, run_id)
 
 
 __all__ = [
     "IngestionCardinality",
+    "load_batch_for_run",
     "resolve_for_candidate",
-    "resolve_from_source_documents",
+    "resolve_for_run",
+    "resolve_from_batch",
     "source_document_ids_from_provenance",
 ]

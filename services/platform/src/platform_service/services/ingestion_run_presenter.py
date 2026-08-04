@@ -21,11 +21,16 @@ from platform_service.db.repositories.module_candidate_repository import (
     ModuleCandidateRepository,
 )
 from platform_service.services.module_presenter import get_card_counts, get_quiz_counts
+from platform_service.services.run_state.constants import (
+    _PIPELINE_CLAIM_KEY,
+    as_error_object,
+)
 from platform_service.services.run_state_service import (
     FUSION_RUN_TYPE,
     RUN_RUNNING,
     RUN_SUCCEEDED,
     STAGE_CARD_DRAFT,
+    STEP_AWAITING_INPUT,
     STEP_FAILED,
     STEP_RUNNING,
     STEP_SKIPPED,
@@ -63,6 +68,17 @@ class IngestionRunPresenter:
         self._candidate_repo = ModuleCandidateRepository(session)
 
     @staticmethod
+    def _present_run_error(error_jsonb: Any) -> dict[str, Any] | None:
+        """Coerce run error metadata for API responses.
+
+        ``error_jsonb`` is typed as an object, but legacy Postgres ``||`` merges
+        can leave array values. Internal pipeline-claim keys are stripped.
+        """
+        error = dict(as_error_object(error_jsonb))
+        error.pop(_PIPELINE_CLAIM_KEY, None)
+        return error or None
+
+    @staticmethod
     def run_kind(run: IngestionRun) -> str:
         if RunStateService.is_fusion_run(run):
             return FUSION_RUN_TYPE
@@ -80,19 +96,38 @@ class IngestionRunPresenter:
             "input_summary": step.input_summary_jsonb,
             "output_summary": step.output_summary_jsonb,
             "error": step.error_jsonb,
+            "error_code": step.error_code,
+            "error_message": step.error_message,
         }
         activity = input_summary.get("activity")
         if activity:
             step_dict["activity"] = activity
         if input_summary.get("fusion") is True:
             step_dict["fusion"] = True
-        if step.stage == STAGE_CARD_DRAFT and step.status in (STEP_SUCCEEDED, STEP_FAILED, STEP_SKIPPED):
+        if step.stage == STAGE_CARD_DRAFT and step.status == STEP_AWAITING_INPUT:
+            step_dict["published_module_merge"] = {
+                "active": True,
+                "was_merge": False,
+                "merged_from_module_id": None,
+                "proposed_module_id": output_summary.get("matched_module_id"),
+                "proposed_title": output_summary.get("proposed_title"),
+                "match_rationale": output_summary.get("match_rationale"),
+                "cards_count": output_summary.get("cards_count"),
+                "merged_cards_count": output_summary.get("merged_cards_count"),
+            }
+        elif step.stage == STAGE_CARD_DRAFT and step.status in (
+            STEP_SUCCEEDED,
+            STEP_FAILED,
+            STEP_SKIPPED,
+        ):
             was_merge = output_summary.get("was_published_merge")
             if was_merge is not None:
                 step_dict["published_module_merge"] = {
                     "active": False,
                     "was_merge": bool(was_merge),
                     "merged_from_module_id": output_summary.get("merged_from_module_id"),
+                    "primary_module_id": output_summary.get("module_id"),
+                    "secondary_module_id": output_summary.get("secondary_module_id"),
                 }
         return step_dict
 
@@ -110,6 +145,8 @@ class IngestionRunPresenter:
             input_summary=step.input_summary_jsonb,
             output_summary=step.output_summary_jsonb,
             error=step.error_jsonb,
+            error_code=step.error_code,
+            error_message=step.error_message,
             activity=poll.get("activity"),
             fusion=poll.get("fusion"),
             published_module_merge=merge_payload,
@@ -124,16 +161,20 @@ class IngestionRunPresenter:
         if run_status != RUN_RUNNING:
             return None
         for step in steps:
-            if step.status != STEP_RUNNING:
+            if step.status not in (STEP_RUNNING, STEP_AWAITING_INPUT):
                 continue
             input_summary = step.input_summary_jsonb or {}
             activity = input_summary.get("activity")
+            if step.status == STEP_AWAITING_INPUT and not activity:
+                activity = "published_module_merge"
             if not activity:
                 continue
             current: dict[str, Any] = {
                 "kind": activity,
                 "stage": step.stage,
             }
+            if step.status == STEP_AWAITING_INPUT:
+                current["awaiting_input"] = True
             if step.stage == STAGE_CARD_DRAFT:
                 candidate_id = input_summary.get("candidate_id")
                 if candidate_id:
@@ -194,7 +235,7 @@ class IngestionRunPresenter:
                         status=run.status,
                         started_at=run.started_at,
                         completed_at=run.completed_at,
-                        error=run.error_jsonb,
+                        error=self._present_run_error(run.error_jsonb),
                         document_label=label,
                         generated_module_count=0,
                         generated_card_count=0,
@@ -211,7 +252,7 @@ class IngestionRunPresenter:
                     status=run.status,
                     started_at=run.started_at,
                     completed_at=run.completed_at,
-                    error=run.error_jsonb,
+                    error=self._present_run_error(run.error_jsonb),
                     document_label=label,
                     generated_module_count=len(module_ids),
                     generated_card_count=sum(card_counts.get(mid, 0) for mid in module_ids),
@@ -242,7 +283,7 @@ class IngestionRunPresenter:
         return steps, candidates, self.run_kind(run)
 
     async def present_poll(self, run: IngestionRun) -> dict[str, Any]:
-        """JSON payload for ``GET /admin/ingest/by-document/{source_document_id}`` poll."""
+        """JSON payload for legacy flat poll views (dashboard helpers)."""
         steps, candidates, run_kind = await self._load_run_context(run)
         payload: dict[str, Any] = {
             "run_id": str(run.id),
@@ -259,7 +300,7 @@ class IngestionRunPresenter:
         if current_activity is not None:
             payload["current_activity"] = current_activity
         if run_kind == FUSION_RUN_TYPE:
-            error = run.error_jsonb or {}
+            error = as_error_object(run.error_jsonb)
             source_ids = error.get("source_document_ids")
             if source_ids:
                 payload["source_document_ids"] = source_ids
@@ -271,7 +312,7 @@ class IngestionRunPresenter:
         current_activity = self.current_activity_from_steps(steps, run_status=run.status)
         source_document_ids = None
         if run_kind == FUSION_RUN_TYPE:
-            source_document_ids = (run.error_jsonb or {}).get("source_document_ids")
+            source_document_ids = as_error_object(run.error_jsonb).get("source_document_ids")
         summary = (await self.present_summaries([run]))[0]
         return IngestionRunDetail(
             id=summary.id,

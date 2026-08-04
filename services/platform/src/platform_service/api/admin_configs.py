@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from mc_contracts.admin_configs import (
     ConfigThresholdResponse,
     ConfigThresholdUpdateRequest,
 )
+from mc_contracts.errors import ErrorCode
+from mc_foundation.problem import AppError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.db.repositories.config_threshold_repository import ConfigThresholdRepository
@@ -32,9 +34,10 @@ async def get_config(
     repo = ConfigThresholdRepository(session)
     config = await repo.get_by_key(key)
     if config is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Config threshold with key '{key}' not found.",
+        raise AppError(
+            ErrorCode.CONFIG_NOT_FOUND.value,
+            f"Config threshold with key '{key}' not found.",
+            status=404,
         )
     return ConfigThresholdResponse.model_validate(config)
 
@@ -49,9 +52,10 @@ async def update_config(
     repo = ConfigThresholdRepository(session)
     config = await repo.get_by_key(key)
     if config is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Config threshold with key '{key}' not found.",
+        raise AppError(
+            ErrorCode.CONFIG_NOT_FOUND.value,
+            f"Config threshold with key '{key}' not found.",
+            status=404,
         )
 
     updated = await repo.update_config(

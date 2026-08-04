@@ -163,3 +163,21 @@ class ModuleCompletionRepository:
             )
         stmt = stmt.order_by(CHWModuleCompletion.module_family_id.asc())
         return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_completed_in_range_for_chws(
+        self,
+        *,
+        chw_ids: list[int],
+        from_ts: datetime,
+        to_ts: datetime,
+    ) -> list[CHWModuleCompletion]:
+        if not chw_ids:
+            return []
+        stmt = select(CHWModuleCompletion).where(
+            CHWModuleCompletion.chw_id.in_(chw_ids),
+            CHWModuleCompletion.completed_at.is_not(None),
+            CHWModuleCompletion.completed_at >= from_ts,
+            CHWModuleCompletion.completed_at <= to_ts,
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())

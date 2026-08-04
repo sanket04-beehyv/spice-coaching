@@ -29,8 +29,10 @@ except ImportError:
 _ = os  # keep import alive for downstream use
 
 import uvicorn  # noqa: E402
-from fastapi import FastAPI  # noqa: E402
+from fastapi import FastAPI, HTTPException  # noqa: E402
+from fastapi.exceptions import RequestValidationError  # noqa: E402
 from mc_foundation.logging import setup_logging  # noqa: E402
+from mc_foundation.problem import register_problem_handlers  # noqa: E402
 from mc_foundation.request_middleware import RequestIdMiddleware  # noqa: E402
 
 from ai_runtime.api.internal_embed import router as embed_router  # noqa: E402
@@ -62,6 +64,11 @@ def create_app() -> FastAPI:
         docs_url="/docs" if settings.app_env != "production" else None,
         redoc_url=None,
         lifespan=_lifespan,
+    )
+    register_problem_handlers(
+        app,
+        validation_error_type=RequestValidationError,
+        http_exception_type=HTTPException,
     )
     app.add_middleware(RequestIdMiddleware, service_name=settings.app_name)
 

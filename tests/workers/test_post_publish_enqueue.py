@@ -45,7 +45,7 @@ def _enable_gap_classification(monkeypatch: pytest.MonkeyPatch) -> None:
 async def _wipe(db_session: AsyncSession) -> AsyncIterator[None]:
     await truncate_tables(
         db_session,
-        "module, module_family, module_candidate_draft, source_document, ingestion_run_step, ingestion_run",
+        "module, module_family, module_candidate_draft, source_document, ingestion_run_step, ingestion_run, ingest_batch",
     )
     yield
 
@@ -54,19 +54,23 @@ async def _seed_run_and_candidate(
     session: AsyncSession,
     *,
     assessment_mode: str = "with_quiz",
+    quizzes_per_module: int | None = None,
 ) -> tuple[StageDOrchestrator, IngestionRun, ModuleCandidateDraft, SourceDocument]:
     sd = SourceDocument(
         title="t",
         source_type="pdf",
         primary_language="en",
         content_domain="clinical",
-        assessment_mode=assessment_mode,
         original_storage_path="/tmp/x.pdf",
     )
     session.add(sd)
     await session.flush()
     run_state = RunStateService(session)
-    run = await run_state.start_run(source_document_id=sd.id)
+    batch = await run_state.create_batch(
+        assessment_mode=assessment_mode,
+        quizzes_per_module=quizzes_per_module,
+    )
+    run = await run_state.start_run(source_document_id=sd.id, ingest_batch_id=batch.id)
     cand = ModuleCandidateDraft(
         ingestion_run_id=run.id,
         proposed_title="T",
@@ -130,12 +134,15 @@ class TestEnqueuePostPublishSteps:
         mock_embed.delay.assert_not_called()
         mock_gap.delay.assert_called_once()
 
-    async def test_passes_quiz_size_when_source_has_target(
+    async def test_passes_quiz_size_when_batch_has_target(
         self,
         db_session: AsyncSession,
     ) -> None:
-        stage_d, run, cand, sd = await _seed_run_and_candidate(db_session)
-        sd.target_quizzes_per_module = 6
+        stage_d, run, cand, sd = await _seed_run_and_candidate(
+            db_session,
+            quizzes_per_module=6,
+        )
+        cand.estimated_quiz_count = 6
         await db_session.flush()
         module_id = uuid4()
         mock_quiz = MagicMock()
@@ -164,7 +171,7 @@ class TestEnqueuePostPublishSteps:
             )
 
         mock_quiz.delay.assert_called_once()
-        assert mock_quiz.delay.call_args.kwargs.get("quiz_size") == cand.estimated_quiz_count
+        assert mock_quiz.delay.call_args.kwargs.get("quiz_size") == 6
 
         run_row = await db_session.get(IngestionRun, run.id)
         assert run_row is not None

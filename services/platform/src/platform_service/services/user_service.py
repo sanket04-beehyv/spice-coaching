@@ -683,3 +683,13 @@ SK_TO_PO_MAP = {row[7]: row[5] for row in RAW_DATA}
 def get_user_po_id(user_id: int) -> int | None:
     """Return the PO user_id for a given SK user_id, or None if not found/not an SK."""
     return SK_TO_PO_MAP.get(user_id)
+
+
+def get_team_members_for_organizer(organizer_id: int) -> list[dict[str, Any]]:
+    """Return SK team members whose parent_id matches the organizer (PO) user id."""
+    return [u for u in get_all_users() if u["role"] == "SK" and u["parent_id"] == organizer_id]
+
+
+def get_all_sk_users() -> list[dict[str, Any]]:
+    """Return all SK-role users (unrestricted team-activity roster when auth is off)."""
+    return [u for u in get_all_users() if u["role"] == "SK"]

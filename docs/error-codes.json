@@ -1,0 +1,629 @@
+{
+  "version": 1,
+  "errors": {
+    "validation_error": {
+      "title": "Validation Error",
+      "description": "Request body or query failed schema or field validation.",
+      "typical_status": 422,
+      "domain": "cross_cutting",
+      "retryable": false,
+      "audience": "client"
+    },
+    "not_authenticated": {
+      "title": "Not Authenticated",
+      "description": "Missing or invalid authentication credentials.",
+      "typical_status": 401,
+      "domain": "cross_cutting",
+      "retryable": false,
+      "audience": "client"
+    },
+    "forbidden": {
+      "title": "Forbidden",
+      "description": "Authenticated principal lacks permission for this resource or plane.",
+      "typical_status": 403,
+      "domain": "cross_cutting",
+      "retryable": false,
+      "audience": "client"
+    },
+    "not_found": {
+      "title": "Not Found",
+      "description": "Generic resource not found when no more specific code applies.",
+      "typical_status": 404,
+      "domain": "cross_cutting",
+      "retryable": false,
+      "audience": "client"
+    },
+    "conflict": {
+      "title": "Conflict",
+      "description": "Request conflicts with current resource state.",
+      "typical_status": 409,
+      "domain": "cross_cutting",
+      "retryable": false,
+      "audience": "client"
+    },
+    "bad_request": {
+      "title": "Bad Request",
+      "description": "Malformed or semantically invalid request that is not a field-validation failure.",
+      "typical_status": 400,
+      "domain": "cross_cutting",
+      "retryable": false,
+      "audience": "client"
+    },
+    "payload_too_large": {
+      "title": "Payload Too Large",
+      "description": "Request body or uploaded file exceeds the configured size limit.",
+      "typical_status": 413,
+      "domain": "cross_cutting",
+      "retryable": false,
+      "audience": "client"
+    },
+    "rate_limit_exceeded": {
+      "title": "Rate Limit Exceeded",
+      "description": "Too many requests; wait and retry.",
+      "typical_status": 429,
+      "domain": "cross_cutting",
+      "retryable": true,
+      "audience": "client"
+    },
+    "not_implemented": {
+      "title": "Not Implemented",
+      "description": "Requested capability is not implemented on this service.",
+      "typical_status": 501,
+      "domain": "cross_cutting",
+      "retryable": false,
+      "audience": "client"
+    },
+    "internal_error": {
+      "title": "Internal Error",
+      "description": "Unexpected server failure. Detail is generic; stacks stay in logs.",
+      "typical_status": 500,
+      "domain": "cross_cutting",
+      "retryable": true,
+      "audience": "client"
+    },
+    "service_unavailable": {
+      "title": "Service Unavailable",
+      "description": "Service or a required dependency is temporarily unavailable (e.g. readiness checks).",
+      "typical_status": 503,
+      "domain": "cross_cutting",
+      "retryable": true,
+      "audience": "client"
+    },
+    "bad_gateway": {
+      "title": "Bad Gateway",
+      "description": "Upstream dependency returned an invalid or unsuccessful response.",
+      "typical_status": 502,
+      "domain": "cross_cutting",
+      "retryable": true,
+      "audience": "client"
+    },
+    "batch_not_found": {
+      "title": "Batch Not Found",
+      "description": "Ingest batch id does not exist.",
+      "typical_status": 404,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "run_not_found": {
+      "title": "Run Not Found",
+      "description": "Ingestion run id does not exist.",
+      "typical_status": 404,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "step_not_found": {
+      "title": "Step Not Found",
+      "description": "Ingestion run step id does not exist.",
+      "typical_status": 404,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "source_not_found": {
+      "title": "Source Not Found",
+      "description": "Source document referenced by the request does not exist.",
+      "typical_status": 404,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "source_not_uploaded": {
+      "title": "Source Not Uploaded",
+      "description": "Source document is not in uploaded state and cannot be queued for ingest without override.",
+      "typical_status": 422,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "unknown_stage": {
+      "title": "Unknown Stage",
+      "description": "Requested pipeline stage name is not recognized.",
+      "typical_status": 400,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "merge_override_not_primary": {
+      "title": "Merge Override Not Primary",
+      "description": "Override-merge requires the dual-path primary module (the row that references a secondary).",
+      "typical_status": 400,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "merge_override_not_review_pending": {
+      "title": "Merge Override Not Review Pending",
+      "description": "Override-merge is only allowed while the primary module is review_pending.",
+      "typical_status": 409,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "merge_override_secondary_unavailable": {
+      "title": "Merge Override Secondary Unavailable",
+      "description": "The secondary merge module is missing or no longer review_pending.",
+      "typical_status": 409,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "merge_override_source_unavailable": {
+      "title": "Merge Override Source Unavailable",
+      "description": "The matched source module for the dual-path merge is missing or already retired.",
+      "typical_status": 409,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "duplicate_content": {
+      "title": "Duplicate Content",
+      "description": "Upload or start-ingest blocked because content already exists (or every item in the batch was a duplicate / already ingested without override).",
+      "typical_status": 409,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "invalid_ingestion_instructions": {
+      "title": "Invalid Ingestion Instructions",
+      "description": "Ingestion instructions payload failed validation.",
+      "typical_status": 422,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "invalid_cardinality_targets": {
+      "title": "Invalid Cardinality Targets",
+      "description": "Ingest cardinality / target module configuration is invalid.",
+      "typical_status": 422,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "concurrent_run": {
+      "title": "Concurrent Run",
+      "description": "Another ingest run already claims this work; retry later or wait for completion.",
+      "typical_status": 409,
+      "domain": "ingest",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "step_not_failed": {
+      "title": "Step Not Failed",
+      "description": "Retry was requested for a step that is not in a failed state.",
+      "typical_status": 400,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "retry_not_allowed": {
+      "title": "Retry Not Allowed",
+      "description": "This step or stage cannot be retried in its current state.",
+      "typical_status": 400,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "candidate_required": {
+      "title": "Candidate Required",
+      "description": "Operation requires a module candidate id that was not provided.",
+      "typical_status": 400,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "chunk_required": {
+      "title": "Chunk Required",
+      "description": "Operation requires a source chunk that was not provided.",
+      "typical_status": 400,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "chunk_id_invalid": {
+      "title": "Chunk Id Invalid",
+      "description": "Provided chunk id is malformed or does not belong to the run.",
+      "typical_status": 400,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "module_id_missing": {
+      "title": "Module Id Missing",
+      "description": "Operation requires a module id that was not provided.",
+      "typical_status": 400,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "fusion_sources_missing": {
+      "title": "Fusion Sources Missing",
+      "description": "Cross-source fusion requires source documents that are missing or incomplete.",
+      "typical_status": 400,
+      "domain": "ingest",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "module_not_found": {
+      "title": "Module Not Found",
+      "description": "Module id does not exist.",
+      "typical_status": 404,
+      "domain": "modules",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "module_version_conflict": {
+      "title": "Module Version Conflict",
+      "description": "Optimistic concurrency failure on module edit; refetch latest and retry with expected_version.",
+      "typical_status": 409,
+      "domain": "modules",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "object_not_found": {
+      "title": "Object Not Found",
+      "description": "Object-storage key or file object does not exist.",
+      "typical_status": 404,
+      "domain": "modules",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "filename_required": {
+      "title": "Filename Required",
+      "description": "Upload or ingest requires a non-empty filename.",
+      "typical_status": 400,
+      "domain": "modules",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "prompt_not_found": {
+      "title": "Prompt Not Found",
+      "description": "Admin prompt id does not exist.",
+      "typical_status": 404,
+      "domain": "modules",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "trigger_binding_not_found": {
+      "title": "Trigger Binding Not Found",
+      "description": "Trigger binding id does not exist.",
+      "typical_status": 404,
+      "domain": "modules",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "assignment_not_found": {
+      "title": "Assignment Not Found",
+      "description": "Module assignment id does not exist.",
+      "typical_status": 404,
+      "domain": "modules",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "assignment_validation_error": {
+      "title": "Assignment Validation Error",
+      "description": "Assignment create/update failed business validation.",
+      "typical_status": 400,
+      "domain": "modules",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "invalid_query": {
+      "title": "Invalid Query",
+      "description": "List/filter query parameters are invalid.",
+      "typical_status": 422,
+      "domain": "modules",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "config_not_found": {
+      "title": "Config Not Found",
+      "description": "Named admin config key does not exist.",
+      "typical_status": 404,
+      "domain": "modules",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "module_lifecycle_error": {
+      "title": "Module Lifecycle Error",
+      "description": "Module lifecycle transition is not allowed from the current state.",
+      "typical_status": 409,
+      "domain": "modules",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "module_family_not_assignable": {
+      "title": "Module Family Not Assignable",
+      "description": "Module family cannot be assigned in its current lifecycle or tip state.",
+      "typical_status": 400,
+      "domain": "modules",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "gap_link_error": {
+      "title": "Gap Link Error",
+      "description": "Linking or unlinking behavioural gaps to a module failed.",
+      "typical_status": 400,
+      "domain": "modules",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "chw_id_required": {
+      "title": "Chw Id Required",
+      "description": "Request requires a community health worker (CHW) id.",
+      "typical_status": 400,
+      "domain": "auth",
+      "retryable": false,
+      "audience": "client"
+    },
+    "user_id_missing": {
+      "title": "User Id Missing",
+      "description": "Authenticated context is missing a user id required for this operation.",
+      "typical_status": 400,
+      "domain": "auth",
+      "retryable": false,
+      "audience": "client"
+    },
+    "tenant_mismatch": {
+      "title": "Tenant Mismatch",
+      "description": "Resource tenant does not match the authenticated principal's tenant.",
+      "typical_status": 403,
+      "domain": "auth",
+      "retryable": false,
+      "audience": "client"
+    },
+    "ai_runtime_unreachable": {
+      "title": "Ai Runtime Unreachable",
+      "description": "Platform could not reach ai-runtime (transport/timeout). Retry may help.",
+      "typical_status": 502,
+      "domain": "ai",
+      "retryable": true,
+      "audience": "client"
+    },
+    "ai_runtime_error": {
+      "title": "Ai Runtime Error",
+      "description": "ai-runtime or upstream model provider returned an error.",
+      "typical_status": 502,
+      "domain": "ai",
+      "retryable": true,
+      "audience": "client"
+    },
+    "empty_embedding": {
+      "title": "Empty Embedding",
+      "description": "Embedding provider returned an empty vector.",
+      "typical_status": 502,
+      "domain": "ai",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "empty_transcript": {
+      "title": "Empty Transcript",
+      "description": "Transcription provider returned an empty transcript.",
+      "typical_status": 422,
+      "domain": "ai",
+      "retryable": false,
+      "audience": "client"
+    },
+    "unsupported_mime_type": {
+      "title": "Unsupported Mime Type",
+      "description": "Media MIME type is not supported for this operation.",
+      "typical_status": 400,
+      "domain": "ai",
+      "retryable": false,
+      "audience": "client"
+    },
+    "invalid_base64": {
+      "title": "Invalid Base64",
+      "description": "Media payload is not valid base64.",
+      "typical_status": 400,
+      "domain": "ai",
+      "retryable": false,
+      "audience": "client"
+    },
+    "empty_media_payload": {
+      "title": "Empty Media Payload",
+      "description": "Decoded media payload is empty.",
+      "typical_status": 400,
+      "domain": "ai",
+      "retryable": false,
+      "audience": "client"
+    },
+    "embedding_dimension_mismatch": {
+      "title": "Embedding Dimension Mismatch",
+      "description": "Embedding vector length does not match the configured store dimension.",
+      "typical_status": 500,
+      "domain": "ai",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "object_storage_error": {
+      "title": "Object Storage Error",
+      "description": "Object storage upload, download, or delete failed.",
+      "typical_status": 502,
+      "domain": "ai",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "analytics_unavailable": {
+      "title": "Analytics Unavailable",
+      "description": "Analytics backend (e.g. ClickHouse) is unavailable for this request.",
+      "typical_status": 503,
+      "domain": "ai",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "coaching_rag_error": {
+      "title": "Coaching Rag Error",
+      "description": "Coaching RAG query pipeline failed after retrieval or generation.",
+      "typical_status": 502,
+      "domain": "ai",
+      "retryable": true,
+      "audience": "client"
+    },
+    "internal_token_invalid": {
+      "title": "Internal Token Invalid",
+      "description": "Internal service-to-service auth token is missing or invalid.",
+      "typical_status": 401,
+      "domain": "ai",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "pipeline_crashed": {
+      "title": "Pipeline Crashed",
+      "description": "Ingest pipeline worker crashed while processing a run.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "stage_failed": {
+      "title": "Stage Failed",
+      "description": "A generic pipeline stage failed without a more specific code.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "extract_failed": {
+      "title": "Extract Failed",
+      "description": "Source extract stage failed, including when extracted or transcribed text is empty or below the configured minimum character threshold.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "identify_failed": {
+      "title": "Identify Failed",
+      "description": "Module identify stage failed.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "identify_no_candidates": {
+      "title": "Identify No Candidates",
+      "description": "Module identify stage completed without emitting any candidates.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "draft_failed": {
+      "title": "Draft Failed",
+      "description": "Card draft generation stage failed.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "fusion_failed": {
+      "title": "Fusion Failed",
+      "description": "Cross-source fusion stage failed.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "thumbnail_failed": {
+      "title": "Thumbnail Failed",
+      "description": "Thumbnail generation worker failed.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "embedding_failed": {
+      "title": "Embedding Failed",
+      "description": "Module embedding worker failed.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "search_metadata_failed": {
+      "title": "Search Metadata Failed",
+      "description": "Search metadata generation worker failed.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "card_search_metadata_failed": {
+      "title": "Card Search Metadata Failed",
+      "description": "Per-card search metadata generation worker failed.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "trigger_binding_failed": {
+      "title": "Trigger Binding Failed",
+      "description": "Trigger binding worker failed.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "gap_classification_failed": {
+      "title": "Gap Classification Failed",
+      "description": "Gap classification worker failed.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "quiz_generation_failed": {
+      "title": "Quiz Generation Failed",
+      "description": "Quiz generation worker failed.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "enqueue_failed": {
+      "title": "Enqueue Failed",
+      "description": "Failed to enqueue a follow-on pipeline or worker job.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    },
+    "module_has_no_text": {
+      "title": "Module Has No Text",
+      "description": "Embedding or generation requires module text that is empty.",
+      "typical_status": 400,
+      "domain": "worker",
+      "retryable": false,
+      "audience": "operator"
+    },
+    "generation_failed": {
+      "title": "Generation Failed",
+      "description": "Generic AI generation step failed in a worker pipeline.",
+      "typical_status": 500,
+      "domain": "worker",
+      "retryable": true,
+      "audience": "operator"
+    }
+  }
+}

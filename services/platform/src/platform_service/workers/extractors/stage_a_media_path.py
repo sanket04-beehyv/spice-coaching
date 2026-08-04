@@ -11,6 +11,7 @@ from platform_service.db.repositories.source_repository import SourceRepository
 from platform_service.workers.extractors.calibration import CalibrationDecision
 from platform_service.workers.extractors.extraction_markdown import persist_markdown_content
 from platform_service.workers.extractors.stage_a_outline_assembler import assemble_outline_from_page_pairs
+from platform_service.workers.extractors.stage_a_text_guard import assert_document_has_text
 from platform_service.workers.extractors.text_extractor import ExtractedPage
 from platform_service.workers.stage_a_types import StageAResult
 
@@ -70,6 +71,13 @@ async def run_media_transcript_path(
         empty_outline_log=(
             "Stage 1 media transcript produced no outline sections for source_document_id=%s; proceeding"
         ),
+    )
+    await assert_document_has_text(
+        repo,
+        session,
+        source_document_id=source_document_id,
+        page_markdowns=[md for _, md in page_pairs],
+        total_pages=total_pages,
     )
 
     return StageAResult(

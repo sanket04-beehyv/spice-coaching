@@ -9,10 +9,13 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient
 from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import InferenceResponse
+from mc_foundation.objectstore import PresignedObjectUrl
+from mc_foundation.problem import register_problem_handlers
 from platform_service.api.admin_module_analytics import router as admin_module_analytics_router
 from platform_service.api.admin_modules import router as admin_modules_router
 from platform_service.api.admin_trigger_bindings import router as admin_trigger_bindings_router
@@ -24,12 +27,11 @@ from platform_service.db.models.chw_module_completion import CHWModuleCompletion
 from platform_service.db.models.module import Module
 from platform_service.db.models.trigger_definition import TriggerDefinition
 from platform_service.deps import get_ai_client, get_db, get_object_storage_client
-from platform_service.services.object_storage import PresignedObjectUrl
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.api.conftest import _seed_module, _unit_basis_vector, wipe_api_tables
-from tests.conftest import platform_path, requires_db
+from tests.api.conftest import _seed_module, _unit_basis_vector
+from tests.conftest import platform_path, requires_db, truncate_tables
 from tests.localized_helpers import loc, primary_from_response
 
 pytestmark = [requires_db, pytest.mark.asyncio]
@@ -37,13 +39,21 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    await wipe_api_tables(db_session)
+    await truncate_tables(
+        db_session,
+        "module_lifecycle_event, chw_module_completion, module_quiz_question, module_trigger_binding, trigger_definition, module, module_family, content_block, source_page, source_document",
+    )
     yield
 
 
 @pytest_asyncio.fixture
 async def admin_app(db_session: AsyncSession) -> AsyncIterator[FastAPI]:
     app_obj = FastAPI()
+    register_problem_handlers(
+        app_obj,
+        validation_error_type=RequestValidationError,
+        http_exception_type=HTTPException,
+    )
     api_router = APIRouter(prefix=get_settings().api_root_path_normalized)
     api_router.include_router(admin_modules_router)
     api_router.include_router(admin_module_analytics_router)

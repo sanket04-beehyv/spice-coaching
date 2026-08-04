@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from mc_contracts.admin_assignments import (
     AssignmentCreateRequest,
     AssignmentResponse,
@@ -13,6 +13,8 @@ from mc_contracts.admin_module_demand import (
     ModuleDemandAssignRequest,
     ModuleDemandAssignResponse,
 )
+from mc_contracts.errors import ErrorCode
+from mc_foundation.problem import AppError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.auth.spice_identity import resolve_tenant_id_for_admin
@@ -54,9 +56,9 @@ async def create_assignments(
     try:
         return await service.create_assignments(body, assigned_by)
     except ModuleNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, str(exc), status=404) from exc
     except AssignmentValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise AppError(ErrorCode.ASSIGNMENT_VALIDATION_ERROR.value, str(exc), status=400) from exc
 
 
 @router.post(
@@ -90,9 +92,9 @@ async def assign_module_from_demand(
             tenant_id=tenant_id,
         )
     except ModuleNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise AppError(ErrorCode.MODULE_NOT_FOUND.value, str(exc), status=404) from exc
     except AssignmentValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise AppError(ErrorCode.ASSIGNMENT_VALIDATION_ERROR.value, str(exc), status=400) from exc
 
 
 @router.delete("/assignments/{assignment_id}")
@@ -105,7 +107,7 @@ async def revoke_assignment(
     try:
         return await service.revoke_assignment(assignment_id)
     except AssignmentNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise AppError(ErrorCode.ASSIGNMENT_NOT_FOUND.value, str(exc), status=404) from exc
 
 
 @router.get("/users", response_model=list[UserResponse])

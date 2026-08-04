@@ -431,6 +431,34 @@ class TestCountModules:
         assert default == published
         assert retired >= 1  # at least our retired one
 
+    async def test_default_includes_review_pending(self, db_session: AsyncSession) -> None:
+        marker = f"count-rp-{uuid4().hex[:6]}"
+        await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": marker},
+            lifecycle_status="review_pending",
+        )
+        await _make_module(
+            db_session,
+            family=await _make_family(db_session),
+            title_localized={"bn": f"{marker}-deactivated"},
+            lifecycle_status="deactivated",
+            set_family_pointer=False,
+        )
+
+        repo = ModuleRepository(db_session)
+        default_rows = await repo.list_modules(full_text_query=marker)
+        review_pending = await repo.count_modules(status="review_pending", full_text_query=marker)
+        deactivated = await repo.count_modules(status="deactivated", full_text_query=marker)
+        default = await repo.count_modules(full_text_query=marker)
+        titles = {m.title_localized["bn"] for m in default_rows}
+        assert marker in titles
+        assert f"{marker}-deactivated" not in titles
+        assert review_pending == 1
+        assert deactivated == 1
+        assert default == 1
+
     async def test_clinically_reviewed_filter_count(self, db_session: AsyncSession) -> None:
         # Use a unique tag in description so we can isolate.
         marker = f"count-test-{uuid4().hex[:6]}"
@@ -551,7 +579,7 @@ class TestListActiveModulesForMerge:
 
     async def test_excludes_modules_with_empty_cards(self, db_session: AsyncSession) -> None:
         repo = ModuleRepository(db_session)
-        empty = await _make_module(
+        empty_cards_module = await _make_module(
             db_session,
             title_localized={"bn": "no cards"},
             module_json={"cards": []},
@@ -559,7 +587,7 @@ class TestListActiveModulesForMerge:
         )
         await db_session.commit()
         active = await repo.list_active_modules_for_merge()
-        assert empty.id not in {m.id for m in active}
+        assert empty_cards_module.id not in {module.id for module in active}
 
 
 # Suppress unused-import lint when only referenced via select(...)

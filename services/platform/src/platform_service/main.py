@@ -29,25 +29,32 @@ from contextlib import asynccontextmanager  # noqa: E402
 import httpx  # noqa: E402
 import uvicorn  # noqa: E402
 from fastapi import APIRouter, FastAPI, HTTPException  # noqa: E402
+from fastapi.exceptions import RequestValidationError  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from mc_contracts.errors import ErrorCode  # noqa: E402
 from mc_foundation.logging import setup_logging  # noqa: E402
+from mc_foundation.problem import AppError, register_problem_handlers  # noqa: E402
 from mc_foundation.request_middleware import RequestIdMiddleware  # noqa: E402
 from redis.asyncio import Redis  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
-from platform_service.api.admin_assignments import router as admin_assignments_router
-from platform_service.api.admin_configs import router as admin_configs_router
+from platform_service.api.admin_assignments import router as admin_assignments_router  # noqa: E402
+from platform_service.api.admin_configs import router as admin_configs_router  # noqa: E402
 from platform_service.api.admin_files import router as admin_files_router  # noqa: E402
 from platform_service.api.admin_ingest import router as admin_ingest_router  # noqa: E402
 from platform_service.api.admin_ingestion_runs import router as admin_ingestion_runs_router  # noqa: E402
-from platform_service.api.admin_module_analytics import router as admin_module_analytics_router
-from platform_service.api.admin_module_demand import router as admin_module_demand_router
+from platform_service.api.admin_module_analytics import router as admin_module_analytics_router  # noqa: E402
+from platform_service.api.admin_module_demand import router as admin_module_demand_router  # noqa: E402
 from platform_service.api.admin_modules import router as admin_modules_router  # noqa: E402
-from platform_service.api.admin_prompts import router as admin_prompts_router
+from platform_service.api.admin_prompts import router as admin_prompts_router  # noqa: E402
 from platform_service.api.admin_source_documents import router as admin_source_documents_router  # noqa: E402
 from platform_service.api.admin_trigger_bindings import router as admin_trigger_bindings_router  # noqa: E402
+from platform_service.api.admin_video_assignments import (
+    router as admin_video_assignments_router,  # noqa: E402
+)
 from platform_service.api.coaching_rag import router as coaching_rag_router  # noqa: E402
 from platform_service.api.dashboard import router as dashboard_router  # noqa: E402
+from platform_service.api.knowledge import router as knowledge_router  # noqa: E402
 from platform_service.api.morning import router as morning_router  # noqa: E402
 from platform_service.api.sync import router as sync_router  # noqa: E402
 from platform_service.api.telemetry import router as telemetry_router  # noqa: E402
@@ -91,6 +98,11 @@ def create_app() -> FastAPI:
         redoc_url=None,
         lifespan=_lifespan,
     )
+    register_problem_handlers(
+        fastapi_app,
+        validation_error_type=RequestValidationError,
+        http_exception_type=HTTPException,
+    )
 
     fastapi_app.add_middleware(
         CORSMiddleware,
@@ -109,12 +121,14 @@ def create_app() -> FastAPI:
     api_router.include_router(coaching_rag_router)
     api_router.include_router(admin_ingest_router)
     api_router.include_router(admin_files_router)
+    api_router.include_router(knowledge_router)
     api_router.include_router(admin_modules_router)
     api_router.include_router(admin_module_analytics_router)
     api_router.include_router(admin_trigger_bindings_router)
     api_router.include_router(admin_ingestion_runs_router)
     api_router.include_router(admin_source_documents_router)
     api_router.include_router(admin_assignments_router)
+    api_router.include_router(admin_video_assignments_router)
     api_router.include_router(admin_module_demand_router)
     api_router.include_router(admin_configs_router)
     api_router.include_router(admin_prompts_router)
@@ -179,7 +193,12 @@ def create_app() -> FastAPI:
             checks["object_storage"] = "error"
 
         if any(value != "ok" for value in checks.values()):
-            raise HTTPException(status_code=503, detail={"status": "degraded", "checks": checks})
+            raise AppError(
+                ErrorCode.SERVICE_UNAVAILABLE.value,
+                "one or more dependencies are unavailable",
+                status=503,
+                extensions={"checks": checks},
+            )
 
         return {"status": "ok", "service": settings.app_name, "checks": checks}
 

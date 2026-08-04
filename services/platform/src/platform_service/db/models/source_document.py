@@ -1,15 +1,16 @@
 """v3.3 source_document — canonical raw input artefact for the content pipeline.
 
 Per Data Model v3.3 §3.1. Replaces the v1 `documents` table semantically (the old
-`Document` model remains during the deprecation window). Carries content_domain
-+ assessment_mode, calibration result for Stage A, and outline_method tag for Stage B.
+`Document` model remains during the deprecation window). Carries content_domain,
+calibration result for Stage A, and outline_method tag for Stage B. Ingest-time
+config (assessment_mode, instructions, cardinality) lives on ingest_batch.
 """
 
 import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, Date, DateTime, Integer, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,18 +26,18 @@ class SourceDocument(Base):
         UUID(as_uuid=True), nullable=False, default=uuid.uuid4
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
+    # Optional admin-provided summary (set at ingest or via PATCH; never drives the pipeline).
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Enum stored as text for forward-compat: pdf | pptx | docx | image_set | video | transcript
     source_type: Mapped[str] = mapped_column(Text, nullable=False)
     # bn | en | bn_en_mixed
     primary_language: Mapped[str] = mapped_column(Text, nullable=False, default="bn")
-    # Enum stored as text: digital | clinical | clinical_with_app_workflows
+    # Enum stored as text: clinical | digital | operational
     content_domain: Mapped[str] = mapped_column(Text, nullable=False, default="clinical")
-    # with_quiz | read_only — read_only skips post-publish quiz generation
-    assessment_mode: Mapped[str] = mapped_column(Text, nullable=False, default="with_quiz")
     version_label: Mapped[str | None] = mapped_column(Text, nullable=True)
     publication_date: Mapped[datetime | None] = mapped_column(Date, nullable=True)
     original_storage_path: Mapped[str] = mapped_column(Text, nullable=False)
-    # MinIO path to ingest thumbnail PNG ({bucket}/ingest/thumbnails/{id}.png).
+    # Object-storage path to ingest thumbnail PNG ({bucket}/ingest/thumbnails/{id}.png).
     thumbnail_storage_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Optional audit / dedup (populated by ingest when bytes are available).
@@ -52,17 +53,10 @@ class SourceDocument(Base):
     # { "vision_pct": 0.55, "text_pct": 0.45, "sample_pages_evaluated": [3, 17, ...], "decision_at": "..." }
     extraction_calibration_jsonb: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
-    # Optional admin steering text for Stage C module identification (sanitized at ingest).
-    ingestion_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    # Optional fixed card/quiz counts per module (set at ingest; null = deployment defaults).
-    target_cards_per_module: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    target_quizzes_per_module: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
     # When true, document may appear in GET /sync/source-documents/published.
     sync_published_visible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # ingesting | ingested | failed
+    # uploaded | ingesting | ingested | failed | retired
     status: Mapped[str] = mapped_column(Text, nullable=False, default="ingesting")
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

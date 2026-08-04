@@ -228,7 +228,7 @@ class TestCardDrafterValidation:
             cited_blocks=[],
             valid_block_ids={UUID(b1)},
         )
-        # card_max_count default is 7
+        # card_max_count default is 10.
         assert len(result.cards) == 10
 
     @pytest.mark.asyncio

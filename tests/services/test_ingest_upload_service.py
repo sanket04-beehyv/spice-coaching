@@ -87,6 +87,26 @@ def test_resolve_titles_rejects_empty_string_entry() -> None:
     assert exc_info.value.status_code == 400
 
 
+def test_resolve_descriptions_defaults_to_none() -> None:
+    uploads = [_FakeUpload("a.pdf"), _FakeUpload("b.pdf")]
+    assert IngestUploadService.resolve_descriptions_for_files(None, uploads) == [None, None]
+
+
+def test_resolve_descriptions_parses_json_array() -> None:
+    uploads = [_FakeUpload("a.pdf"), _FakeUpload("b.pdf")]
+    assert IngestUploadService.resolve_descriptions_for_files(
+        '["First desc", null]',
+        uploads,
+    ) == ["First desc", None]
+
+
+def test_resolve_descriptions_rejects_length_mismatch() -> None:
+    uploads = [_FakeUpload("a.pdf"), _FakeUpload("b.pdf")]
+    with pytest.raises(IngestValidationError) as exc_info:
+        IngestUploadService.resolve_descriptions_for_files('["Only one"]', uploads)
+    assert exc_info.value.status_code == 400
+
+
 def test_resolve_override_duplicates_defaults_to_false() -> None:
     uploads = [_FakeUpload("a.pdf"), _FakeUpload("b.pdf")]
     assert IngestUploadService.resolve_override_duplicates_for_files(None, uploads) == [False, False]
@@ -116,30 +136,49 @@ def test_resolve_override_duplicates_rejects_non_boolean_entry() -> None:
     assert "boolean" in exc_info.value.message
 
 
-def test_resolve_sync_published_visible_defaults_to_false() -> None:
+def test_resolve_content_domains_defaults_to_clinical() -> None:
     uploads = [_FakeUpload("a.pdf"), _FakeUpload("b.pdf")]
-    assert IngestUploadService.resolve_sync_published_visible_for_files(None, uploads) == [False, False]
-
-
-def test_resolve_sync_published_visible_parses_json_array() -> None:
-    uploads = [_FakeUpload("a.pdf"), _FakeUpload("b.pdf")]
-    assert IngestUploadService.resolve_sync_published_visible_for_files("[true, false]", uploads) == [
-        True,
-        False,
+    assert IngestUploadService.resolve_content_domains_for_files(None, uploads) == [
+        "clinical",
+        "clinical",
     ]
 
 
-def test_resolve_sync_published_visible_rejects_length_mismatch() -> None:
+def test_resolve_content_domains_parses_json_array() -> None:
+    uploads = [_FakeUpload("a.pdf"), _FakeUpload("b.pdf")]
+    assert IngestUploadService.resolve_content_domains_for_files(
+        '["digital","operational"]',
+        uploads,
+    ) == ["digital", "operational"]
+
+
+def test_resolve_content_domains_null_and_empty_default_to_clinical() -> None:
+    uploads = [_FakeUpload("a.pdf"), _FakeUpload("b.pdf"), _FakeUpload("c.pdf")]
+    assert IngestUploadService.resolve_content_domains_for_files(
+        '[null, "", "  "]',
+        uploads,
+    ) == ["clinical", "clinical", "clinical"]
+
+
+def test_resolve_content_domains_rejects_length_mismatch() -> None:
     uploads = [_FakeUpload("a.pdf"), _FakeUpload("b.pdf")]
     with pytest.raises(IngestValidationError) as exc_info:
-        IngestUploadService.resolve_sync_published_visible_for_files("[true]", uploads)
+        IngestUploadService.resolve_content_domains_for_files('["digital"]', uploads)
     assert exc_info.value.status_code == 400
     assert "2 entries" in exc_info.value.message
 
 
-def test_resolve_sync_published_visible_rejects_non_boolean_entry() -> None:
+def test_resolve_content_domains_rejects_invalid_domain() -> None:
     uploads = [_FakeUpload("a.pdf")]
     with pytest.raises(IngestValidationError) as exc_info:
-        IngestUploadService.resolve_sync_published_visible_for_files('["yes"]', uploads)
+        IngestUploadService.resolve_content_domains_for_files('["not_a_domain"]', uploads)
     assert exc_info.value.status_code == 400
-    assert "boolean" in exc_info.value.message
+    assert "invalid content_domain" in exc_info.value.message
+
+
+def test_resolve_content_domains_rejects_non_string_entry() -> None:
+    uploads = [_FakeUpload("a.pdf")]
+    with pytest.raises(IngestValidationError) as exc_info:
+        IngestUploadService.resolve_content_domains_for_files("[true]", uploads)
+    assert exc_info.value.status_code == 400
+    assert "string or null" in exc_info.value.message

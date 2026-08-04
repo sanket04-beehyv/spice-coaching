@@ -5,13 +5,13 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from mc_foundation.objectstore import ObjectNotFoundError
 from platform_service.config import Settings
 from platform_service.db.validators import ValidationError
 from platform_service.services.module_attachment_validator import (
     parse_youtube_url,
     validate_module_attachments,
 )
-from platform_service.services.object_storage import ObjectNotFoundError
 
 
 def _file_ref(*, attachment_id: str | None = None, object_name: str = "media/test.pdf") -> dict:
@@ -121,7 +121,7 @@ class TestValidateModuleAttachments:
             await validate_module_attachments(module_json, settings=Settings())
         assert exc_info.value.code == "duplicate_attachment_id"
 
-    async def test_rejects_missing_minio_object(self) -> None:
+    async def test_rejects_missing_object_storage_object(self) -> None:
         module_json = {"attachments": [_file_ref()], "cards": []}
         with pytest.raises(ValidationError) as exc_info:
             await validate_module_attachments(

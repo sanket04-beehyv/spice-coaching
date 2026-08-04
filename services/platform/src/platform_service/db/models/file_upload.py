@@ -1,6 +1,6 @@
-"""Audit record: who uploaded what to MinIO at ingest upload time.
+"""Audit record: who uploaded what to object storage at ingest upload time.
 
-Captured via ``POST /admin/ingest``.
+Captured via ``POST /admin/ingest/upload``.
 Provenance (sha256, original filename) is also stored on ``source_document``.
 """
 

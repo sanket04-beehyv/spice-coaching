@@ -26,6 +26,7 @@ class TestIngestionRunEndpoints:
         *,
         status: str = "succeeded",
         started_offset_seconds: int = 0,
+        completed_offset_seconds: int | None = None,
         title: str | None = None,
         original_filename: str | None = None,
     ) -> IngestionRun:
@@ -35,17 +36,23 @@ class TestIngestionRunEndpoints:
             source_type="pdf",
             primary_language="en",
             content_domain="clinical",
-            assessment_mode="with_quiz",
             original_storage_path="/tmp/test.pdf",
             original_filename=original_filename,
         )
         session.add(sd)
         await session.flush()
+        started_at = datetime.now(UTC) + timedelta(seconds=started_offset_seconds)
+        if status == "running":
+            completed_at = None
+        elif completed_offset_seconds is not None:
+            completed_at = started_at + timedelta(seconds=completed_offset_seconds)
+        else:
+            completed_at = datetime.now(UTC)
         run = IngestionRun(
             source_document_id=sd.id,
             status=status,
-            started_at=datetime.now(UTC) + timedelta(seconds=started_offset_seconds),
-            completed_at=datetime.now(UTC) if status != "running" else None,
+            started_at=started_at,
+            completed_at=completed_at,
         )
         session.add(run)
         await session.flush()
@@ -93,6 +100,68 @@ class TestIngestionRunEndpoints:
         assert statuses == {"failed"}
         assert body["total_runs"] == 1
 
+    async def test_filename_query(self, client: AsyncClient, db_session: AsyncSession) -> None:
+        match = await self._seed_run(
+            db_session,
+            title="other-title",
+            original_filename="Hypertension_Training.mp4",
+            started_offset_seconds=0,
+        )
+        await self._seed_run(
+            db_session,
+            title="unrelated",
+            original_filename="Diabetes_Overview.mp4",
+            started_offset_seconds=10,
+        )
+
+        resp = await client.get(platform_path("/admin/ingestion-runs?q=hyper"))
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["runs"]) == 1
+        assert body["runs"][0]["id"] == str(match.id)
+        assert body["runs"][0]["document_label"] == "Hypertension_Training.mp4"
+        assert body["total_runs"] == 1
+
+    async def test_filename_query_matches_title(self, client: AsyncClient, db_session: AsyncSession) -> None:
+        run = await self._seed_run(
+            db_session,
+            title="BRAC Counselling Video",
+            original_filename="clip-001.mp4",
+            started_offset_seconds=0,
+        )
+
+        resp = await client.get(platform_path("/admin/ingestion-runs?q=counselling"))
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["runs"]) == 1
+        assert body["runs"][0]["id"] == str(run.id)
+        assert body["runs"][0]["document_label"] == "clip-001.mp4"
+
+    async def test_filename_query_combines_with_status(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        match = await self._seed_run(
+            db_session,
+            title="Hypertension Guide",
+            original_filename="hypertension.pdf",
+            status="failed",
+            started_offset_seconds=0,
+        )
+        await self._seed_run(
+            db_session,
+            title="Hypertension Overview",
+            original_filename="hypertension-v2.pdf",
+            status="succeeded",
+            started_offset_seconds=10,
+        )
+
+        resp = await client.get(platform_path("/admin/ingestion-runs?q=hypertension&status=failed"))
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["runs"]) == 1
+        assert body["runs"][0]["id"] == str(match.id)
+        assert body["total_runs"] == 1
+
     async def test_pagination_limit_offset(self, client: AsyncClient, db_session: AsyncSession) -> None:
         for i in range(5):
             await self._seed_run(db_session, started_offset_seconds=i)
@@ -122,6 +191,83 @@ class TestIngestionRunEndpoints:
 
     async def test_limit_validation_rejects_excessive(self, client: AsyncClient) -> None:
         resp = await client.get(platform_path("/admin/ingestion-runs?limit=500"))
+        assert resp.status_code == 422
+
+    async def test_list_orders_by_started_asc(self, client: AsyncClient, db_session: AsyncSession) -> None:
+        r1 = await self._seed_run(db_session, started_offset_seconds=0)
+        r2 = await self._seed_run(db_session, started_offset_seconds=10)
+        r3 = await self._seed_run(db_session, started_offset_seconds=20)
+
+        resp = await client.get(platform_path("/admin/ingestion-runs?sort_by=started_at&sort_dir=asc"))
+        body = resp.json()
+        ids = [row["id"] for row in body["runs"]]
+        assert ids == [str(r1.id), str(r2.id), str(r3.id)]
+
+    async def test_list_orders_by_status_asc(self, client: AsyncClient, db_session: AsyncSession) -> None:
+        failed = await self._seed_run(db_session, status="failed", started_offset_seconds=0)
+        running = await self._seed_run(db_session, status="running", started_offset_seconds=10)
+        succeeded = await self._seed_run(db_session, status="succeeded", started_offset_seconds=20)
+
+        resp = await client.get(platform_path("/admin/ingestion-runs?sort_by=status&sort_dir=asc"))
+        body = resp.json()
+        ids = [row["id"] for row in body["runs"]]
+        assert ids == [str(failed.id), str(running.id), str(succeeded.id)]
+
+    async def test_list_orders_by_completed_desc_nulls_last(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        early = await self._seed_run(
+            db_session,
+            status="succeeded",
+            started_offset_seconds=0,
+            completed_offset_seconds=10,
+        )
+        late = await self._seed_run(
+            db_session,
+            status="succeeded",
+            started_offset_seconds=100,
+            completed_offset_seconds=50,
+        )
+        in_progress = await self._seed_run(db_session, status="running", started_offset_seconds=200)
+
+        resp = await client.get(platform_path("/admin/ingestion-runs?sort_by=completed_at&sort_dir=desc"))
+        body = resp.json()
+        ids = [row["id"] for row in body["runs"]]
+        assert ids == [str(late.id), str(early.id), str(in_progress.id)]
+
+    async def test_list_orders_by_document_label_asc(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        alpha = await self._seed_run(
+            db_session,
+            original_filename="alpha.pdf",
+            title="Alpha Title",
+            started_offset_seconds=0,
+        )
+        beta = await self._seed_run(
+            db_session,
+            original_filename="beta.pdf",
+            title="Beta Title",
+            started_offset_seconds=10,
+        )
+        charlie = await self._seed_run(
+            db_session,
+            title="Charlie Title",
+            original_filename=None,
+            started_offset_seconds=20,
+        )
+
+        resp = await client.get(platform_path("/admin/ingestion-runs?sort_by=document_label&sort_dir=asc"))
+        body = resp.json()
+        ids = [row["id"] for row in body["runs"]]
+        assert ids == [str(alpha.id), str(beta.id), str(charlie.id)]
+
+    async def test_sort_by_validation_rejects_invalid(self, client: AsyncClient) -> None:
+        resp = await client.get(platform_path("/admin/ingestion-runs?sort_by=invalid"))
+        assert resp.status_code == 422
+
+    async def test_sort_dir_validation_rejects_invalid(self, client: AsyncClient) -> None:
+        resp = await client.get(platform_path("/admin/ingestion-runs?sort_dir=up"))
         assert resp.status_code == 422
 
     async def test_list_includes_document_label_and_generated_counts(

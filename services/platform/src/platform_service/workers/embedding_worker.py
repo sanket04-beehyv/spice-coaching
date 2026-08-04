@@ -2,7 +2,8 @@
 
 Per `docs/ARCHITECTURE_RESET.md`. Triggered on module publish (Stage 3
 enqueues a Celery task per `module_id`). Reads card text from ``module_card`` rows,
-calls ai-runtime `/embed`, and writes the vector to ``module.embedding``.
+calls ai-runtime `/embed`, and writes the vector via the configured
+``VectorStore`` (pgvector adapter persists to ``module.embedding`` today).
 
 The embedding is per-module (not per-card). It serves admin/web semantic
 search inside this repo; the Android repo's runtime grounding flow uses it
@@ -17,6 +18,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from mc_contracts.errors import ErrorCode
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_service.config import get_settings
@@ -29,6 +31,7 @@ from platform_service.services.card_normalisation import card_row_to_dict
 from platform_service.services.embedding_vector import assert_embedding_dimension
 from platform_service.services.module_search_text import module_text_for_search
 from platform_service.services.post_publish_step import finish_post_publish_step
+from platform_service.vectorstore import MODULES_COLLECTION, get_vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +44,8 @@ def _module_text_for_embedding(module: Module, cards: list[dict[str, Any]]) -> s
 async def generate_embedding_for_module(module_id: UUID, *, step_id: UUID | None = None) -> bool:
     """Generate and persist a per-module embedding. Returns True on success.
 
-    The embedding column type is pgvector `vector(N)`. We pass a Python list
-    of floats through SQLAlchemy as a bind parameter — pgvector accepts the
-    list literal `[0.1, 0.2, …]` form when cast at the DB side.
+    Persistence goes through the configured ``VectorStore`` (pgvector adapter
+    writes ``module.embedding`` today).
     """
     try:
         async with SessionLocal() as session:
@@ -53,6 +55,8 @@ async def generate_embedding_for_module(module_id: UUID, *, step_id: UUID | None
                 await finish_post_publish_step(
                     step_id=step_id,
                     success=False,
+                    error_code=ErrorCode.MODULE_NOT_FOUND.value,
+                    error_message=f"module {module_id} not found",
                     error={"type": "ModuleNotFound", "message": f"module {module_id} not found"},
                 )
                 return False
@@ -64,6 +68,8 @@ async def generate_embedding_for_module(module_id: UUID, *, step_id: UUID | None
                 await finish_post_publish_step(
                     step_id=step_id,
                     success=False,
+                    error_code=ErrorCode.MODULE_HAS_NO_TEXT.value,
+                    error_message="module has no embeddable text",
                     error={"type": "NoText", "message": "module has no embeddable text"},
                 )
                 return False
@@ -76,6 +82,8 @@ async def generate_embedding_for_module(module_id: UUID, *, step_id: UUID | None
                 await finish_post_publish_step(
                     step_id=step_id,
                     success=False,
+                    error_code=ErrorCode.EMBEDDING_FAILED.value,
+                    error_message=str(exc)[:500],
                     error={"type": type(exc).__name__, "message": str(exc)[:500]},
                 )
                 return False
@@ -84,6 +92,8 @@ async def generate_embedding_for_module(module_id: UUID, *, step_id: UUID | None
                 await finish_post_publish_step(
                     step_id=step_id,
                     success=False,
+                    error_code=ErrorCode.EMPTY_EMBEDDING.value,
+                    error_message="ai-runtime returned no vectors",
                     error={"type": "EmptyEmbedding", "message": "ai-runtime returned no vectors"},
                 )
                 return False
@@ -96,6 +106,8 @@ async def generate_embedding_for_module(module_id: UUID, *, step_id: UUID | None
                 await finish_post_publish_step(
                     step_id=step_id,
                     success=False,
+                    error_code=ErrorCode.EMBEDDING_DIMENSION_MISMATCH.value,
+                    error_message=str(exc)[:500],
                     error={"type": "EmbeddingDimensionError", "message": str(exc)[:500]},
                 )
                 return False
@@ -114,19 +126,25 @@ async def generate_embedding_for_module(module_id: UUID, *, step_id: UUID | None
         await finish_post_publish_step(
             step_id=step_id,
             success=False,
+            error_code=ErrorCode.EMBEDDING_FAILED.value,
+            error_message=str(exc)[:500],
             error={"type": type(exc).__name__, "message": str(exc)[:500]},
         )
         raise
 
 
 async def _persist_embedding(session: AsyncSession, module_id: UUID, vector: list[float]) -> None:
-    """Write the embedding through the ORM. The Module.embedding column is
-    pgvector-typed via `pgvector.sqlalchemy.Vector`, so a Python list[float]
-    roundtrips cleanly without raw-SQL cast tricks."""
-    module = await session.get(Module, module_id)
-    if module is None:
-        return
-    module.embedding = list(vector)
+    """Persist the embedding via the configured ``VectorStore`` backend."""
+    store = get_vector_store(session)
+    await store.upsert(
+        [
+            {
+                "collection": MODULES_COLLECTION,
+                "id": str(module_id),
+                "vector": list(vector),
+            }
+        ]
+    )
 
 
 __all__ = ["generate_embedding_for_module"]

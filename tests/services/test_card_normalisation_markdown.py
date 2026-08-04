@@ -41,4 +41,4 @@ def test_card_dict_to_row_fields_flattens_block_markdown() -> None:
     }
     row = card_dict_to_row_fields(card)
     assert row["title_localized"] == {"bn": "Heading"}
-    assert row["body_localized"] == {"bn": "a  b\n1  2"}
+    assert row["body_localized"] == {"bn": "First bold\nSecond\na  b\n1  2\ncode line\nquoted"}

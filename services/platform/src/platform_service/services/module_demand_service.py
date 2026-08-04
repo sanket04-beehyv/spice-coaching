@@ -6,7 +6,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -112,6 +112,13 @@ def _title_aliases(title_localized: dict[str, str] | None) -> set[str]:
     return aliases
 
 
+def _default_chatbot_date_range() -> tuple[date, date]:
+    """Inclusive UTC window matching former ``today() - period_days`` through today."""
+    to_date = datetime.now(UTC).date()
+    from_date = to_date - timedelta(days=DEFAULT_CHATBOT_DEMAND_PERIOD_DAYS)
+    return from_date, to_date
+
+
 class ModuleDemandService:
     def __init__(
         self,
@@ -139,7 +146,8 @@ class ModuleDemandService:
         self,
         *,
         tenant_id: UUID | None = None,
-        chatbot_period_days: int = DEFAULT_CHATBOT_DEMAND_PERIOD_DAYS,
+        from_date: date | None = None,
+        to_date: date | None = None,
     ) -> ModuleDemandSummaryResponse:
         """Read the daily-precomputed snapshot; compute live on cache miss.
 
@@ -153,7 +161,8 @@ class ModuleDemandService:
             return ModuleDemandSummaryResponse.model_validate(cached.payload_json)
         return await self.build_summary(
             tenant_id=tenant_id,
-            chatbot_period_days=chatbot_period_days,
+            from_date=from_date,
+            to_date=to_date,
         )
 
     async def list_summary_scopes(self) -> list[UUID | None]:
@@ -166,12 +175,14 @@ class ModuleDemandService:
         self,
         *,
         tenant_id: UUID | None = None,
-        chatbot_period_days: int = DEFAULT_CHATBOT_DEMAND_PERIOD_DAYS,
+        from_date: date | None = None,
+        to_date: date | None = None,
     ) -> ModuleDemandSummaryResponse:
         """Compute a fresh summary and persist it as the cached snapshot."""
         summary = await self.build_summary(
             tenant_id=tenant_id,
-            chatbot_period_days=chatbot_period_days,
+            from_date=from_date,
+            to_date=to_date,
             llm_timeout_seconds=MODULE_DEMAND_LLM_JOB_TIMEOUT_SECONDS,
         )
         await self._summaries.upsert(
@@ -188,13 +199,15 @@ class ModuleDemandService:
         self,
         *,
         tenant_id: UUID | None = None,
-        chatbot_period_days: int = DEFAULT_CHATBOT_DEMAND_PERIOD_DAYS,
+        from_date: date | None = None,
+        to_date: date | None = None,
         llm_timeout_seconds: float | None = None,
     ) -> ModuleDemandSummaryResponse:
         top_k = await self.resolve_top_k()
         buckets = await self._aggregate_buckets(
             tenant_id=tenant_id,
-            chatbot_period_days=chatbot_period_days,
+            from_date=from_date,
+            to_date=to_date,
         )
         # Rank by distinct requestor count (request_count), then display name.
         ranked = sorted(
@@ -231,7 +244,8 @@ class ModuleDemandService:
         module_id: UUID,
         *,
         tenant_id: UUID | None = None,
-        chatbot_period_days: int = DEFAULT_CHATBOT_DEMAND_PERIOD_DAYS,
+        from_date: date | None = None,
+        to_date: date | None = None,
     ) -> ModuleDemandRequestorsResponse:
         module = await self._session.get(Module, module_id)
         if module is None:
@@ -266,12 +280,19 @@ class ModuleDemandService:
                 )
             )
 
+        chat_from, chat_to = _default_chatbot_date_range()
+        if from_date is not None:
+            chat_from = from_date
+        if to_date is not None:
+            chat_to = to_date
+
         # Soft-fail ClickHouse: form requestors still return when analytics are down.
         try:
             chatbot_rows = await self._chatbot.requestors_for_module(
                 module_id=module_id,
                 tenant_id=tenant_id,
-                period_days=chatbot_period_days,
+                from_date=chat_from,
+                to_date=chat_to,
             )
         except Exception:
             logger.exception("Module demand: ClickHouse chatbot requestors failed")
@@ -349,7 +370,8 @@ class ModuleDemandService:
         self,
         *,
         tenant_id: UUID | None,
-        chatbot_period_days: int,
+        from_date: date | None = None,
+        to_date: date | None = None,
     ) -> list[_DemandBucket]:
         modules = await self._load_matchable_modules(tenant_id=tenant_id)
         by_id: dict[UUID, Module] = {m.id: m for m in modules}
@@ -404,7 +426,8 @@ class ModuleDemandService:
             buckets,
             by_id=by_id,
             tenant_id=tenant_id,
-            period_days=chatbot_period_days,
+            from_date=from_date,
+            to_date=to_date,
         )
         return list(buckets.values())
 
@@ -414,13 +437,21 @@ class ModuleDemandService:
         *,
         by_id: dict[UUID, Module],
         tenant_id: UUID | None,
-        period_days: int,
+        from_date: date | None = None,
+        to_date: date | None = None,
     ) -> None:
+        chat_from, chat_to = _default_chatbot_date_range()
+        if from_date is not None:
+            chat_from = from_date
+        if to_date is not None:
+            chat_to = to_date
+
         # Soft-fail ClickHouse: form demand still powers the summary.
         try:
             by_module = await self._chatbot.distinct_chw_by_module_id(
                 tenant_id=tenant_id,
-                period_days=period_days,
+                from_date=chat_from,
+                to_date=chat_to,
             )
         except Exception:
             logger.exception("Module demand: ClickHouse chatbot demand aggregation failed")

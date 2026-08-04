@@ -27,6 +27,8 @@ _COMPLETE_SNAPSHOT_FIELDS = frozenset(
 _CARD_NOISE_KEYS = frozenset(
     {
         "id",
+        "card_family_id",
+        "card_version",
         "source_pages",
         "presigned_url",
         "presigned_expires_seconds",
@@ -69,7 +71,11 @@ def _json_ready(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     if isinstance(value, dict):
-        return {str(k): _json_ready(v) for k, v in value.items()}
+        return {
+            str(k): normalized
+            for k, v in value.items()
+            if (normalized := _json_ready(v)) not in (None, [], {})
+        }
     if isinstance(value, (list, tuple)):
         return [_json_ready(v) for v in value]
     return value
@@ -93,6 +99,8 @@ def _canonical_quiz_item(item: QuizEditItem) -> dict[str, Any]:
     else:
         payload = dict(item)
     payload.pop("id", None)
+    payload.pop("question_family_id", None)
+    payload.pop("question_version", None)
     return payload
 
 

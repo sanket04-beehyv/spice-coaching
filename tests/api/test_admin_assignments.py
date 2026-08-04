@@ -6,8 +6,10 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient
+from mc_foundation.problem import register_problem_handlers
 from platform_service.api.admin_assignments import router as admin_assignments_router
 from platform_service.api.sync import router as sync_router
 from platform_service.config import get_settings
@@ -16,21 +18,25 @@ from platform_service.db.models.module_family import ModuleFamily
 from platform_service.deps import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.api.conftest import wipe_api_tables
-from tests.conftest import platform_path, requires_db
+from tests.conftest import platform_path, requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    await wipe_api_tables(db_session)
+    await truncate_tables(db_session, "chw_module_assignment, module, module_family")
     yield
 
 
 @pytest_asyncio.fixture
 async def app(db_session: AsyncSession) -> FastAPI:
     app_obj = FastAPI()
+    register_problem_handlers(
+        app_obj,
+        validation_error_type=RequestValidationError,
+        http_exception_type=HTTPException,
+    )
 
     # Custom mock auth middleware to inject spice_user for testing sync filtering
     @app_obj.middleware("http")
@@ -208,7 +214,8 @@ class TestAdminAssignments:
         assert resp.status_code == 200
         users = resp.json()
 
-        # Seeded hierarchy may grow; keep a lower bound and check known identities.
+        # Verify total unique users count: 2 AMs, 14 POs (Abdus Salam, Sobita, Dalim, Shidul, 9 Abdullah Al Faruk, Sajedul), 53 SKs
+        # Total unique IDs = 2 + 14 + 53 = 69
         assert len(users) >= 69
 
         # Check specific entries

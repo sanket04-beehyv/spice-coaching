@@ -45,6 +45,10 @@ class ModuleSummary(BaseModel):
     thumbnail_presigned_expires_seconds: int | None = None
     # Per-module source document linkage for dashboard document filters.
     source_document_ids: list[str] | None = None
+    # Dual-path merge links (null when not part of a merge pair).
+    merge_secondary_module_id: UUID | None = None
+    merge_primary_module_id: UUID | None = None
+    merge_source_module_id: UUID | None = None
 
 
 class ModuleListResponse(BaseModel):
@@ -58,7 +62,7 @@ class ModuleListResponse(BaseModel):
 
 
 class ModuleSourceDocumentRef(BaseModel):
-    """Linked source document with optional MinIO presigned GET URL."""
+    """Linked source document with optional object-storage presigned GET URL."""
 
     source_document_id: UUID
     presigned_url: str | None = None
@@ -168,7 +172,7 @@ class ModuleEditRequest(BaseModel):
     thumbnail_storage_path: str | None = Field(
         default=None,
         description=(
-            "MinIO path to module preview image. Omit to copy forward on version bump; "
+            "Object storage path to module preview image. Omit to copy forward on version bump; "
             "send null to clear; send a path to set or replace (upload via POST /admin/files)."
         ),
     )
@@ -263,8 +267,18 @@ class SourceDocumentSummary(BaseModel):
     source_type: str
     status: str
     content_domain: str
+    stored_path: str
     original_filename: str | None = None
+    description: str | None = None
+    thumbnail_storage_path: str | None = None
     ingested_at: datetime
+
+
+class SourceDocumentMetadataUpdate(BaseModel):
+    """Partial update for source document title / description (no re-ingest)."""
+
+    title: str | None = None
+    description: str | None = None
 
 
 class SourceDocumentListResponse(BaseModel):
@@ -319,6 +333,13 @@ class PublishedModuleMergePoll(BaseModel):
     active: bool
     was_merge: bool
     merged_from_module_id: str | None = None
+    proposed_module_id: str | None = None
+    proposed_title: str | None = None
+    match_rationale: str | None = None
+    cards_count: int | None = None
+    merged_cards_count: int | None = None
+    primary_module_id: str | None = None
+    secondary_module_id: str | None = None
 
 
 class IngestionRunStepPayload(BaseModel):
@@ -330,6 +351,8 @@ class IngestionRunStepPayload(BaseModel):
     input_summary: dict[str, Any] | None
     output_summary: dict[str, Any] | None
     error: dict[str, Any] | None
+    error_code: str | None = None
+    error_message: str | None = None
     activity: str | None = None
     fusion: bool | None = None
     published_module_merge: PublishedModuleMergePoll | None = None

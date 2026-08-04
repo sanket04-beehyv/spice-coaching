@@ -38,7 +38,6 @@ async def _seed_page_with_block(
         source_type=source_type,
         primary_language="bn",
         content_domain="clinical",
-        assessment_mode="with_quiz",
         original_storage_path="/tmp/x.pdf",
     )
     session.add(doc)
@@ -78,7 +77,6 @@ async def _seed_second_block_on_new_page(
             source_type="pdf",
             primary_language="bn",
             content_domain="clinical",
-            assessment_mode="with_quiz",
             original_storage_path="/tmp/y.pdf",
         )
         session.add(doc)
@@ -238,7 +236,6 @@ class TestCardsWithSourcePages:
             source_type="pdf",
             primary_language="bn",
             content_domain="clinical",
-            assessment_mode="with_quiz",
             original_storage_path="/tmp/x.pdf",
         )
         db_session.add(doc)

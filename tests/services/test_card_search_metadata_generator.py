@@ -202,8 +202,7 @@ class TestCardSearchMetadataGenerator:
             )
         )
         generator = CardSearchMetadataGenerator(client=client)
-        cards = module.module_json["cards"]
-        result = await generator.generate_for_module(module, [0, 1], cards=cards)
+        result = await generator.generate_for_module(module, [0, 1], cards=module.module_json["cards"])
         assert result.failed_indices == []
         assert result.metadata_by_index[0]["keywords"]["bn"] == ["k0"]
         assert result.metadata_by_index[1]["keywords"]["bn"] == ["k1"]

@@ -14,6 +14,11 @@ Routing:
 - `MODULE_REQUESTED` → enqueue `process_training_request_event_task` when
   `module_id` or non-empty `payload_json.requested_module_name` is present
   (independent of the gap-state flag; does not use the completion worker).
+- `VIDEO_PROGRESS_UPDATED` → enqueue `process_video_progress_event_task` when
+  `payload_json.source_document_id` is present (monotonic upsert of
+  `chw_video_progress`; independent of the gap-state flag).
+- `DOCUMENT_VIEWED` → ClickHouse only (``document_view_daily`` MV); no Celery
+  side-effects and no learning points.
 
 W-10 hardening (additive on top of the original handler):
 1. Dedup by event_id via Redis SET-NX with 24h TTL — duplicates from SDK
@@ -36,7 +41,11 @@ from mc_contracts.enums import CoachingEventType
 from mc_contracts.telemetry import TelemetryAckResponse, TelemetryBatch, TelemetryEvent
 
 from platform_service.auth.spice_identity import require_chw_id_for_telemetry
-from platform_service.celery_tasks import process_module_event_task, process_training_request_event_task
+from platform_service.celery_tasks import (
+    process_module_event_task,
+    process_training_request_event_task,
+    process_video_progress_event_task,
+)
 from platform_service.config import get_settings
 from platform_service.deps import get_clickhouse_client, get_redis_client
 from platform_service.services.telemetry_buffer import enqueue_rows
@@ -94,6 +103,19 @@ def _reason_from_payload(payload: dict | None) -> str | None:
     if not isinstance(raw, str):
         return str(raw)
     return raw
+
+
+def _source_document_id_from_payload(payload: dict | None) -> str | None:
+    raw = (payload or {}).get("source_document_id")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        return str(UUID(text))
+    except ValueError:
+        return None
 
 
 def _event_to_row(
@@ -164,6 +186,7 @@ async def ingest_events(
     # training_request_jobs handles MODULE_REQUESTED separately.
     module_jobs: list[dict] = []
     training_request_jobs: list[dict] = []
+    video_progress_jobs: list[dict] = []
 
     synced_at_ms = int(time.time() * 1000)
     request_id = getattr(request.state, "request_id", None)
@@ -209,6 +232,24 @@ async def ingest_events(
                 else:
                     logger.warning(
                         "module_requested missing module_id and requested_module_name event_id=%s",
+                        event.id,
+                    )
+            elif event_type_value == CoachingEventType.VIDEO_PROGRESS_UPDATED.value:
+                source_document_id = _source_document_id_from_payload(event.payload_json)
+                if source_document_id is not None:
+                    video_job: dict = {
+                        "chw_id": chw_id,
+                        "tenant_id": batch.tenant_id,
+                        "event_id": event.id,
+                        "event_type": event_type_value,
+                        "payload_json": event.payload_json or {},
+                    }
+                    if request_id:
+                        video_job["request_id"] = request_id
+                    video_progress_jobs.append(video_job)
+                else:
+                    logger.warning(
+                        "video_progress_updated missing/invalid source_document_id event_id=%s",
                         event.id,
                     )
             elif gap_state_enabled:
@@ -284,6 +325,8 @@ async def ingest_events(
         process_module_event_task.delay(j)
     for j in training_request_jobs:
         process_training_request_event_task.delay(j)
+    for j in video_progress_jobs:
+        process_video_progress_event_task.delay(j)
 
     return TelemetryAckResponse(
         accepted=accepted,

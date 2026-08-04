@@ -10,10 +10,12 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient
 from mc_contracts.enums import GenerationType
 from mc_contracts.internal_ai import InferenceResponse, TokenUsage
+from mc_foundation.problem import register_problem_handlers
 from platform_service.api.admin_assignments import router as admin_assignments_router
 from platform_service.api.admin_module_demand import router as admin_module_demand_router
 from platform_service.config import get_settings
@@ -27,8 +29,7 @@ from platform_service.services.module_demand_service import ModuleDemandService
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.api.conftest import wipe_api_tables
-from tests.conftest import platform_path, requires_db
+from tests.conftest import platform_path, requires_db, truncate_tables
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
@@ -40,7 +41,10 @@ USER_C = 1313053892
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    await wipe_api_tables(db_session)
+    await truncate_tables(
+        db_session,
+        "chw_training_request, chw_module_assignment, attribution_event, module_demand_summary, module, module_family",
+    )
     await db_session.execute(text("DELETE FROM config_threshold WHERE key = 'module_demand_top_k'"))
     await db_session.commit()
     yield
@@ -49,6 +53,11 @@ async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[No
 @pytest_asyncio.fixture
 async def app(db_session: AsyncSession) -> FastAPI:
     app_obj = FastAPI()
+    register_problem_handlers(
+        app_obj,
+        validation_error_type=RequestValidationError,
+        http_exception_type=HTTPException,
+    )
 
     @app_obj.middleware("http")
     async def mock_auth_middleware(request: Request, call_next):

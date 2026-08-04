@@ -26,7 +26,7 @@ Scenarios covered:
 |---|---|---|
 | 1 | Happy path | Module published; cards in module_json; quiz rows; embedding set |
 | 2 | Outline-empty (Stage 1 fails) | Run failed, no module created |
-| 3 | Stage 2 returns 0 candidates | Run succeeded, Stage D step skipped |
+| 3 | Stage 2 returns 0 candidates | Run partially_succeeded, identify step failed |
 | 4 | One Stage D candidate fails | partially_succeeded, surviving candidates published |
 | 5 | Resume after Stage 2 failure | Stage 1 not re-run; pipeline picks up at Stage 2 |
 | 6 | Embedding worker AI-runtime down | Module still published; embedding stays NULL |
@@ -80,20 +80,14 @@ from tests.conftest import requires_db, truncate_tables
 
 pytestmark = [requires_db]
 
-
 # ─── Cleanup ──────────────────────────────────────────────────────────────
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_data_between_tests(db_session: AsyncSession) -> AsyncIterator[None]:
-    # Wipe before the test only (matches api/conftest). Post-teardown TRUNCATE
-    # races with SessionLocal pool connections from the orchestrator.
     await truncate_tables(
         db_session,
-        "module_card, module_quiz_question, module, module_family, "
-        "behavioural_gap, module_candidate_draft, content_block, source_page, "
-        "source_document, ingestion_run_step, ingestion_run, "
-        "llm_call_cache",
+        "module_quiz_question, module, module_family, behavioural_gap, module_candidate_draft, content_block, source_page, source_document, ingestion_run_step, ingestion_run, llm_call_cache",
     )
     yield
 
@@ -166,18 +160,13 @@ def _card(idx: int = 0) -> dict[str, Any]:
     }
 
 
-def _id_candidate(
-    block_ids: list[UUID],
-    *,
-    title: str = "Topic",
-    source_document_id: UUID | None = None,
-) -> dict[str, Any]:
+def _id_candidate(block_ids: list[UUID], *, title: str = "Topic") -> dict[str, Any]:
     return {
         "proposed_title": title,
         "scope_summary": "Summary of the topic.",
         "source_provenance": [
             {
-                "source_document_id": str(source_document_id or uuid4()),
+                "source_document_id": str(uuid4()),
                 "source_page_id": str(uuid4()),
                 "content_block_ids": [str(b) for b in block_ids],
             }
@@ -197,7 +186,6 @@ async def _seed_source_doc(session: AsyncSession) -> UUID:
         source_type="pdf",
         primary_language="en",
         content_domain="clinical",
-        assessment_mode="with_quiz",
         original_storage_path="/tmp/fake.pdf",
     )
     session.add(sd)
@@ -245,11 +233,7 @@ async def _run_orchestrator(
         async def _identify(**kwargs: Any) -> ModuleIdentifierResult:
             valid_block_ids = list(kwargs.get("valid_block_ids") or [])
             if identify_candidates_fn is None:
-                cands = (
-                    [_id_candidate(valid_block_ids[:1], source_document_id=source_document_id)]
-                    if valid_block_ids
-                    else []
-                )
+                cands = [_id_candidate(valid_block_ids[:1])] if valid_block_ids else []
             else:
                 cands = identify_candidates_fn(valid_block_ids)
             return _id_response(cands)
@@ -261,6 +245,7 @@ async def _run_orchestrator(
             card_drafter = MagicMock()
             card_drafter.draft = AsyncMock(return_value=_draft_response())
         stage_d = StageDOrchestrator(own_session, card_drafter=card_drafter)
+        stage_d._propose_published_merge = AsyncMock(return_value=None)
 
         orch = PipelineOrchestrator(own_session, stage_a=stage_a, stage_c=stage_c, stage_d=stage_d)
         result = await orch.run(
@@ -273,9 +258,6 @@ async def _run_orchestrator(
         return result, text_extractor_fn
     finally:
         if session is None:
-            # Release locks before the next test's TRUNCATE; a pooled
-            # connection left in an open transaction deadlocks wipe fixtures.
-            await own_session.rollback()
             await own_session.close()
 
 
@@ -394,7 +376,7 @@ async def _run_post_publish_inproc(
 
     with patch(
         "platform_service.services.module_gap_classifier.get_ai_client",
-        _GapClientStub,
+        return_value=_GapClientStub(),
     ):
         try:
             await classify_module_gaps_for_module(module_id)
@@ -410,7 +392,6 @@ class TestHappyPath:
         self,
         db_session: AsyncSession,
         patch_count_pages: Callable[[int], None],
-        mock_prompt_templates: object,
     ) -> None:
         sd_id = await _seed_source_doc(db_session)
         text_pages = _good_text_pages(3)
@@ -429,20 +410,14 @@ class TestHappyPath:
         # attribution graph is wired (source_document_ids populated, cards
         # carry source_block_ids).
         modules = (
-            (await db_session.execute(select(Module).where(Module.source_document_ids.contains([sd_id]))))
+            (await db_session.execute(select(Module).where(Module.lifecycle_status == "draft")))
             .scalars()
             .all()
         )
         assert len(modules) >= 1
         m = modules[0]
         cards = (
-            (
-                await db_session.execute(
-                    select(ModuleCard).where(ModuleCard.module_id == m.id).order_by(ModuleCard.card_order)
-                )
-            )
-            .scalars()
-            .all()
+            (await db_session.execute(select(ModuleCard).where(ModuleCard.module_id == m.id))).scalars().all()
         )
         assert len(cards) >= 3
         assert m.clinically_reviewed is False
@@ -495,8 +470,8 @@ class TestOutlineEmptyFailsRun:
 # ─── Scenario 3: Stage C zero candidates ──────────────────────────────────
 
 
-class TestStageCZeroCandidatesSkipsStageD:
-    async def test_run_succeeds_with_card_draft_skipped(
+class TestStageCZeroCandidatesFailsIdentify:
+    async def test_run_partially_succeeds_with_identify_failed(
         self,
         db_session: AsyncSession,
         patch_count_pages: Callable[[int], None],
@@ -511,23 +486,32 @@ class TestStageCZeroCandidatesSkipsStageD:
             identify_candidates_fn=lambda _bids: [],
         )
 
-        assert result.final_status == "succeeded"
+        assert result.final_status == "partially_succeeded"
         modules = (await db_session.execute(select(Module))).scalars().all()
         assert modules == []
         steps = (
             (
                 await db_session.execute(
-                    select(IngestionRunStep)
-                    .where(IngestionRunStep.ingestion_run_id == result.run_id)
-                    .where(IngestionRunStep.stage == "card_draft")
+                    select(IngestionRunStep).where(IngestionRunStep.ingestion_run_id == result.run_id)
                 )
             )
             .scalars()
             .all()
         )
-        assert len(steps) == 1
-        assert steps[0].status == "skipped"
-        assert steps[0].output_summary_jsonb["skipped_reason"] == "no_candidates_from_stage_c"
+        assert {step.stage: step.status for step in steps} == {
+            "extract": "succeeded",
+            "module_identify": "failed",
+        }
+
+        run = (
+            await db_session.execute(select(IngestionRun).where(IngestionRun.id == result.run_id))
+        ).scalar_one()
+        assert run.status == "partially_succeeded"
+        assert run.error_jsonb == {
+            "code": "identify_no_candidates",
+            "failed_stage": "module_identify",
+            "message": "zero candidates were identified",
+        }
 
 
 # ─── Scenario 4: Per-candidate Stage D failure ────────────────────────────
@@ -538,12 +522,10 @@ class TestStageDPerCandidateFailure:
         self,
         db_session: AsyncSession,
         patch_count_pages: Callable[[int], None],
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         sd_id = await _seed_source_doc(db_session)
         text_pages = _good_text_pages(3)
         patch_count_pages(3)
-        monkeypatch.setattr(get_settings(), "stage_d_published_merge_enabled", False)
 
         def _three_cands(block_ids: list[UUID]) -> list[dict]:
             return [_id_candidate(block_ids[:1], title=f"T{i}") for i in range(3)]

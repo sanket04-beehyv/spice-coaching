@@ -14,12 +14,12 @@ from mc_contracts.module_attachments import (
     ModuleAttachmentYoutubeRef,
     ModuleMediaKind,
 )
+from mc_foundation.objectstore import ObjectNotFoundError, ObjectStore
 from pydantic import TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
 
 from platform_service.config import Settings
 from platform_service.db.validators import ValidationError
-from platform_service.services.object_storage import ObjectNotFoundError, ObjectStorageClient
 
 _ATTACHMENT_ADAPTER: TypeAdapter[ModuleAttachmentFileRef | ModuleAttachmentYoutubeRef] = TypeAdapter(
     ModuleAttachmentFileRef | ModuleAttachmentYoutubeRef
@@ -162,7 +162,7 @@ async def validate_module_attachments(
     module_json: dict[str, Any] | None,
     *,
     settings: Settings,
-    storage: ObjectStorageClient | None = None,
+    storage: ObjectStore | None = None,
 ) -> dict[str, Any] | None:
     """Validate attachment refs and return a sanitized ``module_json`` copy.
 

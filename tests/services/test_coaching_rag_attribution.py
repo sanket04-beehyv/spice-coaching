@@ -40,7 +40,7 @@ def _service() -> CoachingRagService:
         session,
         ai,
         storage,
-        settings=Settings(minio_bucket_name="medtronics-storage"),
+        settings=Settings(object_storage_bucket_name="medtronics-storage"),
     )
 
 

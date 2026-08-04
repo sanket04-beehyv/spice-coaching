@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from mc_foundation.problem import AppError
 from platform_service.auth.spice_context import SpiceUserContext
 from platform_service.auth.spice_identity import (
     require_chw_id_for_device_route,
@@ -75,9 +75,9 @@ class TestSpiceIdentityEnabled:
 
     def test_device_user_cannot_override_chw_id(self) -> None:
         request = _request_with_user(DEVICE_USER)
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             resolve_chw_id_for_device_route(request, 99)
-        assert exc.value.status_code == 403
+        assert exc.value.status == 403
 
     def test_device_user_gets_own_chw_id_when_omitted(self) -> None:
         request = _request_with_user(DEVICE_USER)
@@ -89,9 +89,9 @@ class TestSpiceIdentityEnabled:
 
     def test_telemetry_rejects_mismatched_batch_chw_id(self) -> None:
         request = _request_with_user(DEVICE_USER)
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             require_chw_id_for_telemetry(request, 99)
-        assert exc.value.status_code == 403
+        assert exc.value.status == 403
 
     def test_telemetry_accepts_matching_batch_chw_id(self) -> None:
         request = _request_with_user(DEVICE_USER)
@@ -103,9 +103,9 @@ class TestSpiceIdentityEnabled:
 
     def test_device_user_cannot_override_tenant_id(self) -> None:
         request = _request_with_user(DEVICE_USER)
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             resolve_tenant_id_for_device_route(request, uuid4())
-        assert exc.value.status_code == 403
+        assert exc.value.status == 403
 
     def test_device_user_receives_mapped_tenant_id(self) -> None:
         request = _request_with_user(DEVICE_USER)
@@ -115,12 +115,12 @@ class TestSpiceIdentityEnabled:
         monkeypatch.setenv("SPICE_TENANT_ID_MAP", '{"99": "00000000-0000-0000-0000-000000000099"}')
         get_settings.cache_clear()
         request = _request_with_user(DEVICE_USER)
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             resolve_tenant_id_for_device_route(request, None)
-        assert exc.value.status_code == 403
+        assert exc.value.status == 403
 
     def test_unauthenticated_raises_401(self) -> None:
         request = _request_with_user(None)
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             resolve_chw_id_for_device_route(request, 1)
-        assert exc.value.status_code == 401
+        assert exc.value.status == 401

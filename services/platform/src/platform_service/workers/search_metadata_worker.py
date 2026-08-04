@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
+from mc_contracts.errors import ErrorCode
+
 from platform_service.db.base import SessionLocal
 from platform_service.db.models.module import Module
 from platform_service.db.repositories.module_read_repository import ModuleReadRepository
@@ -69,6 +71,8 @@ async def generate_search_metadata_for_module(
                 await finish_post_publish_step(
                     step_id=step_id,
                     success=False,
+                    error_code=ErrorCode.MODULE_NOT_FOUND.value,
+                    error_message=f"module {module_id} not found",
                     error={"type": "ModuleNotFound", "message": f"module {module_id} not found"},
                 )
                 _chain_post_metadata()
@@ -88,6 +92,8 @@ async def generate_search_metadata_for_module(
                 await finish_post_publish_step(
                     step_id=step_id,
                     success=False,
+                    error_code=ErrorCode.GENERATION_FAILED.value,
+                    error_message=(result.error or "unknown")[:500],
                     error={
                         "type": "GenerationError",
                         "message": (result.error or "unknown")[:500],
@@ -113,6 +119,8 @@ async def generate_search_metadata_for_module(
         await finish_post_publish_step(
             step_id=step_id,
             success=False,
+            error_code=ErrorCode.SEARCH_METADATA_FAILED.value,
+            error_message=str(exc)[:500],
             error={"type": type(exc).__name__, "message": str(exc)[:500]},
         )
         _chain_post_metadata()

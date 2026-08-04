@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hmac
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request
+from mc_contracts.errors import ErrorCode
+from mc_foundation.problem import AppError
 
 from ai_runtime.config import get_settings
 
@@ -14,7 +16,8 @@ def require_internal_token(request: Request) -> None:
     settings = get_settings()
     token = request.headers.get("X-Internal-Token", "")
     if not hmac.compare_digest(token, settings.internal_token):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing internal token",
+        raise AppError(
+            ErrorCode.INTERNAL_TOKEN_INVALID.value,
+            "Invalid or missing internal token",
+            status=401,
         )

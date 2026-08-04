@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
+from mc_foundation.objectstore import PresignedObjectUrl
 from platform_service.config import Settings
 from platform_service.db.models.content_block import ContentBlock
 from platform_service.db.models.source_page import SourcePage
-from platform_service.services.object_storage import PresignedObjectUrl
 from platform_service.services.sync_service import SyncService
 from sqlalchemy.ext.asyncio import AsyncSession
 

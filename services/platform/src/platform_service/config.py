@@ -20,9 +20,11 @@ from pydantic_settings import SettingsConfigDict
 from platform_service.tenant_mapping import parse_spice_tenant_id_map
 
 _DEV_AI_RUNTIME_TOKEN = "dev-internal-token"
-_DEV_MINIO_ACCESS_KEY = "minioadmin"
+_DEV_OBJECT_STORAGE_ACCESS_KEY = "minioadmin"
 _INSECURE_DB_PASSWORDS = frozenset({"postgres"})
 _DEPLOYED_ENVS = frozenset({"production", "staging"})
+_OBJECT_STORAGE_BACKENDS = frozenset({"minio", "s3"})
+_OBJECT_STORAGE_PRESIGN_MODES = frozenset({"direct", "proxy"})
 
 
 class Settings(BaseAppSettings):
@@ -41,7 +43,7 @@ class Settings(BaseAppSettings):
     # Sourced from env in production. Default None so a missing env var
     # surfaces clearly at first DB connection rather than silently using
     # someone's stale local password.
-    database_password: str | None = "dpkgyl"
+    database_password: str | None = None
     database_pool_size: int = 5
     database_max_overflow: int = 10
     database_pool_recycle: int = 3600
@@ -96,10 +98,13 @@ class Settings(BaseAppSettings):
     deployment_primary_locale: str = "bn"
     deployment_region_context: str = "rural Bangladesh"
 
-    # ── Embedding ─────────────────────────────────────────────
+    # ── Embedding / vector store ──────────────────────────────
     embedding_dimension: int = 768
     top_k: int = 5
     retrieval_require_validated: bool = False
+    # Durable vector backend. Call sites use mc_foundation.VectorStore;
+    # only ``pgvector`` is implemented today (vectors stay on module.embedding).
+    vector_store_backend: str = "pgvector"
 
     # ── Safety ────────────────────────────────────────────────
     spice_referral_destinations: str = (
@@ -132,6 +137,11 @@ class Settings(BaseAppSettings):
             # Covers cases like "///" or whitespace-only.
             return ""
         return f"/{clean}"
+
+    def api_path(self, path: str) -> str:
+        """Return *path* prefixed with :pyattr:`api_root_path_normalized`."""
+        normalized = path if path.startswith("/") else f"/{path}"
+        return f"{self.api_root_path_normalized}{normalized}"
 
     @property
     def spice_auth_authenticate_url(self) -> str:
@@ -289,6 +299,12 @@ class Settings(BaseAppSettings):
     # ── Module demand summary (daily Celery beat) ────────────────
     module_demand_summary_daily_hour_utc: int = 3
 
+    # ── Module creation suggestions (daily Celery beat) ──────────
+    module_creation_suggestions_daily_hour_utc: int = 4
+    module_creation_suggestions_max_evidence: int = 80
+    module_creation_suggestions_max_suggestions: int = 20
+    module_creation_suggestions_llm_timeout_seconds: float = 60.0
+
     # ── Chat feedback summary (weekly Celery beat) ───────────────
     chat_feedback_summary_weekly_hour_utc: int = 3
     chat_feedback_summary_weekly_day_of_week: int = 0  # 0=Sunday (Celery crontab convention)
@@ -299,10 +315,9 @@ class Settings(BaseAppSettings):
     chat_feedback_summary_max_negative_online_samples: int = 30
     chat_feedback_summary_max_negative_offline_samples: int = 30
 
-    # ── Stage 2-draft — optional published-module merge ─────────
-    # When enabled, Stage D may merge newly drafted cards into a similar
-    # active (non-retired) published module.
-    stage_d_published_merge_enabled: bool = True
+    # ── Stage 2-draft — published-module merge tuning ───────────
+    # Stage D always attempts merge into a similar active (non-retired)
+    # published module (fusion drafts opt out via StageDOrchestrator).
     # Pre-filter existing modules by title similarity before sending to the LLM.
     stage_d_published_merge_prefilter_limit: int = 25
     # Deterministic content gate: fraction of existing cards that must match
@@ -337,16 +352,23 @@ class Settings(BaseAppSettings):
     # Max seconds the ingest batch worker waits for a thumbnail Celery task before Stage A.
     ingest_thumbnail_wait_seconds: int = 300
 
-    # ── Object storage ──────────────────────────────────────────
-    minio_endpoint: str = "localhost:9100"
-    minio_presigned_endpoint: str | None = None
-    minio_access_key: SecretStr = SecretStr(_DEV_MINIO_ACCESS_KEY)
-    minio_secret_key: SecretStr = SecretStr(_DEV_MINIO_ACCESS_KEY)
-    minio_bucket_name: str = "medtronics-storage"
-    # When false, missing buckets raise at first upload instead of make_bucket (production default).
-    minio_auto_create_bucket: bool = True
-    minio_secure: bool = False
-    minio_region: str = "us-east-1"
+    # ── Object storage (MinIO or AWS S3 via boto3) ───────────────
+    # ``minio`` (local compose default) or ``s3`` (AWS / S3-compatible cloud).
+    object_storage_backend: str = "minio"
+    # Required for backend=minio; optional override for backend=s3.
+    object_storage_endpoint: str | None = "localhost:9100"
+    object_storage_presigned_endpoint: str | None = None
+    # ``proxy`` signs against OBJECT_STORAGE_PRESIGNED_ENDPOINT (compose/nginx);
+    # ``direct`` signs against the data endpoint / AWS regional host.
+    object_storage_presign_mode: str = "proxy"
+    # Empty keys + backend=s3 → default AWS credential chain (env / instance role / IRSA).
+    object_storage_access_key: SecretStr = SecretStr(_DEV_OBJECT_STORAGE_ACCESS_KEY)
+    object_storage_secret_key: SecretStr = SecretStr(_DEV_OBJECT_STORAGE_ACCESS_KEY)
+    object_storage_bucket_name: str = "medtronics-storage"
+    # Honored only for backend=minio; forced off for backend=s3 in the adapter.
+    object_storage_auto_create_bucket: bool = True
+    object_storage_secure: bool = False
+    object_storage_region: str = "us-east-1"
     admin_file_allowed_prefixes: str = "uploads,source-documents,media,ingest,module-thumbnails"
     # Single write prefix for POST /admin/files (must be in admin_file_allowed_prefixes).
     admin_file_upload_prefix: str = "uploads"
@@ -409,6 +431,39 @@ class Settings(BaseAppSettings):
         return self
 
     @model_validator(mode="after")
+    def _validate_object_storage(self) -> Self:
+        backend = self.object_storage_backend.strip().lower()
+        if backend not in _OBJECT_STORAGE_BACKENDS:
+            raise ValueError(
+                f"OBJECT_STORAGE_BACKEND must be one of {sorted(_OBJECT_STORAGE_BACKENDS)}; "
+                f"got {self.object_storage_backend!r}"
+            )
+        self.object_storage_backend = backend
+
+        mode = self.object_storage_presign_mode.strip().lower()
+        if mode not in _OBJECT_STORAGE_PRESIGN_MODES:
+            raise ValueError(
+                f"OBJECT_STORAGE_PRESIGN_MODE must be one of "
+                f"{sorted(_OBJECT_STORAGE_PRESIGN_MODES)}; got {self.object_storage_presign_mode!r}"
+            )
+        self.object_storage_presign_mode = mode
+
+        if backend == "minio":
+            if not (self.object_storage_endpoint or "").strip():
+                raise ValueError("OBJECT_STORAGE_ENDPOINT is required when OBJECT_STORAGE_BACKEND=minio")
+            access = self.object_storage_access_key.get_secret_value()
+            secret = self.object_storage_secret_key.get_secret_value()
+            if not access or not secret:
+                raise ValueError(
+                    "OBJECT_STORAGE_ACCESS_KEY and OBJECT_STORAGE_SECRET_KEY are required "
+                    "when OBJECT_STORAGE_BACKEND=minio"
+                )
+        if backend == "s3":
+            # Never auto-create buckets against AWS from the app.
+            self.object_storage_auto_create_bucket = False
+        return self
+
+    @model_validator(mode="after")
     def _validate_production_safety(self) -> Self:
         if self.app_env not in _DEPLOYED_ENVS:
             return self
@@ -417,10 +472,18 @@ class Settings(BaseAppSettings):
             errors.append("DATABASE_PASSWORD must be set to a non-default value in production")
         if self.ai_runtime_token == _DEV_AI_RUNTIME_TOKEN:
             errors.append("AI_RUNTIME_TOKEN must not use the dev default in production")
-        if self.minio_access_key.get_secret_value() == _DEV_MINIO_ACCESS_KEY:
-            errors.append("MINIO_ACCESS_KEY must not use the dev default in production")
-        if self.minio_secret_key.get_secret_value() == _DEV_MINIO_ACCESS_KEY:
-            errors.append("MINIO_SECRET_KEY must not use the dev default in production")
+        access = self.object_storage_access_key.get_secret_value()
+        secret = self.object_storage_secret_key.get_secret_value()
+        if access or secret:
+            if access == _DEV_OBJECT_STORAGE_ACCESS_KEY:
+                errors.append("OBJECT_STORAGE_ACCESS_KEY must not use the dev default in production")
+            if secret == _DEV_OBJECT_STORAGE_ACCESS_KEY:
+                errors.append("OBJECT_STORAGE_SECRET_KEY must not use the dev default in production")
+        elif self.object_storage_backend != "s3":
+            errors.append(
+                "OBJECT_STORAGE_ACCESS_KEY and OBJECT_STORAGE_SECRET_KEY are required "
+                "in production unless OBJECT_STORAGE_BACKEND=s3 (IAM / default credential chain)"
+            )
         if not self.spice_auth_enabled:
             errors.append("SPICE_AUTH_ENABLED must be true in production")
         if not self.spice_tenant_id_map.strip():

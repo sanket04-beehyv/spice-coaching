@@ -10,15 +10,21 @@ from platform_service.db.models.chw_module_completion import CHWModuleCompletion
 from platform_service.db.models.chw_module_quiz_progress import CHWModuleQuizProgress
 from platform_service.db.models.chw_quiz_question_state import CHWQuizQuestionState
 from platform_service.db.models.chw_training_request import CHWTrainingRequest
+from platform_service.db.models.chw_video_assignment import CHWVideoAssignment
 from platform_service.db.models.config_threshold import ConfigThreshold
 from platform_service.db.models.content_block import ContentBlock
 from platform_service.db.models.file_upload import FileUpload
+from platform_service.db.models.ingest_batch import IngestBatch
 from platform_service.db.models.ingestion_run import IngestionRun, IngestionRunStep
 from platform_service.db.models.llm_call_cache import LlmCallCache
 from platform_service.db.models.module import Module
 from platform_service.db.models.module_behavioural_gap import ModuleBehaviouralGap
 from platform_service.db.models.module_candidate_draft import ModuleCandidateDraft
 from platform_service.db.models.module_card import ModuleCard
+from platform_service.db.models.module_creation_suggestion import (
+    ModuleCreationSuggestion,
+    ModuleCreationSuggestionEvidence,
+)
 from platform_service.db.models.module_demand_summary import ModuleDemandSummary
 from platform_service.db.models.module_family import ModuleFamily
 from platform_service.db.models.module_lifecycle_event import ModuleLifecycleEvent
@@ -34,6 +40,7 @@ __all__ = [
     # source layer
     "ContentBlock",
     "FileUpload",
+    "IngestBatch",
     "IngestionRun",
     "IngestionRunStep",
     "LlmCallCache",
@@ -44,6 +51,8 @@ __all__ = [
     # Cards live in ``module_card``; quiz questions stay relational for telemetry FKs.
     "Module",
     "ModuleBehaviouralGap",
+    "ModuleCreationSuggestion",
+    "ModuleCreationSuggestionEvidence",
     "ModuleDemandSummary",
     "ModuleFamily",
     "ModuleLifecycleEvent",
@@ -60,6 +69,7 @@ __all__ = [
     "CHWModuleAssignment",
     "CHWQuizQuestionState",
     "CHWTrainingRequest",
+    "CHWVideoAssignment",
     "ModuleTriggerBinding",
     "TriggerDefinition",
     # config
